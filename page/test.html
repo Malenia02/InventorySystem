@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>Custom POS Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <!-- Bootstrap Icons -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+
+  <style>
+/* ===== Body ===== */
+body {
+  min-height: 100vh;
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background-color: #f5f5f5;
+}
+
+/* ===== Header ===== */
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background-color: maroon; /* header color */
+  color: #fff;
+  border-bottom: 1px solid #800000;
+  z-index: 1030;
+}
+
+.app-header .container-fluid {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 100%;
+}
+
+/* Header links and icons */
+.app-header a,
+.app-header i {
+  color: #fff;
+}
+
+/* Sidebar Toggle Button Margin Fix */
+#sidebarToggle {
+  margin-left: 20px;
+}
+
+/* ===== Profile Dropdown ===== */
+.dropdown-menu.profile {
+  background-color: #fff; /* dropdown background */
+  color: #000; /* text color default */
+  min-width: 220px;
+}
+
+.dropdown-menu.profile .dropdown-item {
+  color: #000; /* links default black */
+}
+
+.dropdown-menu.profile .dropdown-item i {
+  color: #000; /* icons default black */
+  margin-right: 10px;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+}
+
+/* Profile dropdown menu default */
+.dropdown-menu.profile .dropdown-item {
+  color: #000; /* text default black */
+}
+
+.dropdown-menu.profile .dropdown-item i {
+  color: #000; /* icon default black */
+  margin-right: 10px;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+}
+
+/* Hover for profile dropdown items */
+.dropdown-menu.profile .dropdown-item:hover {
+  background-color: #f0f0f0; /* optional light hover background */
+  color: blue; /* text turns blue on hover */
+}
+
+.dropdown-menu.profile .dropdown-item:hover i {
+  color: blue; /* icon turns blue on hover */
+}
+
+
+/* ===== Sidebar ===== */
+.app-sidebar {
+  position: fixed;
+  top: 60px;
+  left: 0;
+  width: 250px;
+  height: calc(100vh - 60px);
+  background-color: #fff; /* sidebar background */
+  padding-top: 1rem;
+  transition: transform 0.3s ease;
+  z-index: 1020;
+}
+
+.app-sidebar.hidden {
+  transform: translateX(-100%);
+}
+
+.sidebar-nav {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.sidebar-nav li a {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  color: #000; /* default sidebar text black */
+  text-decoration: none;
+  transition: 0.2s;
+}
+
+.sidebar-nav li a i {
+  margin-right: 10px;
+  font-size: 1.2rem;
+  color: #000; /* default sidebar icon black */
+}
+
+/* Sidebar hover and active ONLY */
+.sidebar-nav li a:hover,
+.sidebar-nav li a.active {
+  background-color: #f8f9fa; /* light hover background */
+  color: blue; /* text turns blue on hover */
+}
+
+.sidebar-nav li a:hover i,
+.sidebar-nav li a.active i {
+  color: blue; /* icon also turns blue on hover */
+}
+
+/* ===== Main Content ===== */
+.main-content {
+  margin-left: 250px;
+  padding: 20px;
+  transition: margin-left 0.3s ease;
+}
+
+.main-content.full {
+  margin-left: 0;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 768px) {
+  .app-sidebar {
+    transform: translateX(-100%);
+  }
+
+  .app-sidebar.show {
+    transform: translateX(0);
+  }
+}
+
+
+</style>
+
+</head>
+
+<body>
+
+  <!-- ===== Header ===== -->
+  <header class="app-header navbar navbar-expand shadow-sm px-3 fixed-top">
+    <div class="d-flex align-items-center w-100 justify-content-between">
+
+      <!-- Logo + Burger -->
+      <div class="d-flex align-items-center">
+        <a href="#" class="d-flex align-items-center text-decoration-none me-3">
+          <img src="assets/logo.png" height="32" alt="Logo">
+          <span class="fw-bold ms-2 d-none d-lg-block">MyPOS</span>
+        </a>
+
+        <button id="sidebarToggle" class="btn btn-sm btn-outline-secondary">
+          <i class="bi bi-list"></i>
+        </button>
+      </div>
+
+
+
+      <!-- Right Icons -->
+      <ul class="nav align-items-center ms-auto gap-3">
+        <!-- Notifications -->
+        <li class="nav-item dropdown">
+          <a class="nav-link position-relative" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-bell fs-5 bg"></i>
+            <span class="badge bg-primary position-absolute top-9 start-20 translate-middle">4</span>
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end shadow rounded-3 p-2" style="min-width: 300px;">
+            <li class="d-flex justify-content-between align-items-center px-2 py-1">
+              <span class="fw-bold">You have 4 new notifications</span>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <!-- Notification Items -->
+            <li class="dropdown-item d-flex align-items-start">
+              <i class="bi bi-exclamation-circle text-warning me-2 fs-5"></i>
+              <div>
+                <strong>Lorem Ipsum</strong><br>
+                <small class="text-muted">Quae dolorem earum veritatis oditseno</small><br>
+                <small class="text-muted">30 min. ago</small>
+              </div>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <li class="dropdown-item d-flex align-items-start">
+              <i class="bi bi-x-circle text-danger me-2 fs-5"></i>
+              <div>
+                <strong>Atque rerum nesciunt</strong><br>
+                <small class="text-muted">Quae dolorem earum veritatis oditseno</small><br>
+                <small class="text-muted">1 hr. ago</small>
+              </div>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <li class="dropdown-item d-flex align-items-start">
+              <i class="bi bi-check-circle text-success me-2 fs-5"></i>
+              <div>
+                <strong>Sit rerum fuga</strong><br>
+                <small class="text-muted">Quae dolorem earum veritatis oditseno</small><br>
+                <small class="text-muted">2 hrs. ago</small>
+              </div>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <li class="dropdown-item d-flex align-items-start">
+              <i class="bi bi-info-circle text-primary me-2 fs-5"></i>
+              <div>
+                <strong>Dicta reprehenderit</strong><br>
+                <small class="text-muted">Quae dolorem earum veritatis oditseno</small><br>
+                <small class="text-muted">4 hrs. ago</small>
+              </div>
+            </li>
+
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+            <li class="text-center">
+              <a href="#" class="small text-decoration-none">Show all notifications</a>
+            </li>
+          </ul>
+        </li>
+
+        <!-- Messages (similar style) -->
+        <li class="nav-item dropdown">
+          <a class="nav-link position-relative" href="#" data-bs-toggle="dropdown">
+            <i class="bi bi-chat-left-text fs-5"></i>
+            <span class="badge bg-success position-absolute top-10 start-20 translate-middle">3</span>
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end shadow rounded-3 p-2" style="min-width: 300px;">
+            <li class="dropdown-header px-2">Messages</li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+            <li class="dropdown-item d-flex align-items-start">
+              <img src="assets/profile1.jpg" class="rounded-circle me-2" width="32">
+              <div>
+                <strong>Maria Hudson</strong><br>
+                <small class="text-muted">Velit asperiores et ducimus...</small><br>
+                <small class="text-muted">4 hrs ago</small>
+              </div>
+            </li>
+          </ul>
+        </li>
+
+        <!-- Profile -->
+        <li class="nav-item dropdown pe-3">
+
+          <a class="nav-link nav-profile d-flex align-items-center pe-0" href="#" data-bs-toggle="dropdown">
+            <img src="assets/profile.jpg" alt="Profile" class="rounded-circle">
+            <span class="d-none d-md-block dropdown-toggle ps-2">K. Anderson</span>
+          </a><!-- End Profile Image Icon -->
+
+          <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow profile">
+            <!-- Header -->
+            <li class="dropdown-header text-center">
+              <img src="assets/profile.jpg" class="rounded-circle mb-2" width="60" alt="Profile">
+              <h6>K. Anderson</h6>
+              <span class="text-muted small">Web Designer</span>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <!-- Links -->
+            <li>
+              <a class="dropdown-item d-flex align-items-center" href="users-profile.html">
+                <i class="bi bi-person"></i>
+                <span>My Profile</span>
+              </a>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <li>
+              <a class="dropdown-item d-flex align-items-center" href="account-settings.html">
+                <i class="bi bi-gear"></i>
+                <span>Account Settings</span>
+              </a>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <li>
+              <a class="dropdown-item d-flex align-items-center" href="pages-faq.html">
+                <i class="bi bi-question-circle"></i>
+                <span>Need Help?</span>
+              </a>
+            </li>
+            <li>
+              <hr class="dropdown-divider">
+            </li>
+
+            <li>
+              <a class="dropdown-item d-flex align-items-center" href="#">
+                <i class="bi bi-box-arrow-right"></i>
+                <span>Sign Out</span>
+              </a>
+            </li>
+          </ul><!-- End Profile Dropdown Items -->
+        </li>
+
+    </div>
+  </header>
+
+
+  <!-- ===== Sidebar ===== -->
+  <aside id="app-sidebar" class="app-sidebar">
+    <ul class="sidebar-nav">
+      <li><a href="#" class="active"><i class="bi bi-speedometer2"></i> Dashboard</a></li>
+      <li><a href="#"><i class="bi bi-box"></i> Products</a></li>
+      <li><a href="#"><i class="bi bi-cart-check"></i> Sales</a></li>
+      <li><a href="#"><i class="bi bi-clipboard-data"></i> Reports</a></li>
+      <li><a href="#"><i class="bi bi-people"></i> Users</a></li>
+    </ul>
+  </aside>
+
+  <!-- ===== Main Content ===== -->
+  <main id="main-content" class="main-content">
+    <h3>Dashboard</h3>
+    <p>Welcome to your custom POS dashboard!</p>
+  </main>
+
+  <!-- ===== Bootstrap JS ===== -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- ===== Sidebar Toggle Script ===== -->
+  <script>
+    const toggleBtn = document.getElementById("sidebarToggle");
+    const sidebar = document.getElementById("app-sidebar");
+    const content = document.getElementById("main-content");
+
+    toggleBtn.addEventListener("click", () => {
+      sidebar.classList.toggle("hidden");
+      content.classList.toggle("full");
+    });
+  </script>
+
+</body>
+
+</html>
