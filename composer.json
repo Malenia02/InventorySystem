@@ -1,0 +1,14 @@
+{
+    "name": "louie/inventory_system",
+    "autoload": {
+        "psr-4": {
+            "Louie\\InventorySystem\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Louie"
+        }
+    ],
+    "require": {}
+}

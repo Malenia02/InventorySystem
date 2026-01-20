@@ -36,7 +36,7 @@ class ProductController {
         if ($fileSize > $maxFileSize) throw new Exception("File too large.");
 
         $safeName = preg_replace("/[^a-zA-Z0-9_-]/", "_", strtolower($productName));
-        $uploadDir = $_SERVER['DOCUMENT_ROOT'] . "/inventory_system/uploads/products/{$safeName}/";
+        $uploadDir = $_SERVER['DOCUMENT_ROOT'] . "/inventory_system/assets/uploads/products/{$safeName}/";
         if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
 
         $ext = pathinfo($_FILES[$fileInputName]['name'], PATHINFO_EXTENSION);
@@ -46,7 +46,7 @@ class ProductController {
             throw new Exception("Failed to move uploaded file.");
         }
 
-        return "/inventory_system/uploads/products/{$safeName}/" . $photoName;
+        return "/inventory_system/assets/uploads/products/{$safeName}/" . $photoName;
     }
 
     // ==========================
@@ -101,6 +101,31 @@ class ProductController {
         $stmt = $conn->prepare("UPDATE {$table_products} SET status = :status WHERE product_id = :id");
         $stmt->execute(['status' => $newStatus, 'id' => $id]);
         return $newStatus;
+    }
+
+    // ==========================
+    // GET ALL PRODUCTS FOR POS (INCLUDE INACTIVE)
+    // ==========================
+    public static function allProductsForPOS($conn, $table_products = 'products') {
+        $stmt = $conn->prepare("SELECT p.*, c.category_name 
+                                FROM {$table_products} p 
+                                LEFT JOIN categories c ON p.category_id = c.category_id
+                                ORDER BY p.product_id DESC");
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    // ==========================
+    // GET ONLY ACTIVE PRODUCTS FOR POS
+    // ==========================
+    public static function activeProductsForPOS($conn, $table_products = 'products') {
+        $stmt = $conn->prepare("SELECT p.*, c.category_name 
+                                FROM {$table_products} p 
+                                LEFT JOIN categories c ON p.category_id = c.category_id
+                                WHERE p.status = 'active'
+                                ORDER BY p.product_id DESC");
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
 }
