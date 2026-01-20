@@ -27,6 +27,9 @@ if (isset($_SESSION['error_message'])) {
             break;
     }
 }
+
+// Determine fallback URL for "Go Back"
+$previous_url = $_SERVER['HTTP_REFERER'] ?? '/inventory_system/index.php';
 ?>
 
 <!DOCTYPE html>
@@ -44,7 +47,8 @@ if (isset($_SESSION['error_message'])) {
 
     <!-- Google Fonts -->
     <link href="https://fonts.gstatic.com" rel="preconnect">
-    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700|Nunito:300,400,600,700|Poppins:300,400,500,600,700"
+    <link
+        href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700|Nunito:300,400,600,700|Poppins:300,400,500,600,700"
         rel="stylesheet">
 
     <!-- Vendor CSS Files -->
@@ -63,32 +67,19 @@ if (isset($_SESSION['error_message'])) {
 <body>
 
     <main>
-        <div class="container">
-            <section class="section register min-vh-100 d-flex flex-column align-items-center justify-content-center py-4">
-                <div class="container">
-                    <div class="row justify-content-center">
-                        <div class="col-lg-4 col-md-6 d-flex flex-column align-items-center justify-content-center">
-                            <div class="d-flex justify-content-center py-4">
-                                <a href="/inventory_system/index.php" class="logo d-flex align-items-center w-auto">
-                                    <img src="/inventory_system/assets/img/artlogo.png" alt="">
-                                    <span class="d-none d-lg-block"></span>
-                                </a>
-                            </div>
-                            <div class="card mb-3">
-                                <div class="card-body">
-                                    <h5 class="card-title text-center pb-0 fs-4">Error <?php echo htmlspecialchars($error_code); ?></h5>
-                                    <div>
-                                        <p class="text-center small alert alert-danger"><?php echo htmlspecialchars($error_message); ?></p>
-                                    </div>
-                                    <button id="homeButton" class="btn btn-primary w-100"
-                                        onclick="window.location.href='/inventory_system/index.php';">Reload</button>
-                                    <button class="btn btn-secondary w-100 mt-2" onclick="history.back();">Go Back</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
+        <div class="container min-vh-100 d-flex flex-column justify-content-center align-items-center">
+            <div class="card p-4" style="max-width:400px; width:100%;">
+                <h5 class="card-title text-center pb-3 fs-4">Error <?= htmlspecialchars($error_code) ?></h5>
+                <p class="text-center alert alert-danger"><?= htmlspecialchars($error_message) ?></p>
+
+                <button class="btn btn-primary w-100 mb-2"
+                    onclick="window.location.href='/inventory_system/index.php';">
+                    Go to Home
+                </button>
+                <button class="btn btn-secondary w-100" onclick="window.location.href='<?= $previous_url ?>';">
+                    Go Back
+                </button>
+            </div>
         </div>
     </main>
 

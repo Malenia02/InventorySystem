@@ -94,7 +94,7 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
       <a class="nav-link collapsed <?php if($current_page == 'tables-general.html' || $current_page == 'tables-data.html'){ echo 'active'; } ?>" 
          data-bs-target="#tables-nav" data-bs-toggle="collapse" href="#">
         <i class="bi bi-layout-text-window-reverse"></i>
-        <span>Tables</span>
+        <span>Reports</span>
         <i class="bi bi-chevron-down ms-auto"></i>
       </a>
 

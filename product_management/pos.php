@@ -1,10 +1,19 @@
 <?php
-require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/CategoryController.php';
-require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/ProductController.php';
+// Load config first (this defines $conn)
+require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/config/config.php';
 
-$categories = CategoryController::all();
-$products = ProductController::allProducts($conn); // ✅ pass $conn
+// Load controllers after config
+require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/CategoryController.php';
+require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/ProductController.php';
 
+// Safety check (optional but recommended while debugging)
+if (!isset($conn)) {
+    die('❌ $conn is NOT defined. config.php did not load correctly.');
+}
+
+// Now this is SAFE
+$categories = CategoryController::all($conn, $table_categories);
+$products = ProductController::activeProductsForPOS($conn);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -14,124 +23,186 @@ $products = ProductController::allProducts($conn); // ✅ pass $conn
 <title>POS System</title>
 <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
 <style>
+/* ================= DARK THEME BASE ================= */
 body {
-    background: #121212;
-    color: #fff;
+    background: #0d0d0d;
+    color: #eee;
     margin: 0;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
-/* LEFT */
+/* ================= LEFT PANEL ================= */
 .pos-left {
-    background: #181818;
+    background: #1b1b1b;
     padding: 15px;
     height: 100vh;
     overflow-y: auto;
+    border-right: 1px solid #2c2c2c;
 }
 
-/* CATEGORY BAR */
+/* ================= CATEGORY BAR ================= */
+.category-bar-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 30px;
+}
+
 .category-bar {
     display: flex;
+    overflow-x: auto;
     gap: 10px;
-    margin-bottom: 15px;
+    scroll-behavior: smooth;
+}
+
+.category-bar::-webkit-scrollbar {
+    height: 6px;
+}
+
+.category-bar::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+.category-bar::-webkit-scrollbar-track {
+    background: #1b1b1b;
 }
 
 .category {
-    background: #2a2a2a;
+    background: #2b2b2b;
     border: none;
     color: #fff;
     padding: 10px 18px;
-    border-radius: 10px;
+    border-radius: 12px;
     cursor: pointer;
+    transition: all 0.2s ease-in-out;
+    white-space: nowrap;
+    font-size: 14px;
+}
+
+.category:hover {
+    background: #3a3a3a;
 }
 
 .category.active {
     background: #2563eb;
+    color: #fff;
 }
 
-/* PRODUCT GRID */
+/* ================= CATEGORY ARROWS ================= */
+.category-arrow {
+    background: #2b2b2b;
+    border: none;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 18px;
+    transition: all 0.2s ease-in-out;
+}
+
+.category-arrow:hover {
+    background: #3a3a3a;
+}
+
+.category-arrow:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ================= PRODUCT GRID ================= */
 .product-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 15px;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); /* smaller cards */
+    gap: 12px;
 }
 
-/* PRODUCT CARD */
+/* ================= PRODUCT CARD ================= */
 .product-card {
-    background: #1f1f1f;
-    border-radius: 15px;
-    padding: 10px;
+    background: #212121;
+    border-radius: 12px;      /* slightly smaller radius */
+    padding: 8px;             /* less padding */
     text-align: center;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.product-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 15px rgba(0, 0, 0, 0.5);
 }
 
 .product-card img {
     width: 100%;
-    height: 200px;
+    height: 150px;             /* smaller height */
     object-fit: cover;
-    border-radius: 12px;
+    border-radius: 10px;
+    border: 1px solid #333;
 }
 
 .product-card h6 {
-    margin-top: 8px;
-    font-size: 14px;
+    margin-top: 6px;
+    font-size: 12px;           /* smaller font */
+    color: #fff;
 }
 
 .price {
     color: #4ade80;
     font-weight: bold;
+    font-size: 12px;           /* smaller price text */
 }
 
-/* QUANTITY */
+/* ================= QUANTITY CONTROLS ================= */
 .qty-controls {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-top: 8px;
+    margin-top: 6px;
 }
 
 .qty-controls button {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    border: none;
-    background: #333;
-    color: #fff;
-    cursor: pointer;
+    width: 28px;               /* smaller buttons */
+    height: 28px;
+    font-size: 12px;
 }
 
 .qty-controls span {
-    min-width: 20px;
+    min-width: 18px;           /* smaller quantity display */
     text-align: center;
 }
 
-/* RIGHT */
+/* ================= RIGHT PANEL ================= */
 .pos-right {
-    background: #101010;
+    background: #141414;
     padding: 15px;
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 90vh;
+    border-left: 1px solid #2c2c2c;
 }
 
+/* ================= CART ITEMS ================= */
 .cart-items {
     flex: 1;
     overflow-y: auto;
     margin-top: 15px;
 }
 
+.cart-item {
+    border-bottom: 1px solid #333;
+    padding: 5px 0;
+    font-size: 14px;
+}
+
 .cart-summary {
-    background: #1a1a1a;
+    background: #1d1d1d;
     padding: 15px;
     border-radius: 15px;
+    margin-top: 10px;
 }
 
 .cart-summary .total {
     font-size: 18px;
     font-weight: bold;
-}
-
-.cart-item {
-    border-bottom: 1px solid #333;
-    padding-bottom: 5px;
 }
 
 .cart-item .cart-qty-controls {
@@ -143,9 +214,90 @@ body {
 .cart-item .cart-qty-controls button {
     width: 24px;
     height: 24px;
-    font-size: 16px;
+    font-size: 12px;
     padding: 0;
+    border-radius: 4px;
+    border: none;
+    background: #333;
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.2s ease;
 }
+
+.cart-item .cart-qty-controls button:hover {
+    background: #444;
+}
+
+/* ================= SEARCH BOX ================= */
+.product-search-wrapper {
+    position: relative;
+    width: 30%;
+    margin-left: auto; /* push it to the right */
+    margin-bottom: 10px;
+}
+
+.product-search {
+    width: 100%;
+    padding: 6px 10px 6px 30px; /* left padding for icon space */
+    border-radius: 8px;
+    border: 1px solid #333;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 13px;
+}
+
+.product-search::placeholder {
+    color: #aaa;
+}
+
+.search-icon {
+    position: absolute;
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #aaa;
+    font-size: 14px;
+    pointer-events: none; /* icon won't block input */
+}
+
+
+
+/*PAGINATION FOR PRODUCTS */
+/* Admin-style pagination dark theme */
+.pagination {
+    margin: 10px 0;
+    padding-left: 0;
+    list-style: none;
+    display: flex;
+    gap: 5px;
+}
+
+.pagination .page-item {
+    display: inline-block;
+}
+
+.pagination .page-link {
+    color: #fff;
+    background-color: #2a2a2a;
+    border: 1px solid #333;
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    text-decoration: none;
+}
+
+.pagination .page-item.active .page-link {
+    background-color: #2563eb;
+    border-color: #2563eb;
+}
+
+.pagination .page-link:hover {
+    background-color: #333;
+    border-color: #444;
+}
+
+
+
 </style>
 </head>
 <body>
@@ -162,14 +314,28 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
   <div class="col-lg-8 pos-left">
 
     <!-- Categories -->
-  <div class="category-bar">
-    <button class="category active" data-id="all">All</button>
-    <?php foreach ($categories as $c): ?>
-        <button class="category" data-id="<?= $c['category_id'] ?>">
-            <?= htmlspecialchars($c['category_name']) ?>
-        </button>
-    <?php endforeach; ?>
+ <div class="category-bar-wrapper d-flex align-items-center">
+    <button class="category-arrow" id="categoryPrev">&#8592;</button>
+    
+    <div class="category-bar flex-grow-1" id="categoryBar">
+        <button class="category active" data-id="all">All</button>
+        <?php foreach ($categories as $c): ?>
+            <button class="category" data-id="<?= $c['category_id'] ?>">
+                <?= htmlspecialchars($c['category_name']) ?>
+            </button>
+        <?php endforeach; ?>
+    </div>
+    
+    <button class="category-arrow" id="categoryNext">&#8594;</button>
 </div>
+
+
+<!-- Product Search (above product grid) -->
+<div class="product-search-wrapper">
+    <input type="text" id="productSearch" class="product-search" placeholder="Search products...">
+    <i class="bi bi-search search-icon"></i>
+</div>
+
 
 <div class="product-grid" id="product-grid">
     <?php foreach ($products as $p):
@@ -191,7 +357,15 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
             </div>
         </div>
     <?php endforeach; ?>
+    
 </div>
+<!-- Product pagination -->
+<nav aria-label="Product pagination" class="mt-2">
+    <ul class="pagination justify-content-center" id="productPagination">
+        <!-- JS will generate page numbers here -->
+    </ul>
+</nav>
+
 
   </div>
 
@@ -306,7 +480,7 @@ function renderCart(){
                     <span>${item} x ${qty}</span>
                     <span>₱${lineTotal.toFixed(2)}</span>
                 </div>
-                <div class="text-muted" style="font-size:12px">
+                <div class="text-muted" style="font-size:10px">
                     Unit Price: ₱${price.toFixed(2)} ${discount > 0 ? `(-${discount}%)` : ''}
                 </div>
                 <div class="cart-qty-controls">
@@ -362,6 +536,111 @@ categoriesBtns.forEach(btn => {
         });
     });
 });
+
+
+const categoryBar = document.getElementById('categoryBar');
+const prevBtn = document.getElementById('categoryPrev');
+const nextBtn = document.getElementById('categoryNext');
+
+const scrollAmount = 150; // pixels to scroll per click
+
+prevBtn.addEventListener('click', () => {
+    categoryBar.scrollBy({ left: -scrollAmount, behavior: 'smooth' });
+});
+
+nextBtn.addEventListener('click', () => {
+    categoryBar.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+});
+
+// Optional: disable arrow if cannot scroll further
+function updateArrowState() {
+    prevBtn.disabled = categoryBar.scrollLeft <= 0;
+    nextBtn.disabled = categoryBar.scrollLeft + categoryBar.clientWidth >= categoryBar.scrollWidth;
+}
+
+categoryBar.addEventListener('scroll', updateArrowState);
+window.addEventListener('resize', updateArrowState);
+updateArrowState();
+
+
+
+// ===== PRODUCT SEARCH =====
+const productSearch = document.getElementById('productSearch');
+
+productSearch.addEventListener('input', () => {
+    const searchTerm = productSearch.value.toLowerCase();
+
+    products.forEach(product => {
+        const productName = product.dataset.name.toLowerCase();
+        
+        // Only show if product name starts with search term
+        if (productName.startsWith(searchTerm)) {
+            product.style.display = 'block';
+        } else {
+            product.style.display = 'none';
+        }
+    });
+});
+
+
+
+// ===== PRODUCT PAGINATION =====
+const productsWrapper = Array.from(document.querySelectorAll('.product-card'));
+const productPagination = document.getElementById('productPagination');
+const itemsPerPage = 10;
+let currentProductPage = 1;
+const totalProductPages = Math.ceil(productsWrapper.length / itemsPerPage);
+
+function renderProducts(page) {
+    const start = (page - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+
+    productsWrapper.forEach((product, index) => {
+        product.style.display = index >= start && index < end ? 'block' : 'none';
+    });
+
+    renderProductPagination(page);
+}
+
+function renderProductPagination(activePage) {
+    productPagination.innerHTML = '';
+
+    // Previous button
+    const prevLi = document.createElement('li');
+    prevLi.className = `page-item ${activePage === 1 ? 'disabled' : ''}`;
+    prevLi.innerHTML = `<a class="page-link" href="#">&laquo;</a>`;
+    prevLi.addEventListener('click', (e) => {
+        e.preventDefault();
+        if(activePage > 1) renderProducts(activePage - 1);
+    });
+    productPagination.appendChild(prevLi);
+
+    // Page numbers
+    for (let i = 1; i <= totalProductPages; i++) {
+        const li = document.createElement('li');
+        li.className = `page-item ${i === activePage ? 'active' : ''}`;
+        li.innerHTML = `<a class="page-link" href="#">${i}</a>`;
+        li.addEventListener('click', (e) => {
+            e.preventDefault();
+            renderProducts(i);
+        });
+        productPagination.appendChild(li);
+    }
+
+    // Next button
+    const nextLi = document.createElement('li');
+    nextLi.className = `page-item ${activePage === totalProductPages ? 'disabled' : ''}`;
+    nextLi.innerHTML = `<a class="page-link" href="#">&raquo;</a>`;
+    nextLi.addEventListener('click', (e) => {
+        e.preventDefault();
+        if(activePage < totalProductPages) renderProducts(activePage + 1);
+    });
+    productPagination.appendChild(nextLi);
+}
+
+// Initial render
+renderProducts(currentProductPage);
+
 
 </script>
 </body>

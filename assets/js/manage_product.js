@@ -3,13 +3,12 @@ document.addEventListener("DOMContentLoaded", function() {
     const productMessages = document.getElementById('productMessages');
 
     const showMessage = (type, msg) => {
+        if (!productMessages) return;
         productMessages.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show" role="alert">
             ${msg}
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>`;
-        setTimeout(() => {
-            productMessages.innerHTML = '';
-        }, 4000);
+        setTimeout(() => { productMessages.innerHTML = ''; }, 4000);
     };
 
     const addProductModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('addProductModal'));
@@ -17,10 +16,10 @@ document.addEventListener("DOMContentLoaded", function() {
     const productsTableBody = document.querySelector('#productsTable tbody');
 
     // ==========================
-    // Add Product AJAX
+    // ADD PRODUCT
     // ==========================
     const addForm = document.getElementById('addProductForm');
-    if(addForm) {
+    if (addForm) {
         addForm.addEventListener('submit', function(e) {
             e.preventDefault();
             const submitBtn = this.querySelector("button[type='submit']");
@@ -29,40 +28,35 @@ document.addEventListener("DOMContentLoaded", function() {
             const formData = new FormData(this);
             formData.append('add_product', true);
 
-            fetch('/inventory_system/admin/manage_product.php', {
+            fetch('/inventory_system/http/ajax/product_actions.php', {
                 method: 'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
             })
             .then(res => res.json())
             .then(data => {
-                if(data.error) showMessage('danger', data.error);
-                if(data.success) {
+                if (data.error) showMessage('danger', data.error);
+                if (data.success) {
                     showMessage('success', data.success);
-
-                    // Insert new row dynamically
                     const temp = document.createElement('tbody');
                     temp.innerHTML = data.newProductRow;
                     const newRow = temp.firstElementChild;
                     productsTableBody.prepend(newRow);
-
-                    attachRowEvents(newRow); // attach edit/toggle events
-
+                    attachRowEvents(newRow);
                     addProductModal.hide();
                     this.reset();
                     document.getElementById('addProductPhotoPreview').src = '/inventory_system/assets/uploads/products/images.jpeg';
                 }
             })
-            .catch(err => showMessage('danger', 'Something went wrong!'))
+            .catch(() => showMessage('danger', 'Something went wrong!'))
             .finally(() => submitBtn.disabled = false);
         });
     }
 
     // ==========================
-    // Edit Product AJAX
+    // EDIT PRODUCT
     // ==========================
     const editForm = document.getElementById('editProductForm');
-    if(editForm) {
+    if (editForm) {
         editForm.addEventListener('submit', function(e) {
             e.preventDefault();
             const submitBtn = this.querySelector("button[type='submit']");
@@ -71,72 +65,56 @@ document.addEventListener("DOMContentLoaded", function() {
             const formData = new FormData(this);
             formData.append('edit_product', true);
 
-            fetch('/inventory_system/admin/manage_product.php', {
+            fetch('/inventory_system/http/ajax/product_actions.php', {
                 method: 'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
             })
             .then(res => res.json())
             .then(data => {
-                if(data.error) showMessage('danger', data.error);
-                if(data.success) {
+                if (data.error) showMessage('danger', data.error);
+                if (data.success) {
                     showMessage('success', data.success);
-
-                    // Replace the existing row HTML
-                    const row = document.getElementById('productRow' + data.product_id);
+                    const row = document.getElementById('productRow' + editForm.product_id.value);
                     const temp = document.createElement('tbody');
                     temp.innerHTML = data.updatedRowHtml;
                     const newRow = temp.firstElementChild;
                     row.replaceWith(newRow);
-
                     attachRowEvents(newRow);
                     editProductModal.hide();
                     this.reset();
                 }
             })
-            .catch(err => showMessage('danger', 'Something went wrong!'))
+            .catch(() => showMessage('danger', 'Something went wrong!'))
             .finally(() => submitBtn.disabled = false);
         });
     }
 
     // ==========================
-    // Toggle Product Status AJAX
+    // TOGGLE STATUS
     // ==========================
     function attachToggleEvent(btn) {
         btn.addEventListener('click', function() {
             const productId = this.dataset.id;
-            const action = this.dataset.status;
 
-            if(!confirm(`Are you sure you want to ${action} this product?`)) return;
+            if(!confirm(`Are you sure you want to change this product's status?`)) return;
 
             const formData = new FormData();
             formData.append('toggle_id', productId);
 
-            fetch('/inventory_system/admin/manage_product.php', {
+            fetch('/inventory_system/http/ajax/product_actions.php', {
                 method: 'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 body: formData
             })
             .then(res => res.json())
             .then(data => {
-                if(data.error) showMessage('danger', data.error);
-                if(data.success) {
+                if (data.error) return showMessage('danger', data.error);
+                if (data.success) {
                     showMessage('success', data.success);
-
-                    // Update status badge and toggle button dynamically
                     const row = document.getElementById('productRow' + productId);
                     const badge = row.querySelector('span.badge');
                     const toggleBtn = row.querySelector('.toggleProductStatusBtn');
 
-                    if(action === 'deactivate') {
-                        badge.textContent = 'Inactive';
-                        badge.classList.remove('bg-success');
-                        badge.classList.add('bg-secondary');
-                        toggleBtn.classList.remove('btn-danger');
-                        toggleBtn.classList.add('btn-success');
-                        toggleBtn.dataset.status = 'activate';
-                        toggleBtn.innerHTML = '<i class="bi bi-check-circle"></i>';
-                    } else {
+                    if(data.new_status === 'active') {
                         badge.textContent = 'Active';
                         badge.classList.remove('bg-secondary');
                         badge.classList.add('bg-success');
@@ -144,19 +122,32 @@ document.addEventListener("DOMContentLoaded", function() {
                         toggleBtn.classList.add('btn-danger');
                         toggleBtn.dataset.status = 'deactivate';
                         toggleBtn.innerHTML = '<i class="bi bi-slash-circle"></i>';
+                        // Ensure row is visible if previously removed
+                        if(!row.parentNode) productsTableBody.prepend(row);
+                    } else {
+                        badge.textContent = 'Inactive';
+                        badge.classList.remove('bg-success');
+                        badge.classList.add('bg-secondary');
+                        toggleBtn.classList.remove('btn-danger');
+                        toggleBtn.classList.add('btn-success');
+                        toggleBtn.dataset.status = 'activate';
+                        toggleBtn.innerHTML = '<i class="bi bi-check-circle"></i>';
+                        // Optionally remove from POS table if you have a separate POS table
                     }
                 }
             })
-            .catch(err => showMessage('danger', 'Something went wrong!'));
+            .catch(() => showMessage('danger', 'Something went wrong!'));
         });
     }
 
     // ==========================
-    // Attach events to each row
+    // ATTACH EVENTS TO ROWS
     // ==========================
     function attachRowEvents(row) {
-        // Edit Button
         const editBtn = row.querySelector('.editProductBtn');
+        const toggleBtn = row.querySelector('.toggleProductStatusBtn');
+
+        // Edit modal
         editBtn.addEventListener('click', function() {
             document.getElementById('editProductId').value = this.dataset.id;
             document.getElementById('editProductName').value = this.dataset.name;
@@ -167,12 +158,10 @@ document.addEventListener("DOMContentLoaded", function() {
             document.getElementById('editProductPhotoPreview').src = this.dataset.photo;
         });
 
-        // Toggle Status
-        const toggleBtn = row.querySelector('.toggleProductStatusBtn');
         attachToggleEvent(toggleBtn);
     }
 
-    // Attach events to existing rows
+    // Attach to existing rows
     document.querySelectorAll('#productsTable tbody tr').forEach(row => attachRowEvents(row));
 
 });

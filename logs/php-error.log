@@ -1,0 +1,8 @@
+[20-Jan-2026 10:10:58 Europe/Berlin] PHP Fatal error:  Uncaught Error: Call to undefined method ProductController::allAvailable() in C:\xampp\htdocs\inventory_system\product_management\pos.php:16
+Stack trace:
+#0 {main}
+  thrown in C:\xampp\htdocs\inventory_system\product_management\pos.php on line 16
+[20-Jan-2026 10:21:02 Europe/Berlin] PHP Fatal error:  Uncaught Error: Call to undefined method ProductController::allAvailable() in C:\xampp\htdocs\inventory_system\product_management\pos.php:16
+Stack trace:
+#0 {main}
+  thrown in C:\xampp\htdocs\inventory_system\product_management\pos.php on line 16

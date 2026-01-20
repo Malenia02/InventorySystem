@@ -46,7 +46,7 @@ function handlePhotoUpload($fileInputName, $staffName = 'unknown') {
     if ($imageInfo === false) throw new Exception("Uploaded file is not a valid image.");
 
     $safeName = preg_replace("/[^a-zA-Z0-9_-]/", "_", strtolower($staffName));
-    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . "/inventory_system/uploads/staff/{$safeName}/";
+    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . "/inventory_system/assets/uploads/staff/{$safeName}/";
     if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
 
     $ext = pathinfo($_FILES[$fileInputName]['name'], PATHINFO_EXTENSION);
@@ -56,7 +56,7 @@ function handlePhotoUpload($fileInputName, $staffName = 'unknown') {
         throw new Exception("Failed to move uploaded file.");
     }
 
-    return "/inventory_system/uploads/staff/{$safeName}/" . $photoName;
+    return "/inventory_system/assets/uploads/staff/{$safeName}/" . $photoName;
 }
 
 // ==========================
