@@ -1,8 +1,5 @@
-[20-Jan-2026 10:10:58 Europe/Berlin] PHP Fatal error:  Uncaught Error: Call to undefined method ProductController::allAvailable() in C:\xampp\htdocs\inventory_system\product_management\pos.php:16
+[31-Jan-2026 02:24:11 Europe/Berlin] PHP Warning:  require(C:\xampp\htdocs\inventory_system\logout.php): Failed to open stream: No such file or directory in C:\xampp\htdocs\inventory_system\login.php on line 6
+[31-Jan-2026 02:24:11 Europe/Berlin] PHP Fatal error:  Uncaught Error: Failed opening required 'C:/xampp/htdocs/inventory_system/logout.php' (include_path='C:\xampp\php\PEAR') in C:\xampp\htdocs\inventory_system\login.php:6
 Stack trace:
 #0 {main}
-  thrown in C:\xampp\htdocs\inventory_system\product_management\pos.php on line 16
-[20-Jan-2026 10:21:02 Europe/Berlin] PHP Fatal error:  Uncaught Error: Call to undefined method ProductController::allAvailable() in C:\xampp\htdocs\inventory_system\product_management\pos.php:16
-Stack trace:
-#0 {main}
-  thrown in C:\xampp\htdocs\inventory_system\product_management\pos.php on line 16
+  thrown in C:\xampp\htdocs\inventory_system\login.php on line 6

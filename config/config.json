@@ -110,6 +110,16 @@
       "reason": "reason",
       "date": "stockout_date",
       "user_id": "user_id"
+    },
+
+    "activity_logs": {
+      "table": "activity_logs",
+      "id": "log_id",
+      "user_id": "user_id",
+      "action": "action",
+      "description": "description",
+      "ip_address": "ip_address",
+      "created_at": "created_at"
     }
   }
 }
