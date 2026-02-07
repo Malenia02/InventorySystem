@@ -2,6 +2,7 @@
 header('Content-Type: application/json');
 require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/config/config.php';
 require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/CategoryController.php';
+require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/middleware/csrf.php'; // CSRF check
 
 $response = ['success' => false, 'error' => 'Invalid action'];
 
@@ -11,93 +12,45 @@ try {
     // ADD CATEGORY
     // ==========================
     if (isset($_POST['add_category'])) {
-
         $name = trim($_POST['category_name']);
         if ($name === '') throw new Exception("Category name is required.");
+
+        // Prevent duplicates
+        $existing = $conn->prepare("SELECT * FROM categories WHERE category_name = ?");
+        $existing->execute([$name]);
+        if ($existing->rowCount() > 0) throw new Exception("Category '$name' already exists.");
 
         $id = CategoryController::addCategory($conn, 'categories', $name);
         $category = CategoryController::getCategoryById($conn, 'categories', $id);
 
         ob_start();
-        ?>
-        <tr id="categoryRow<?= $category['category_id'] ?>">
-            <td>#</td>
-            <td><?= htmlspecialchars($category['category_name']) ?></td>
-            <td>
-                <span class="badge <?= $category['status'] === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-                    <?= ucfirst($category['status']) ?>
-                </span>
-            </td>
-            <td>
-                <button class="btn btn-sm btn-warning editCategoryBtn"
-                        data-id="<?= $category['category_id'] ?>"
-                        data-name="<?= htmlspecialchars($category['category_name']) ?>"
-                        data-bs-toggle="modal" data-bs-target="#editCategoryModal">
-                    <i class="bi bi-pencil-square"></i>
-                </button>
+        include $_SERVER['DOCUMENT_ROOT'].'/inventory_system/templates/category_row_template.php';
+        $rowHtml = ob_get_clean();
 
-                <button class="btn btn-sm <?= $category['status'] === 'active' ? 'btn-danger' : 'btn-success' ?> toggleCategoryStatusBtn"
-                        data-id="<?= $category['category_id'] ?>"
-                        data-status="<?= $category['status'] === 'active' ? 'deactivate' : 'activate' ?>">
-                    <?= $category['status'] === 'active' 
-                        ? '<i class="bi bi-slash-circle"></i>' 
-                        : '<i class="bi bi-check-circle"></i>' ?>
-                </button>
-            </td>
-        </tr>
-        <?php
-
-        $response = [
-            'success' => 'Category added successfully!',
-            'updatedRowHtml' => ob_get_clean()
-        ];
+        $response = ['success' => "Category '$name' added successfully!", 'updatedRowHtml' => $rowHtml];
     }
 
     // ==========================
     // EDIT CATEGORY
     // ==========================
     if (isset($_POST['edit_category'])) {
-
-        $id   = $_POST['category_id'];
+        $id = $_POST['category_id'];
         $name = trim($_POST['category_name']);
         if ($name === '') throw new Exception("Category name is required.");
+
+        // Prevent duplicates
+        $existing = $conn->prepare("SELECT * FROM categories WHERE category_name = ? AND category_id != ?");
+        $existing->execute([$name, $id]);
+        if ($existing->rowCount() > 0) throw new Exception("Category '$name' already exists.");
 
         CategoryController::updateCategory($conn, 'categories', $id, $name);
         $category = CategoryController::getCategoryById($conn, 'categories', $id);
 
         ob_start();
-        ?>
-        <tr id="categoryRow<?= $category['category_id'] ?>">
-            <td>#</td>
-            <td><?= htmlspecialchars($category['category_name']) ?></td>
-            <td>
-                <span class="badge <?= $category['status'] === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-                    <?= ucfirst($category['status']) ?>
-                </span>
-            </td>
-            <td>
-                <button class="btn btn-sm btn-warning editCategoryBtn"
-                        data-id="<?= $category['category_id'] ?>"
-                        data-name="<?= htmlspecialchars($category['category_name']) ?>"
-                        data-bs-toggle="modal" data-bs-target="#editCategoryModal">
-                    <i class="bi bi-pencil-square"></i>
-                </button>
+        require_once
+        $rowHtml = ob_get_clean();
 
-                <button class="btn btn-sm <?= $category['status'] === 'active' ? 'btn-danger' : 'btn-success' ?> toggleCategoryStatusBtn"
-                        data-id="<?= $category['category_id'] ?>"
-                        data-status="<?= $category['status'] === 'active' ? 'deactivate' : 'activate' ?>">
-                    <?= $category['status'] === 'active' 
-                        ? '<i class="bi bi-slash-circle"></i>' 
-                        : '<i class="bi bi-check-circle"></i>' ?>
-                </button>
-            </td>
-        </tr>
-        <?php
-
-        $response = [
-            'success' => 'Category updated successfully!',
-            'updatedRowHtml' => ob_get_clean()
-        ];
+        $response = ['success' => "Category '$name' updated successfully!", 'updatedRowHtml' => $rowHtml];
     }
 
     // ==========================
@@ -111,38 +64,10 @@ try {
         $category = CategoryController::getCategoryById($conn, 'categories', $id);
 
         ob_start();
-        ?>
-        <tr id="categoryRow<?= $category['category_id'] ?>">
-            <td>#</td>
-            <td><?= htmlspecialchars($category['category_name']) ?></td>
-            <td>
-                <span class="badge <?= $category['status'] === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-                    <?= ucfirst($category['status']) ?>
-                </span>
-            </td>
-            <td>
-                <button class="btn btn-sm btn-warning editCategoryBtn"
-                        data-id="<?= $category['category_id'] ?>"
-                        data-name="<?= htmlspecialchars($category['category_name']) ?>"
-                        data-bs-toggle="modal" data-bs-target="#editCategoryModal">
-                    <i class="bi bi-pencil-square"></i>
-                </button>
+        include $_SERVER['DOCUMENT_ROOT'].'/inventory_system/templates/category_row_template.php';
+        $rowHtml = ob_get_clean();
 
-                <button class="btn btn-sm <?= $category['status'] === 'active' ? 'btn-danger' : 'btn-success' ?> toggleCategoryStatusBtn"
-                        data-id="<?= $category['category_id'] ?>"
-                        data-status="<?= $category['status'] === 'active' ? 'deactivate' : 'activate' ?>">
-                    <?= $category['status'] === 'active' 
-                        ? '<i class="bi bi-slash-circle"></i>' 
-                        : '<i class="bi bi-check-circle"></i>' ?>
-                </button>
-            </td>
-        </tr>
-        <?php
-
-        $response = [
-            'success' => "Category status updated to $newStatus",
-            'updatedRowHtml' => ob_get_clean()
-        ];
+        $response = ['success' => "Category status changed to '$newStatus'.", 'updatedRowHtml' => $rowHtml];
     }
 
 } catch (Exception $e) {

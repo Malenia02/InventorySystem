@@ -81,6 +81,8 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
                         <div class="modal-dialog">
                             <div class="modal-content">
                                 <form id="addCategoryForm">
+                                    <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+
                                     <div class="modal-header">
                                         <h5 class="modal-title">Add New Category</h5>
                                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -105,6 +107,8 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
                         <div class="modal-dialog">
                             <div class="modal-content">
                                 <form id="editCategoryForm">
+                                    <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?>">
+
                                     <input type="hidden" name="category_id" id="editCategoryId">
                                     <div class="modal-header">
                                         <h5 class="modal-title">Edit Category</h5>

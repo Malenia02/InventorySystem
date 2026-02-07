@@ -8,6 +8,11 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // ==========================
+// TIMEZONE
+// ==========================
+date_default_timezone_set('Asia/Manila');
+
+// ==========================
 // CONSTANTS
 // ==========================
 if (!defined('HOSTURL')) {
@@ -97,7 +102,6 @@ $product_vatable      = $config['tables']['products']['vatable'];
 $product_on_sale      = $config['tables']['products']['on_sale'];
 $product_sale_price   = $config['tables']['products']['sale_price'];
 $product_photo        = $config['tables']['products']['photo'];
-$product_status = $config['tables']['products']['status']; // 'status' column
 
 
 // --- POS CONFIG ---

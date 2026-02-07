@@ -1,5 +1,10 @@
 <?php
 session_start();
+// Generate CSRF token
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrf_token = $_SESSION['csrf_token'];
 
 // Check admin access
 if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
@@ -62,80 +67,77 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                 <i class="bi bi-plus-circle"></i> Add New Product
                             </button>
 
-                            <!-- Products Table -->
-                            <div class="table-responsive">
-                                <table id="productsTable" class="table table-striped table-bordered">
-                                    <thead>
-                                        <tr>
-                                            <th>#</th>
-                                            <th>Photo</th>
-                                            <th>Name</th>
-                                            <th>Category</th>
-                                            <th>Supplier</th>
-                                            <th>SKU</th>
-                                            <th>Quantity</th>
-                                            <th>Price</th>
-                                            <th>Sale Price</th>
-                                            <th>Vatable</th>
-                                            <th>Re-Order Level</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <?php foreach ($products as $index => $p): ?>
-                                            <tr id="productRow<?= $p['product_id'] ?>">
-                                                <td><?= $index + 1 ?></td>
-                                                <td class="text-center">
-                                                    <img src="<?= !empty($p['photo']) ? $p['photo'] : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
-                                                        alt="Photo" style="width:50px;height:50px;object-fit:cover;">
-                                                </td>
-                                                <td><?= htmlspecialchars($p['product_name']) ?></td>
-                                                <td><?= htmlspecialchars($p['category_name'] ?? '-') ?></td>
-                                                <td><?= htmlspecialchars($p['supplier_name'] ?? '-') ?></td>
-                                                                                                <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
+                           <!-- Products Table -->
+<div class="table-responsive">
+    <table id="productsTable" class="table table-striped table-bordered">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Photo</th>
+                <th>Name</th>
+                <th>Category</th>
+                <th>Supplier</th>
+                <th>SKU</th>
+                <th>Quantity</th>
+                <th>Price</th>
+                <th>Sale Price</th>
+                <th>Vatable</th>
+                <th>Re-Order Level</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php foreach ($products as $index => $p): ?>
+                <tr id="productRow<?= $p['product_id'] ?>">
+                    <td><?= $index + 1 ?></td>
+                    <td class="text-center">
+                        <img src="<?= !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
+                             alt="Photo" style="width:50px;height:50px;object-fit:cover;">
+                    </td>
+                    <td><?= htmlspecialchars($p['product_name'] ?? '-') ?></td>
+                    <td><?= htmlspecialchars($p['category_name'] ?? '-') ?></td>
+                    <td><?= htmlspecialchars($p['supplier_name'] ?? '-') ?></td>
+                    <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
+                    <td><?= (int)($p['quantity'] ?? 0) ?></td>
+                    <td>₱<?= number_format($p['price'] ?? 0, 2) ?></td>
+                    <td><?= !empty($p['sale_price']) ? '₱' . number_format($p['sale_price'], 2) : '-' ?></td>
+                    <td><?= !empty($p['vatable']) ? 'Yes' : 'No' ?></td>
+                    <td><?= (int)($p['reorder_level'] ?? 5) ?></td>
+                    <td>
+                        <span class="badge <?= ($p['status'] ?? 'inactive') === 'active' ? 'bg-success' : 'bg-secondary' ?>">
+                            <?= ucfirst($p['status'] ?? 'inactive') ?>
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-sm btn-warning editProductBtn"
+                                data-id="<?= $p['product_id'] ?>"
+                                data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>"
+                                data-category="<?= $p['category_id'] ?? 0 ?>"
+                                data-supplier="<?= $p['supplier_id'] ?? 0 ?>"
+                                data-sku="<?= htmlspecialchars($p['sku'] ?? '') ?>"
+                                data-price="<?= $p['price'] ?? 0 ?>"
+                                data-sale_price="<?= $p['sale_price'] ?? '' ?>"
+                                data-vatable="<?= $p['vatable'] ?? 0 ?>"
+                                data-reorder="<?= $p['reorder_level'] ?? 5 ?>"
+                                data-photo="<?= !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
+                                data-bs-toggle="modal"
+                                data-bs-target="#editProductModal">
+                            <i class="bi bi-pencil-square"></i>
+                        </button>
 
-                                                <td><?= $p['quantity'] ?></td>
-                                                <td>₱<?= number_format($p['price'], 2) ?></td>
-                                                <td><?= !empty($p['sale_price']) ? '₱' . number_format($p['sale_price'], 2) : '-' ?>
-                                                </td>
-                                                <td><?= $p['vatable'] ? 'Yes' : 'No' ?></td>
-                                                <td><?= $p['reorder_level'] ?></td>
-                                                <td>
-                                                    <span
-                                                        class="badge <?= $p['status'] === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-                                                        <?= ucfirst($p['status'] ?? 'inactive') ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                   <button class="btn btn-sm btn-warning editProductBtn"
-    data-id="<?= $p['product_id'] ?>"
-    data-name="<?= htmlspecialchars($p['product_name']) ?>"
-    data-category="<?= $p['category_id'] ?>"
-    data-supplier="<?= $p['supplier_id'] ?>"
-    data-sku="<?= htmlspecialchars($p['sku'] ?? '') ?>"
-    data-price="<?= $p['price'] ?>"
-    data-sale_price="<?= $p['sale_price'] ?>"
-    data-vatable="<?= $p['vatable'] ?>"
-    data-reorder="<?= $p['reorder_level'] ?>"
-    data-photo="<?= !empty($p['photo']) ? $p['photo'] : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
-    data-bs-toggle="modal"
-    data-bs-target="#editProductModal">
+                        <button class="btn btn-sm <?= ($p['status'] ?? 'inactive') === 'active' ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
+                                data-id="<?= $p['product_id'] ?>"
+                                data-status="<?= ($p['status'] ?? 'inactive') === 'active' ? 'deactivate' : 'activate' ?>">
+                            <?= ($p['status'] ?? 'inactive') === 'active' ? '<i class="bi bi-slash-circle"></i>' : '<i class="bi bi-check-circle"></i>' ?>
+                        </button>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
 
-                                                        <i class="bi bi-pencil-square"></i>
-                                                    </button>
-
-                                                    <button
-                                                        class="btn btn-sm <?= $p['status'] === 'active' ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
-                                                        data-id="<?= $p['product_id'] ?>"
-                                                        data-status="<?= $p['status'] === 'active' ? 'deactivate' : 'activate' ?>">
-                                                        <?= $p['status'] === 'active' ? '<i class="bi bi-slash-circle"></i>' : '<i class="bi bi-check-circle"></i>' ?>
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    </tbody>
-                                </table>
                             </div>
 
                             <!-- ==========================
@@ -146,6 +148,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                     <div class="modal-content">
 
                                         <form id="addProductForm" enctype="multipart/form-data">
+                                     <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
                                             <div class="modal-header">
                                                 <h5 class="modal-title">Add New Product</h5>
                                                 <button type="button" class="btn-close"
@@ -277,7 +280,8 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                     <div class="modal-content">
                                         <form id="editProductForm" enctype="multipart/form-data">
                                             <!-- Hidden ID -->
-                                            <input type="hidden" name="product_id" id="editProductId">
+                                         <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
+                                         <input type="hidden" name="product_id" id="editProductId">
 
                                             <div class="modal-header">
                                                 <h5 class="modal-title">Edit Product</h5>
@@ -403,6 +407,8 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                 <div class="modal-dialog">
                                     <div class="modal-content">
                                         <form id="addSupplierForm">
+                                                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
+
                                             <div class="modal-header">
                                                 <h5 class="modal-title">Add New Supplier</h5>
                                                 <button type="button" class="btn-close"
@@ -449,6 +455,8 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                 <div class="modal-dialog">
                                     <div class="modal-content">
                                         <form id="editAddSupplierForm">
+                                                <input type="hidden" name="csrf_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
+
                                             <div class="modal-header">
                                                 <h5 class="modal-title">Add New Supplier</h5>
                                                 <button type="button" class="btn-close"
@@ -501,6 +509,9 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
     <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/js_script.php'; ?>
 
     <script src="https://cdn.jsdelivr.net/npm/simple-datatables@latest" type="text/javascript"></script>
+    <script>
+    const CSRF_TOKEN = "<?= $csrf_token ?>";
+</script>
     <script src="<?= HOSTURL ?>/assets/js/manage_product.js"></script>
     <script>
         // Initialize Simple-DataTables
