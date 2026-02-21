@@ -12,7 +12,7 @@ $categories = CategoryController::all($conn, $table_categories);
 <head>
     <?php require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/head.php'; ?>
     <!-- Include Simple-DataTables CSS -->
-    <link rel="stylesheet" href="<?= HOSTURL ?>/assets/plugins/simple-datatables/style.css">
+    <link rel="stylesheet" href="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js">
 </head>
 <body>
 <?php
@@ -27,7 +27,7 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
             <div class="card">
                 <div class="card-body">
                     <h5 class="card-title">Category List</h5>
-
+<div id="categoryMessageContainer"></div>
                     <!-- Add Category Button -->
                     <button class="btn btn-primary mb-3" data-bs-toggle="modal" data-bs-target="#addCategoryModal">
                         <i class="bi bi-plus-circle"></i> Add New Category
@@ -136,7 +136,9 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
 </section>
 
 <?php require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/js_script.php'; ?>
-<script src="<?= HOSTURL ?>/assets/plugins/simple-datatables/simple-datatables.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
+<script src="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="<?= HOSTURL ?>/assets/js/manage_category.js"></script>
 </body>
 </html>
