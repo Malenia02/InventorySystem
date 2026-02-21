@@ -8,6 +8,11 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // ==========================
+// TIMEZONE
+// ==========================
+date_default_timezone_set('Asia/Manila');
+
+// ==========================
 // CONSTANTS
 // ==========================
 if (!defined('HOSTURL')) {
@@ -97,7 +102,6 @@ $product_vatable      = $config['tables']['products']['vatable'];
 $product_on_sale      = $config['tables']['products']['on_sale'];
 $product_sale_price   = $config['tables']['products']['sale_price'];
 $product_photo        = $config['tables']['products']['photo'];
-$product_status = $config['tables']['products']['status']; // 'status' column
 
 
 // --- POS CONFIG ---
@@ -147,6 +151,18 @@ $stockout_qty          = $config['tables']['stock_out']['quantity'];
 $stockout_reason       = $config['tables']['stock_out']['reason'];
 $stockout_date         = $config['tables']['stock_out']['date'];
 $stockout_user_id      = $config['tables']['stock_out']['user_id'];
+
+
+// --- ACTIVITY LOGS ---
+$table_activity_logs   = $config['tables']['activity_logs']['table'];
+$activity_log_id       = $config['tables']['activity_logs']['id'];
+$activity_log_user_id  = $config['tables']['activity_logs']['user_id'];
+$activity_log_action   = $config['tables']['activity_logs']['action'];
+$activity_log_desc     = $config['tables']['activity_logs']['description'];
+$activity_log_ip       = $config['tables']['activity_logs']['ip_address'];
+$activity_log_created  = $config['tables']['activity_logs']['created_at'];
+
+
 
 // ==========================
 // BASIC AUTH CHECK

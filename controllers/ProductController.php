@@ -1,4 +1,8 @@
 <?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
@@ -8,21 +12,27 @@ if (session_status() === PHP_SESSION_NONE) {
 // ==========================
 class ProductController {
 
-    public static function allProducts($conn, $table_products = 'products') {
-        $stmt = $conn->prepare("SELECT p.*, c.category_name 
-                                FROM {$table_products} p 
-                                LEFT JOIN categories c ON p.category_id = c.category_id
-                                ORDER BY p.product_id DESC");
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
-    }
+   public static function allProducts($conn, $table_products = 'products') {
+    $stmt = $conn->prepare("
+        SELECT p.*, c.category_name, s.supplier_name, s.supplier_id
+        FROM {$table_products} p
+        LEFT JOIN categories c ON p.category_id = c.category_id
+        LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
+        ORDER BY p.product_id DESC
+    ");
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
-    public static function getProductById($conn, $table_products, $id) {
-        $stmt = $conn->prepare("SELECT * FROM {$table_products} WHERE product_id = :id");
-        $stmt->execute(['id' => $id]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
-    }
-
+ public static function getProductById($conn, $table_products, $id) {
+    $stmt = $conn->prepare("SELECT p.*, c.category_name, s.supplier_name
+                            FROM {$table_products} p
+                            LEFT JOIN categories c ON p.category_id = c.category_id
+                            LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
+                            WHERE p.product_id = :id");
+    $stmt->execute(['id' => $id]);
+    return $stmt->fetch(PDO::FETCH_ASSOC);
+}
     public static function handlePhotoUpload($fileInputName, $productName = 'unknown') {
         if (empty($_FILES[$fileInputName]['name'])) return null;
 
@@ -52,43 +62,48 @@ class ProductController {
     // ==========================
     // ADD PRODUCT
     // ==========================
-    public static function addProduct($conn, $table_products, $name, $category, $price, $sale_price, $vatable, $photoPath) {
-        $stmt = $conn->prepare("INSERT INTO {$table_products} 
-            (product_name, category_id, price, sale_price, vatable, photo, status)
-            VALUES (:name, :category, :price, :sale_price, :vatable, :photo, 'active')");
-        $stmt->execute([
-            'name' => $name,
-            'category' => $category,
-            'price' => $price,
-            'sale_price' => $sale_price ?: null,
-            'vatable' => $vatable,
-            'photo' => $photoPath
-        ]);
-        return $conn->lastInsertId();
-    }
+  public static function addProduct($conn, $table_products, $name, $category, $supplier, $price, $sale_price, $vatable, $photoPath = null, $sku = null) {
+    $stmt = $conn->prepare("INSERT INTO $table_products (product_name, category_id, supplier_id, price, sale_price, vatable, photo, sku) VALUES (:name, :category, :supplier, :price, :sale_price, :vatable, :photo, :sku)");
+    $stmt->execute([
+        ':name' => $name,
+        ':category' => $category,
+        ':supplier' => $supplier,
+        ':price' => $price,
+        ':sale_price' => $sale_price,
+        ':vatable' => $vatable,
+        ':photo' => $photoPath,
+        ':sku' => $sku
+    ]);
+    return $conn->lastInsertId();
+}
+
+
 
     // ==========================
     // UPDATE PRODUCT
     // ==========================
-    public static function updateProduct($conn, $table_products, $id, $name, $category, $price, $sale_price, $vatable, $photoPath = null) {
-        $fields = "product_name = :name, category_id = :category, price = :price, sale_price = :sale_price, vatable = :vatable";
-        $params = [
-            'name' => $name,
-            'category' => $category,
-            'price' => $price,
-            'sale_price' => $sale_price ?: null,
-            'vatable' => $vatable,
-            'id' => $id
-        ];
-
-        if(!empty($photoPath)){
-            $fields .= ", photo = :photo";
-            $params['photo'] = $photoPath;
-        }
-
-        $stmt = $conn->prepare("UPDATE {$table_products} SET {$fields} WHERE product_id = :id");
-        return $stmt->execute($params);
+  public static function updateProduct($conn, $table_products, $id, $name, $category, $supplier, $price, $sale_price, $vatable, $photoPath = null, $sku = null) {
+    $sql = "UPDATE $table_products SET product_name=:name, category_id=:category, supplier_id=:supplier, price=:price, sale_price=:sale_price, vatable=:vatable, sku=:sku";
+    if($photoPath) {
+        $sql .= ", photo=:photo";
     }
+    $sql .= " WHERE product_id=:id";
+    $stmt = $conn->prepare($sql);
+    $params = [
+        ':name' => $name,
+        ':category' => $category,
+        ':supplier' => $supplier,
+        ':price' => $price,
+        ':sale_price' => $sale_price,
+        ':vatable' => $vatable,
+        ':sku' => $sku,
+        ':id' => $id
+    ];
+    if($photoPath) $params[':photo'] = $photoPath;
+    $stmt->execute($params);
+}
+
+
 
     // ==========================
     // TOGGLE STATUS

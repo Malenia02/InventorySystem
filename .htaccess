@@ -1,0 +1,51 @@
+# ===============================
+# GENERAL SECURITY
+# ===============================
+
+Options -Indexes
+
+# Block hidden files (.env, .git, etc)
+<FilesMatch "^\.">
+    Require all denied
+</FilesMatch>
+
+# Block sensitive extensions
+<FilesMatch "\.(env|ini|log|json|yml|yaml|xml)$">
+    Require all denied
+</FilesMatch>
+
+# Block backup / dump files
+<FilesMatch "\.(bak|old|backup|sql|zip|tar|gz)$">
+    Require all denied
+</FilesMatch>
+
+
+# ===============================
+# PROTECT CORE PHP FILES
+# ===============================
+
+<FilesMatch "(config\.php|database\.php|config\.json)$">
+    Require all denied
+</FilesMatch>
+
+
+# ===============================
+# BLOCK DIRECT ACCESS TO CORE FOLDERS
+# ===============================
+
+RewriteEngine On
+
+# Block backend folders completely
+RewriteRule ^(controllers|config|database|vendor|templates)/ - [F,L]
+
+# Block direct browsing of ajax folder (but allow files inside)
+RewriteRule ^http/ajax/$ - [F,L]
+
+
+# ===============================
+# CUSTOM ERROR PAGES
+# ===============================
+
+ErrorDocument 403 /inventory_system/error.php
+ErrorDocument 404 /inventory_system/error.php
+ErrorDocument 500 /inventory_system/error.php
