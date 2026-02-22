@@ -1,2 +1,19 @@
-/vendor/
-/config/config.json
+# Config
+config/config.php
+config/config.json
+.env
+
+# Uploads
+assets/uploads/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Node / Composer
+node_modules/
+vendor/
