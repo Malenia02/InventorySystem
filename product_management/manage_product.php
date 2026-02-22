@@ -507,7 +507,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
     </main>
 
     <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/js_script.php'; ?>
-
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/simple-datatables@latest" type="text/javascript"></script>
     <script>
     const CSRF_TOKEN = "<?= $csrf_token ?>";
