@@ -2,6 +2,7 @@
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/AuthController.php';
 
+// Call logout method
 AuthController::logout(
     $conn,
     $table_activity_logs,

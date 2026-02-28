@@ -213,7 +213,7 @@
             </li>
 
             <li>
-              <a class="dropdown-item d-flex align-items-center" href="/inventory_system/controllers/logoutController.php">
+              <a class="dropdown-item d-flex align-items-center" href="/inventory_system/logout.php">
     <i class="bi bi-box-arrow-right"></i>
     <span>Sign Out</span>
 </a>

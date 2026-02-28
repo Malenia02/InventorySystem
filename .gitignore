@@ -17,3 +17,5 @@ Thumbs.db
 # Node / Composer
 node_modules/
 vendor/
+
+log/php-error.log
