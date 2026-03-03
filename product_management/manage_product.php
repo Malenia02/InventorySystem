@@ -20,8 +20,8 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/SupplierContr
 
 // Fetch all categories,products, and suppliers
 $categories = CategoryController::all($conn, table: 'categories');
-$products = ProductController::allProducts($conn);
-$suppliers = SupplierController::all($conn, $table_suppliers);
+    $products = ProductController::allProducts($conn, 'products'); // explicitly set table name
+    $suppliers = SupplierController::all($conn, $table_suppliers);
 
 ?>
 
@@ -30,7 +30,6 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
 
 <head>
     <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/simple-datatables@latest/dist/style.css">
     <title>Manage Products</title>
     <style>
         .modal-message-center {
@@ -67,7 +66,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                             </button>
 
                             <!-- Products Table -->
-                            <div class="table-responsive">
+                            <div class="table-responsive" style="max: height 500px; overflow-y: auto;">
                                 <table id="productsTable" class="table table-striped table-bordered">
                                     <thead>
                                         <tr>
@@ -91,7 +90,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                             <tr id="productRow<?= $p['product_id'] ?>">
                                                 <td><?= $index + 1 ?></td>
                                                 <td class="text-center">
-                                                    <img src="<?= !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
+                                                    <img src="<?= !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/img/card.jpg' ?>"
                                                         alt="Photo" style="width:50px;height:50px;object-fit:cover;">
                                                 </td>
                                                 <td><?= htmlspecialchars($p['product_name'] ?? '-') ?></td>
@@ -123,7 +122,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                 data-sale_price="<?= $p['sale_price'] ?? '' ?>"
                 data-vatable="<?= $p['vatable'] ?? 0 ?>"
                 data-reorder="<?= $p['reorder_level'] ?? 5 ?>"
-                data-photo="<?= !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
+                data-photo="<?= !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/img/card.jpg' ?>"
                 data-bs-toggle="modal"
                 data-bs-target="#editProductModal">
             <i class="bi bi-pencil-square"></i>
@@ -173,7 +172,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                                 <div class="col-md-4 text-center">
                                                     <label class="form-label">Photo</label>
                                                     <img id="addProductPhotoPreview"
-                                                        src="/inventory_system/assets/uploads/products/images.jpeg"
+                                                        src="/inventory_system/assets/img/card.jpg"
                                                         style="width:150px;height:150px;object-fit:cover;border-radius:8px;">
                                                     <input type="file" class="form-control mt-2" name="photo"
                                                         accept="image/*">
@@ -286,7 +285,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                         <!-- ==========================
                                 EDIT PRODUCT MODAL
                             ========================== -->
-                        <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true">
+                        <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true" >
                             <div class="modal-dialog modal-lg">
                                 <div class="modal-content">
                                     <form id="editProductForm" enctype="multipart/form-data">
@@ -308,7 +307,7 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
                                                 <div class="col-md-4 text-center">
                                                     <label class="form-label">Current Photo</label>
                                                     <img id="editProductPhotoPreview"
-                                                        src="/inventory_system/assets/uploads/products/images.jpeg"
+                                                        src="/inventory_system/assets/img/card.jpg"
                                                         alt="Product Photo"
                                                         style="width:150px;height:150px;object-fit:cover;border-radius:8px;">
                                                     <input type="file" class="form-control mt-2" name="photo"
@@ -559,24 +558,11 @@ $suppliers = SupplierController::all($conn, $table_suppliers);
     </main>
 
     <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/js_script.php'; ?>
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-    <script src="https://cdn.jsdelivr.net/npm/simple-datatables@latest" type="text/javascript"></script>
-    <script>
-        const CSRF_TOKEN = "<?= $csrf_token ?>";
     </script>
     <script src="<?= HOSTURL ?>/assets/js/manage_product.js"></script>
-    <script>
-        // Initialize Simple-DataTables
-        const table = document.querySelector("#productsTable");
-        if (table) {
-            new simpleDatatables.DataTable(table, {
-                searchable: true,
-                fixedHeight: true,
-                perPage: 10
-            });
-        }
-    </script>
+  
+   
 
 </body>
 
-</html>
+</html> 
