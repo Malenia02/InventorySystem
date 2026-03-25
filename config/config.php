@@ -8,6 +8,45 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 // ==========================
+// SESSION IDLE TIMEOUT
+// ==========================
+if (!defined('SESSION_TIMEOUT')) {
+    define('SESSION_TIMEOUT', 1800);
+}
+
+if (session_status() !== PHP_SESSION_NONE) {
+    if (isset($_SESSION['user_id'])) {
+        $lastActivity = $_SESSION['last_activity'] ?? null;
+
+        if ($lastActivity !== null && (time() - $lastActivity) > SESSION_TIMEOUT) {
+            $_SESSION = [];
+            session_unset();
+            session_destroy();
+
+            $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
+                      strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+            $isJson = str_contains($_SERVER['CONTENT_TYPE'] ?? '', 'application/json');
+
+            if ($isAjax || $isJson) {
+                http_response_code(401);
+                header('Content-Type: application/json');
+                echo json_encode([
+                    'success'  => false,
+                    'error'    => 'Session expired. Please log in again.',
+                    'redirect' => '/inventory_system/login.php'
+                ]);
+                exit;
+            }
+
+            header('Location: /inventory_system/login.php?reason=timeout');
+            exit;
+        }
+
+        $_SESSION['last_activity'] = time();
+    }
+}
+
+// ==========================
 // TIMEZONE
 // ==========================
 date_default_timezone_set('Asia/Manila');

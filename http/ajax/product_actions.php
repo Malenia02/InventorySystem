@@ -53,20 +53,23 @@ try {
         }
 
         // Add product
-        $productId = ProductController::addProduct(
-            $conn,
-            'products',
-            $name,
-            $categoryId,
-            $supplierId,
-            $price,
-            $sale_price,
-            $vatable,
-            $quantity,
-            $photoPath,
-            $sku,
-            $userID
-        );
+       $productId = ProductController::addProduct(
+    $conn,
+    'products',
+    [
+        'name'             => $name,
+        'category_id'      => $categoryId,
+        'supplier_id'      => $supplierId,
+        'price'            => $price,
+        'sale_price'       => $sale_price,
+        'vatable'          => $vatable,
+        'initial_quantity' => $quantity,
+        'photo'            => $photoPath,
+        'sku'              => $sku,
+        'user_id'          => $userID,
+        'reorder_level'    => $_POST['reorder_level'] ?? 5
+    ]
+);
 
         // Fetch newly added product
         $stmt = $conn->prepare("

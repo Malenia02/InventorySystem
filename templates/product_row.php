@@ -37,6 +37,15 @@
                 <i class="bi bi-pencil-square"></i>
             </button>
 
+
+
+
+             <button class="btn btn-success btn-sm restock-btn"
+                    data-id="<?= $product['product_id'] ?>"
+                    data-name="<?= htmlspecialchars($product['product_name']) ?>">
+                <i class="bi bi-box-arrow-in-down"></i>
+            </button>
+
             <button class="btn btn-sm <?= $product['status'] === 'active' ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
                     data-id="<?= $product['product_id'] ?>"
                     data-status="<?= $product['status'] ?>">
@@ -45,11 +54,7 @@
                     : '<i class="bi bi-check-circle"></i>' ?>
             </button>
 
-            <button class="btn btn-success btn-sm restock-btn"
-                    data-id="<?= $product['product_id'] ?>"
-                    data-name="<?= htmlspecialchars($product['product_name']) ?>">
-                <i class="bi bi-box-arrow-in-down"></i>
-            </button>
+           
         </div>
     </td>
 </tr>

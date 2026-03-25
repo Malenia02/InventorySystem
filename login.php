@@ -4,37 +4,46 @@ define('AUTH_CONTEXT', 'public');
 require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/AuthController.php';
 
-// Redirect logged-in users
+// Redirect already logged-in users
 if (isset($_SESSION['user_id'])) {
     header('Location: /inventory_system/index.php');
     exit;
 }
 
-// ✅ generate CSRF token for form
-$csrf_token = AuthController::generateCSRFToken();
-
+// Generate CSRF token for form
+$csrf_token    = AuthController::generateCsrfToken();
 $error_message = '';
 
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $error_message = AuthController::login(
-        $conn,
-        $table_users,
-        $user_username,
-        $user_password,
-        $user_id,
-        $user_role,
-        $user_status,
 
-            // ✅ activity logs
-        $table_activity_logs,
-        $activity_log_user_id,
-        $activity_log_action,
-        $activity_log_desc,
-        $activity_log_ip,
-        $activity_log_created
-    );
+    // Users table config
+    $userConfig = [
+        'table'          => $table_users,
+        'col_id'         => $user_id,
+        'col_username'   => $user_username,
+        'col_password'   => $user_password,
+        'col_role'       => $user_role,
+        'col_status'     => $user_status,
+        'col_first_name' => $user_firstname,
+        'col_last_name'  => $user_lastname,
+        'col_photo'      => $user_photoPath,
+    ];
+
+    // Activity log config
+    $logConfig = [
+        'table'       => $table_activity_logs,
+        'col_user_id' => $activity_log_user_id,
+        'col_action'  => $activity_log_action,
+        'col_desc'    => $activity_log_desc,
+        'col_ip'      => $activity_log_ip,
+        'col_created' => $activity_log_created,
+    ];
+
+    $error_message = AuthController::login($conn, $userConfig, $logConfig);
 }
+
+// Always re-read after POST — token may have rotated on failure
+$csrf_token = AuthController::generateCsrfToken();
 ?>
 
 <!DOCTYPE html>
@@ -64,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                                 <form class="row g-3 needs-validation" novalidate method="POST">
 
-                                    <!-- ✅ CSRF token -->
+                                    <!-- CSRF token -->
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
 
                                     <?php if (!empty($error_message)): ?>
@@ -79,20 +88,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         <label for="yourUsername" class="form-label">Username</label>
                                         <div class="input-group has-validation">
                                             <span class="input-group-text">@</span>
-                                            <input type="text" name="username" class="form-control" id="yourUsername" required>
+                                            <input type="text" name="username" class="form-control"
+                                                   id="yourUsername" required
+                                                   value="<?= htmlspecialchars($_POST['username'] ?? '') ?>">
                                             <div class="invalid-feedback">Please enter your username.</div>
                                         </div>
                                     </div>
 
                                     <div class="col-12">
                                         <label for="yourPassword" class="form-label">Password</label>
-                                        <input type="password" name="password" class="form-control" id="yourPassword" required>
+                                        <input type="password" name="password" class="form-control"
+                                               id="yourPassword" required>
                                         <div class="invalid-feedback">Please enter your password!</div>
                                     </div>
 
                                     <div class="col-12">
                                         <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" name="remember" value="true" id="rememberMe">
+                                            <input class="form-check-input" type="checkbox"
+                                                   name="remember" value="true" id="rememberMe"
+                                                   <?= !empty($_POST['remember']) ? 'checked' : '' ?>>
                                             <label class="form-check-label" for="rememberMe">Remember me</label>
                                         </div>
                                     </div>
@@ -100,6 +114,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     <div class="col-12">
                                         <button class="btn btn-primary w-100" type="submit">Login</button>
                                     </div>
+
                                 </form>
                             </div>
                         </div>
@@ -117,18 +132,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <script>
 (() => {
-    'use strict'
-    const forms = document.querySelectorAll('.needs-validation')
+    'use strict';
+    const forms = document.querySelectorAll('.needs-validation');
     Array.from(forms).forEach(form => {
         form.addEventListener('submit', event => {
             if (!form.checkValidity()) {
-                event.preventDefault()
-                event.stopPropagation()
+                event.preventDefault();
+                event.stopPropagation();
             }
-            form.classList.add('was-validated')
-        }, false)
-    })
-})();
+            form.classList.add('was-validated');
+        }, false);
+    })();
 </script>
 
 </body>

@@ -36,8 +36,8 @@ Options -Indexes
 RewriteEngine On
 
 # Block backend folders completely
-RewriteRule ^(controllers|config|database|vendor|templates)/ - [F,L]
 
+RewriteRule ^(controllers|config|database|vendor|templates|logs)/ - [F,L]
 # Block direct browsing of ajax folder (but allow files inside)
 RewriteRule ^http/ajax/$ - [F,L]
 
