@@ -3,12 +3,17 @@
  * controllers/DashboardController.php
  * All dashboard data queries — sales, revenue, stock, activity.
  */
+if (php_sapi_name() !== 'cli' && realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
 
-if (php_sapi_name() !== 'cli' && basename($_SERVER['SCRIPT_FILENAME']) === basename(__FILE__)) {
-    http_response_code(403);
-    exit('Access denied.');
+    $_SESSION['error_code'] = 403;
+    $_SESSION['error_message'] = 'Direct access is not allowed.';
+
+    header('Location: /inventory_system/error.php');
+    exit;
 }
-
 class DashboardController
 {
     // ================================================================

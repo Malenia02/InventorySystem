@@ -7,7 +7,7 @@
 <script src="<?= HOSTURL ?>/assets/vendor/quill/quill.js"></script>
 <script src="<?= HOSTURL ?>/assets/vendor/tinymce/tinymce.min.js"></script>
 <script src="<?= HOSTURL ?>/assets/vendor/php-email-form/validate.js"></script>
-
+<script src="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js"></script>
 <script src="<?= HOSTURL ?>/assets/vendor/sweet-alert/sweetalert2.all.min.js"></script>
 
 

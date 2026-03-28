@@ -9,15 +9,12 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/ProductC
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/CategoryController.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/SupplierController.php';
 
-// ── Auth: admin only ──────────────────────────────────────────
 Middleware::auth()->role('admin');
 
-// ── CSRF token ────────────────────────────────────────────────
 $csrf_token = Middleware::generateCsrfToken();
 
-// ── Fetch data ────────────────────────────────────────────────
 $categories = CategoryController::all($conn, $table_categories);
-$products   = ProductController::allProducts($conn, $table_products);
+$products   = ProductController::allProducts($conn);
 $suppliers  = SupplierController::all($conn, $table_suppliers);
 ?>
 <!DOCTYPE html>
@@ -31,6 +28,78 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
             text-align: center;
             font-weight: 500;
             margin-bottom: 12px;
+        }
+
+        .modal-modern .modal-content {
+            border: 0;
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 1rem 3rem rgba(0,0,0,.18);
+        }
+
+        .modal-modern .modal-header {
+            border-bottom: 0;
+            padding: 1rem 1.5rem;
+        }
+
+        .modal-modern .modal-body {
+            padding: 1.5rem;
+        }
+
+        .modal-modern .modal-footer {
+            border-top: 0;
+            padding: 1rem 1.5rem 1.5rem;
+        }
+
+        .modal-modern .form-label {
+            font-weight: 600;
+            margin-bottom: .45rem;
+            color: #495057;
+        }
+
+        .modal-modern .form-control,
+        .modal-modern .form-select,
+        .modal-modern .input-group-text {
+            border-radius: .75rem;
+        }
+
+        .modal-modern .modal-section-title {
+            font-size: .95rem;
+            font-weight: 700;
+            color: #6c757d;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: .5rem;
+            margin-bottom: .75rem;
+        }
+
+        .modal-modern .modal-side-card {
+            border: 1px solid #e9ecef;
+            background: #f8f9fa;
+            border-radius: 1rem;
+            padding: 1rem;
+            height: 100%;
+        }
+
+        .modal-modern .preview-image {
+            width: 100%;
+            max-width: 260px;
+            height: 260px;
+            object-fit: cover;
+            border-radius: 1rem;
+            border: 1px solid #dee2e6;
+            box-shadow: 0 .25rem .75rem rgba(0,0,0,.08);
+        }
+
+        .modal-modern .compact-preview {
+            width: 100%;
+            height: 140px;
+            object-fit: cover;
+            border-radius: .75rem;
+            border: 1px solid #dee2e6;
+        }
+
+        .modal-modern .btn {
+            border-radius: .75rem;
         }
     </style>
 </head>
@@ -50,16 +119,13 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                         <div class="card-body">
                             <h5 class="card-title">Product List</h5>
 
-                            <!-- Messages -->
                             <div id="productMessages"></div>
 
-                            <!-- Add Product Button -->
                             <button type="button" class="btn btn-primary mb-3"
                                 data-bs-toggle="modal" data-bs-target="#addProductModal">
                                 <i class="bi bi-plus-circle"></i> Add New Product
                             </button>
 
-                            <!-- Products Table -->
                             <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
                                 <table id="productsTable" class="table table-striped table-bordered">
                                     <thead>
@@ -81,11 +147,11 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                     </thead>
                                     <tbody>
                                         <?php foreach ($products as $index => $p):
-                                            $photo      = !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/img/card.jpg';
-                                            $status     = $p['status'] ?? 'inactive';
-                                            $isActive   = $status === 'active';
+                                            $photo    = !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/img/card.jpg';
+                                            $status   = $p['status'] ?? 'inactive';
+                                            $isActive = $status === 'active';
                                         ?>
-                                            <tr id="productRow<?= $p['product_id'] ?>">
+                                            <tr id="productRow<?= (int)$p['product_id'] ?>">
                                                 <td><?= $index + 1 ?></td>
                                                 <td class="text-center">
                                                     <img src="<?= $photo ?>" alt="Photo"
@@ -96,8 +162,8 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                 <td><?= htmlspecialchars($p['supplier_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
                                                 <td class="product-quantity"><?= (int)($p['quantity'] ?? 0) ?></td>
-                                                <td>₱<?= number_format($p['price'] ?? 0, 2) ?></td>
-                                                <td><?= !empty($p['sale_price']) ? '₱' . number_format($p['sale_price'], 2) : '-' ?></td>
+                                                <td>₱<?= number_format((float)($p['price'] ?? 0), 2) ?></td>
+                                                <td><?= !empty($p['sale_price']) ? '₱' . number_format((float)$p['sale_price'], 2) : '-' ?></td>
                                                 <td><?= !empty($p['vatable']) ? 'Yes' : 'No' ?></td>
                                                 <td><?= (int)($p['reorder_level'] ?? 5) ?></td>
                                                 <td>
@@ -108,34 +174,37 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                 <td>
                                                     <div class="d-flex gap-2 justify-content-center">
 
-                                                        <!-- Edit -->
                                                         <button class="btn btn-sm btn-warning editProductBtn"
-                                                            data-id="<?= $p['product_id'] ?>"
+                                                            data-id="<?= (int)$p['product_id'] ?>"
                                                             data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>"
-                                                            data-category="<?= $p['category_id'] ?? 0 ?>"
-                                                            data-supplier="<?= $p['supplier_id'] ?? 0 ?>"
+                                                            data-category="<?= (int)($p['category_id'] ?? 0) ?>"
+                                                            data-supplier="<?= (int)($p['supplier_id'] ?? 0) ?>"
                                                             data-sku="<?= htmlspecialchars($p['sku'] ?? '') ?>"
-                                                            data-price="<?= $p['price'] ?? 0 ?>"
-                                                            data-sale_price="<?= $p['sale_price'] ?? '' ?>"
-                                                            data-vatable="<?= $p['vatable'] ?? 0 ?>"
-                                                            data-reorder="<?= $p['reorder_level'] ?? 5 ?>"
+                                                            data-price="<?= (float)($p['price'] ?? 0) ?>"
+                                                            data-sale_price="<?= htmlspecialchars((string)($p['sale_price'] ?? '')) ?>"
+                                                            data-vatable="<?= (int)($p['vatable'] ?? 0) ?>"
+                                                            data-reorder="<?= (int)($p['reorder_level'] ?? 5) ?>"
                                                             data-photo="<?= $photo ?>"
                                                             data-bs-toggle="modal"
                                                             data-bs-target="#editProductModal">
                                                             <i class="bi bi-pencil-square"></i>
                                                         </button>
 
-                                                        <!-- Restock -->
                                                         <button class="btn btn-success btn-sm restock-btn"
-                                                            data-id="<?= $p['product_id'] ?>"
-                                                            data-name="<?= htmlspecialchars($p['product_name']) ?>">
+                                                            data-id="<?= (int)$p['product_id'] ?>"
+                                                            data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>">
                                                             <i class="bi bi-box-arrow-in-down"></i>
                                                         </button>
 
-                                                        <!-- Toggle Status -->
+                                                        <button class="btn btn-secondary btn-sm stockout-btn"
+                                                            data-id="<?= (int)$p['product_id'] ?>"
+                                                            data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>">
+                                                            <i class="bi bi-box-arrow-up"></i>
+                                                        </button>
+
                                                         <button class="btn btn-sm <?= $isActive ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
-                                                            data-id="<?= $p['product_id'] ?>"
-                                                            data-status="<?= $isActive ? 'deactivate' : 'activate' ?>">
+                                                            data-id="<?= (int)$p['product_id'] ?>"
+                                                            data-status="<?= $status ?>">
                                                             <i class="bi <?= $isActive ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i>
                                                         </button>
 
@@ -147,325 +216,435 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                 </table>
                             </div>
 
-                        </div><!-- end card-body -->
+                        </div>
 
-                        <!-- ============================================================
-                             ADD PRODUCT MODAL
-                             ============================================================ -->
-                        <div class="modal fade" id="addProductModal" tabindex="-1">
-                            <div class="modal-dialog modal-lg">
+                        <!-- ADD PRODUCT MODAL -->
+                        <div class="modal fade modal-modern" id="addProductModal" tabindex="-1">
+                            <div class="modal-dialog modal-xl modal-dialog-centered">
                                 <div class="modal-content">
                                     <form id="addProductForm" enctype="multipart/form-data">
                                         <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
 
-                                        <div class="modal-header">
-                                            <h5 class="modal-title">Add New Product</h5>
+                                        <div class="modal-header bg-primary-subtle">
+                                            <div>
+                                                <h5 class="modal-title fw-bold mb-1">
+                                                    <i class="bi bi-plus-circle me-2"></i>Add New Product
+                                                </h5>
+                                                <small class="text-muted">Create a new product record and optionally set its initial stock.</small>
+                                            </div>
                                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                         </div>
 
                                         <div class="modal-body">
-                                            <div class="row">
-
-                                                <!-- Photo -->
-                                                <div class="col-md-4 text-center">
-                                                    <label class="form-label">Photo</label>
-                                                    <img id="addProductPhotoPreview"
-                                                        src="/inventory_system/assets/img/card.jpg"
-                                                        style="width:150px;height:150px;object-fit:cover;border-radius:8px;">
-                                                    <input type="file" class="form-control mt-2" name="photo" accept="image/*">
+                                            <div class="row g-4">
+                                                <div class="col-lg-4">
+                                                    <div class="modal-side-card text-center">
+                                                        <h6 class="modal-section-title text-start">Product Photo</h6>
+                                                        <img id="addProductPhotoPreview"
+                                                            src="/inventory_system/assets/img/card.jpg"
+                                                            class="preview-image"
+                                                            alt="Preview">
+                                                        <div class="mt-3">
+                                                            <label class="form-label">Upload Photo</label>
+                                                            <input type="file" class="form-control" name="photo" accept="image/*">
+                                                        </div>
+                                                    </div>
                                                 </div>
 
-                                                <!-- Details -->
-                                                <div class="col-md-8">
+                                                <div class="col-lg-8">
+                                                    <div class="row g-3">
+                                                        <div class="col-12">
+                                                            <div class="modal-section-title">Basic Information</div>
+                                                        </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Product Name</label>
-                                                        <input type="text" class="form-control" name="product_name" required>
-                                                    </div>
+                                                        <div class="col-md-8">
+                                                            <label class="form-label">Product Name</label>
+                                                            <input type="text" class="form-control" name="product_name" required>
+                                                        </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Category</label>
-                                                        <select class="form-select" name="category_id" required>
-                                                            <?php foreach ($categories as $cat): ?>
-                                                                <option value="<?= $cat['category_id'] ?>">
-                                                                    <?= htmlspecialchars($cat['category_name']) ?>
-                                                                </option>
-                                                            <?php endforeach; ?>
-                                                        </select>
-                                                    </div>
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">SKU / Barcode</label>
+                                                            <input type="text" class="form-control" name="sku" placeholder="Optional">
+                                                        </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Supplier</label>
-                                                        <div class="input-group">
-                                                            <select class="form-select" name="supplier_id"
-                                                                id="addProductSupplierSelect" required>
-                                                                <?php foreach ($suppliers as $sup): ?>
-                                                                    <option value="<?= $sup['supplier_id'] ?>">
-                                                                        <?= htmlspecialchars($sup['supplier_name']) ?>
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Category</label>
+                                                            <select class="form-select" name="category_id" required>
+                                                                <?php foreach ($categories as $cat): ?>
+                                                                    <option value="<?= (int)$cat['category_id'] ?>">
+                                                                        <?= htmlspecialchars($cat['category_name']) ?>
                                                                     </option>
                                                                 <?php endforeach; ?>
                                                             </select>
-                                                            <button type="button" class="btn btn-outline-primary"
-                                                                data-bs-toggle="modal"
-                                                                data-bs-target="#supplierModal"
-                                                                data-target-select="addProductSupplierSelect">
-                                                                + Add Supplier
-                                                            </button>
                                                         </div>
-                                                    </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">SKU / Barcode</label>
-                                                        <input type="text" class="form-control" name="sku"
-                                                            placeholder="Optional but recommended">
-                                                    </div>
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Supplier</label>
+                                                            <div class="input-group">
+                                                                <select class="form-select" name="supplier_id" id="addProductSupplierSelect" required>
+                                                                    <?php foreach ($suppliers as $sup): ?>
+                                                                        <option value="<?= (int)$sup['supplier_id'] ?>">
+                                                                            <?= htmlspecialchars($sup['supplier_name']) ?>
+                                                                        </option>
+                                                                    <?php endforeach; ?>
+                                                                </select>
+                                                                <button type="button" class="btn btn-outline-primary"
+                                                                    data-bs-toggle="modal"
+                                                                    data-bs-target="#supplierModal"
+                                                                    data-target-select="addProductSupplierSelect">
+                                                                    + Add
+                                                                </button>
+                                                            </div>
+                                                        </div>
 
-                                                    <div class="row">
-                                                        <div class="col-md-6 mb-3">
+                                                        <div class="col-12 mt-2">
+                                                            <div class="modal-section-title">Pricing & Stock</div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
                                                             <label class="form-label">Price</label>
-                                                            <input type="number" class="form-control" name="price"
-                                                                step="0.01" required>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="price" step="0.01" required>
+                                                            </div>
                                                         </div>
-                                                        <div class="col-md-6 mb-3">
-                                                            <label class="form-label">Sale Price (optional)</label>
-                                                            <input type="number" class="form-control" name="sale_price"
-                                                                step="0.01">
-                                                        </div>
-                                                    </div>
 
-                                                    <div class="row">
-                                                        <div class="col-md-6 mb-3">
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Sale Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="sale_price" step="0.01">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
                                                             <label class="form-label">Initial Quantity</label>
-                                                            <input type="number" class="form-control"
-                                                                name="initial_quantity" value="0" min="0" required>
+                                                            <input type="number" class="form-control" name="initial_quantity" value="0" min="0" required>
                                                         </div>
-                                                        <div class="col-md-6 mb-3">
+
+                                                        <div class="col-md-6">
                                                             <label class="form-label">Reorder Level</label>
-                                                            <input type="number" class="form-control"
-                                                                name="reorder_level" value="5" min="0">
+                                                            <input type="number" class="form-control" name="reorder_level" value="5" min="0">
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Vatable?</label>
+                                                            <select class="form-select" name="vatable" required>
+                                                                <option value="1">Yes</option>
+                                                                <option value="0">No</option>
+                                                            </select>
                                                         </div>
                                                     </div>
-
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Vatable?</label>
-                                                        <select class="form-select" name="vatable" required>
-                                                            <option value="1">Yes</option>
-                                                            <option value="0">No</option>
-                                                        </select>
-                                                    </div>
-
                                                 </div>
                                             </div>
                                         </div>
 
                                         <div class="modal-footer">
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-primary">Add Product</button>
+                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                            <button type="submit" class="btn btn-primary px-4">
+                                                <i class="bi bi-save me-1"></i>Add Product
+                                            </button>
                                         </div>
                                     </form>
                                 </div>
                             </div>
-                        </div><!-- end Add Product Modal -->
+                        </div>
 
-                        <!-- ============================================================
-                             EDIT PRODUCT MODAL
-                             ============================================================ -->
-                        <div class="modal fade" id="editProductModal" tabindex="-1" aria-hidden="true">
-                            <div class="modal-dialog modal-lg">
+                        <!-- EDIT PRODUCT MODAL -->
+                        <div class="modal fade modal-modern" id="editProductModal" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-xl modal-dialog-centered">
                                 <div class="modal-content">
                                     <form id="editProductForm" enctype="multipart/form-data">
                                         <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
                                         <input type="hidden" name="product_id" id="editProductId">
 
-                                        <div class="modal-header">
-                                            <h5 class="modal-title">Edit Product</h5>
+                                        <div class="modal-header bg-warning-subtle">
+                                            <div>
+                                                <h5 class="modal-title fw-bold mb-1">
+                                                    <i class="bi bi-pencil-square me-2"></i>Edit Product
+                                                </h5>
+                                                <small class="text-muted">Update product details, pricing, and supplier information.</small>
+                                            </div>
                                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                         </div>
 
                                         <div class="modal-body">
-                                            <div class="row">
-
-                                                <!-- Photo -->
-                                                <div class="col-md-4 text-center">
-                                                    <label class="form-label">Current Photo</label>
-                                                    <img id="editProductPhotoPreview"
-                                                        src="/inventory_system/assets/img/card.jpg"
-                                                        alt="Product Photo"
-                                                        style="width:150px;height:150px;object-fit:cover;border-radius:8px;">
-                                                    <input type="file" class="form-control mt-2" name="photo" accept="image/*">
+                                            <div class="row g-4">
+                                                <div class="col-lg-4">
+                                                    <div class="modal-side-card text-center">
+                                                        <h6 class="modal-section-title text-start">Product Photo</h6>
+                                                        <img id="editProductPhotoPreview"
+                                                            src="/inventory_system/assets/img/card.jpg"
+                                                            class="preview-image"
+                                                            alt="Preview">
+                                                        <div class="mt-3">
+                                                            <label class="form-label">Upload New Photo</label>
+                                                            <input type="file" class="form-control" name="photo" accept="image/*">
+                                                        </div>
+                                                    </div>
                                                 </div>
 
-                                                <!-- Details -->
-                                                <div class="col-md-8">
+                                                <div class="col-lg-8">
+                                                    <div class="row g-3">
+                                                        <div class="col-12">
+                                                            <div class="modal-section-title">Basic Information</div>
+                                                        </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Product Name</label>
-                                                        <input type="text" class="form-control" name="product_name"
-                                                            id="editProductName" required>
-                                                    </div>
+                                                        <div class="col-md-8">
+                                                            <label class="form-label">Product Name</label>
+                                                            <input type="text" class="form-control" name="product_name" id="editProductName" required>
+                                                        </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">SKU / Barcode</label>
-                                                        <input type="text" class="form-control" name="sku"
-                                                            id="editProductSku">
-                                                    </div>
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">SKU / Barcode</label>
+                                                            <input type="text" class="form-control" name="sku" id="editProductSku">
+                                                        </div>
 
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Category</label>
-                                                        <select class="form-select" name="category_id"
-                                                            id="editProductCategory" required>
-                                                            <?php foreach ($categories as $cat): ?>
-                                                                <option value="<?= $cat['category_id'] ?>">
-                                                                    <?= htmlspecialchars($cat['category_name']) ?>
-                                                                </option>
-                                                            <?php endforeach; ?>
-                                                        </select>
-                                                    </div>
-
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Supplier</label>
-                                                        <div class="input-group">
-                                                            <select class="form-select" name="supplier_id"
-                                                                id="editProductSupplierSelect" required>
-                                                                <?php foreach ($suppliers as $sup): ?>
-                                                                    <option value="<?= $sup['supplier_id'] ?>">
-                                                                        <?= htmlspecialchars($sup['supplier_name']) ?>
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Category</label>
+                                                            <select class="form-select" name="category_id" id="editProductCategory" required>
+                                                                <?php foreach ($categories as $cat): ?>
+                                                                    <option value="<?= (int)$cat['category_id'] ?>">
+                                                                        <?= htmlspecialchars($cat['category_name']) ?>
                                                                     </option>
                                                                 <?php endforeach; ?>
                                                             </select>
-                                                            <button type="button" class="btn btn-outline-primary"
-                                                                data-bs-toggle="modal"
-                                                                data-bs-target="#supplierModal"
-                                                                data-target-select="editProductSupplierSelect">
-                                                                + Add Supplier
-                                                            </button>
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Supplier</label>
+                                                            <div class="input-group">
+                                                                <select class="form-select" name="supplier_id" id="editProductSupplierSelect" required>
+                                                                    <?php foreach ($suppliers as $sup): ?>
+                                                                        <option value="<?= (int)$sup['supplier_id'] ?>">
+                                                                            <?= htmlspecialchars($sup['supplier_name']) ?>
+                                                                        </option>
+                                                                    <?php endforeach; ?>
+                                                                </select>
+                                                                <button type="button" class="btn btn-outline-primary"
+                                                                    data-bs-toggle="modal"
+                                                                    data-bs-target="#supplierModal"
+                                                                    data-target-select="editProductSupplierSelect">
+                                                                    + Add
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-12 mt-2">
+                                                            <div class="modal-section-title">Pricing & Stock Settings</div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="price" id="editProductPrice" step="0.01" required>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Sale Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="sale_price" id="editProductSalePrice" step="0.01">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Reorder Level</label>
+                                                            <input type="number" class="form-control" name="reorder_level" id="editProductReorderLevel" min="0" required>
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Vatable?</label>
+                                                            <select class="form-select" name="vatable" id="editProductVatable" required>
+                                                                <option value="1">Yes</option>
+                                                                <option value="0">No</option>
+                                                            </select>
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Status</label>
+                                                            <input type="text" class="form-control bg-light" value="Managed via status button" readonly>
                                                         </div>
                                                     </div>
-
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Price</label>
-                                                        <input type="number" class="form-control" name="price"
-                                                            id="editProductPrice" step="0.01" required>
-                                                    </div>
-
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Sale Price (optional)</label>
-                                                        <input type="number" class="form-control" name="sale_price"
-                                                            id="editProductSalePrice" step="0.01">
-                                                    </div>
-
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Reorder Level</label>
-                                                        <input type="number" class="form-control" name="reorder_level"
-                                                            id="editProductReorderLevel" value="5" min="0" required>
-                                                    </div>
-
-                                                    <div class="mb-3">
-                                                        <label class="form-label">Vatable?</label>
-                                                        <select class="form-select" name="vatable"
-                                                            id="editProductVatable" required>
-                                                            <option value="1">Yes</option>
-                                                            <option value="0">No</option>
-                                                        </select>
-                                                    </div>
-
                                                 </div>
                                             </div>
                                         </div>
 
                                         <div class="modal-footer">
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-success">Update Product</button>
+                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                            <button type="submit" class="btn btn-success px-4">
+                                                <i class="bi bi-save me-1"></i>Update Product
+                                            </button>
                                         </div>
                                     </form>
                                 </div>
                             </div>
-                        </div><!-- end Edit Product Modal -->
+                        </div>
 
-                        <!-- ============================================================
-                             RESTOCK MODAL
-                             ============================================================ -->
-                        <div class="modal fade" id="restockModal" tabindex="-1">
-                            <div class="modal-dialog">
+                        <!-- RESTOCK MODAL -->
+                        <div class="modal fade modal-modern" id="restockModal" tabindex="-1">
+                            <div class="modal-dialog modal-dialog-centered">
                                 <div class="modal-content">
                                     <form id="restockForm">
                                         <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
                                         <input type="hidden" id="restockProductId" name="product_id">
 
-                                        <div class="modal-header">
-                                            <h5 class="modal-title">Restock Product</h5>
+                                        <div class="modal-header bg-success-subtle">
+                                            <div>
+                                                <h5 class="modal-title fw-bold mb-1">
+                                                    <i class="bi bi-box-arrow-in-down me-2"></i>Restock Product
+                                                </h5>
+                                                <small class="text-muted">Add inventory to an existing active product.</small>
+                                            </div>
                                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                         </div>
 
                                         <div class="modal-body">
-                                            <div class="mb-3">
-                                                <label class="form-label">Product</label>
-                                                <input type="text" id="restockProductName" class="form-control" readonly>
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label">Quantity to Add</label>
-                                                <input type="number" name="quantity" class="form-control" required min="1">
+                                            <div class="modal-side-card">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Product</label>
+                                                    <input type="text" id="restockProductName" class="form-control" readonly>
+                                                </div>
+
+                                                <div class="mb-0">
+                                                    <label class="form-label">Quantity to Add</label>
+                                                    <input type="number" name="quantity" class="form-control" required min="1" placeholder="Enter quantity">
+                                                </div>
                                             </div>
                                         </div>
 
                                         <div class="modal-footer">
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-primary">Restock</button>
+                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                            <button type="submit" class="btn btn-success px-4">
+                                                <i class="bi bi-plus-lg me-1"></i>Restock
+                                            </button>
                                         </div>
                                     </form>
                                 </div>
                             </div>
-                        </div><!-- end Restock Modal -->
+                        </div>
 
-                        <!-- ============================================================
-                             SUPPLIER MODAL (single — shared by Add + Edit product)
-                             data-target-select on the trigger button tells JS which
-                             supplier <select> to update after saving.
-                             ============================================================ -->
-                        <div class="modal fade" id="supplierModal" tabindex="-1" aria-hidden="true">
-                            <div class="modal-dialog">
+                        <!-- STOCK OUT MODAL -->
+                        <div class="modal fade modal-modern" id="stockOutModal" tabindex="-1">
+                            <div class="modal-dialog modal-dialog-centered">
+                                <div class="modal-content">
+                                    <form id="stockOutForm">
+                                        <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                                        <input type="hidden" id="stockOutProductId" name="product_id">
+
+                                        <div class="modal-header bg-dark text-white">
+                                            <div>
+                                                <h5 class="modal-title fw-bold mb-1">
+                                                    <i class="bi bi-box-arrow-up me-2"></i>Stock Out Product
+                                                </h5>
+                                                <small class="text-white-50">Remove inventory due to damage, expiry, loss, or other reasons.</small>
+                                            </div>
+                                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                        </div>
+
+                                        <div class="modal-body">
+                                            <div class="modal-side-card">
+                                                <div class="mb-3">
+                                                    <label class="form-label">Product</label>
+                                                    <input type="text" id="stockOutProductName" class="form-control" readonly>
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">Quantity to Remove</label>
+                                                    <input type="number" name="quantity" class="form-control" required min="1" placeholder="Enter quantity">
+                                                </div>
+
+                                                <div class="mb-3">
+                                                    <label class="form-label">Reason</label>
+                                                    <select name="reason" class="form-select" required>
+                                                        <option value="">Select reason</option>
+                                                        <option value="Damaged">Damaged</option>
+                                                        <option value="Expired">Expired</option>
+                                                        <option value="Lost">Lost</option>
+                                                        <option value="Returned to supplier">Returned to supplier</option>
+                                                        <option value="Broken packaging">Broken packaging</option>
+                                                        <option value="Other">Other</option>
+                                                    </select>
+                                                </div>
+
+                                                <div class="mb-0">
+                                                    <label class="form-label">Custom Reason (optional)</label>
+                                                    <input type="text" id="customStockOutReason" class="form-control" placeholder="Enter custom reason if needed">
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="modal-footer">
+                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                            <button type="submit" class="btn btn-dark px-4">
+                                                <i class="bi bi-check2-circle me-1"></i>Confirm Stock Out
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- SUPPLIER MODAL -->
+                        <div class="modal fade modal-modern" id="supplierModal" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-dialog-centered">
                                 <div class="modal-content">
                                     <form id="supplierForm">
                                         <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
 
-                                        <div class="modal-header">
-                                            <h5 class="modal-title">Add New Supplier</h5>
+                                        <div class="modal-header bg-info-subtle">
+                                            <div>
+                                                <h5 class="modal-title fw-bold mb-1">
+                                                    <i class="bi bi-truck me-2"></i>Add New Supplier
+                                                </h5>
+                                                <small class="text-muted">Create a supplier record for product assignment.</small>
+                                            </div>
                                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                                         </div>
 
                                         <div class="modal-body">
                                             <div id="supplierMessage" class="modal-message-center"></div>
 
-                                            <div class="mb-3">
-                                                <label class="form-label">Supplier Name</label>
-                                                <input type="text" class="form-control" name="supplier_name" required>
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label">Contact Person</label>
-                                                <input type="text" class="form-control" name="contact_person">
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label">Phone</label>
-                                                <input type="text" class="form-control" name="phone">
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label">Email</label>
-                                                <input type="email" class="form-control" name="email">
-                                            </div>
-                                            <div class="mb-3">
-                                                <label class="form-label">Address</label>
-                                                <textarea class="form-control" name="address" rows="2"></textarea>
+                                            <div class="row g-3">
+                                                <div class="col-12">
+                                                    <label class="form-label">Supplier Name</label>
+                                                    <input type="text" class="form-control" name="supplier_name" required>
+                                                </div>
+
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Contact Person</label>
+                                                    <input type="text" class="form-control" name="contact_person">
+                                                </div>
+
+                                                <div class="col-md-6">
+                                                    <label class="form-label">Phone</label>
+                                                    <input type="text" class="form-control" name="phone">
+                                                </div>
+
+                                                <div class="col-12">
+                                                    <label class="form-label">Email</label>
+                                                    <input type="email" class="form-control" name="email">
+                                                </div>
+
+                                                <div class="col-12">
+                                                    <label class="form-label">Address</label>
+                                                    <textarea class="form-control" name="address" rows="3"></textarea>
+                                                </div>
                                             </div>
                                         </div>
 
                                         <div class="modal-footer">
-                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-primary">Add Supplier</button>
+                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                            <button type="submit" class="btn btn-info px-4 text-white">
+                                                <i class="bi bi-save me-1"></i>Add Supplier
+                                            </button>
                                         </div>
                                     </form>
                                 </div>
                             </div>
-                        </div><!-- end Supplier Modal -->
+                        </div>
 
                     </div><!-- end card -->
                 </div>

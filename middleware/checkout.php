@@ -6,6 +6,9 @@
  * Triggers handle: stock deduction, audit log, total update.
  */
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/middleware/Middleware.php';
+
+Middleware::auth()->csrf(); // Require auth + CSRF for this endpoint
 
 header('Content-Type: application/json');
 

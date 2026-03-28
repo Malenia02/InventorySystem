@@ -26,7 +26,7 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
     <?php if ($isAdmin): ?>
     <!-- Admin -->
     <li class="nav-item">
-      <a class="nav-link collapsed <?php if($current_page == 'manage_staff.php'){ echo 'active'; } ?>" 
+      <a class="nav-link collapsed <?php if($current_page == 'manage_staff.php' || $current_page == 'activity_log.php') { echo 'active'; } ?>" 
          data-bs-target="#components-nav" data-bs-toggle="collapse" href="#">
         <i class="bi bi-menu-button-wide"></i>
         <span>Admin</span>
@@ -34,8 +34,8 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
       </a>
 
       <ul id="components-nav" 
-          class="nav-content collapse <?php if($current_page == 'manage_staff.php'){ echo 'show'; } ?>" 
-          data-bs-parent="#sidebar-nav">
+      class="nav-content collapse <?php if($current_page == 'manage_staff.php' || $current_page == 'activity_log.php'){ echo 'show'; } ?>" 
+      data-bs-parent="#sidebar-nav">
 
         <li>
           <a href="/inventory_system/admin/manage_staff.php" 
@@ -44,6 +44,14 @@ $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
             <span>Manage Staff</span>
           </a>
         </li>
+
+         <li>
+      <a href="/inventory_system/admin/activity_log.php" 
+         class="<?php if($current_page == 'activity_log.php'){ echo 'active'; } ?>">
+        <i class="bi bi-circle"></i>
+        <span>Activity Log</span>
+      </a>
+    </li>
 
       </ul>
     </li>

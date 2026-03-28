@@ -49,3 +49,18 @@ RewriteRule ^http/ajax/$ - [F,L]
 ErrorDocument 403 /inventory_system/error.php
 ErrorDocument 404 /inventory_system/error.php
 ErrorDocument 500 /inventory_system/error.php
+
+
+# ===============================
+# SECURITY HEADERS
+# ===============================
+<IfModule mod_headers.c>
+    # Prevent the site from being embedded in an iframe (Anti-Clickjacking)
+    Header set X-Frame-Options "SAMEORIGIN"
+    
+    # Prevent the browser from "guessing" the file type (MIME-sniffing)
+    Header set X-Content-Type-Options "nosniff"
+    
+    # Enable XSS protection in older browsers
+    Header set X-XSS-Protection "1; mode=block"
+</IfModule>

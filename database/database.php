@@ -3,8 +3,8 @@
 // PDO Database Connection
 // ==========================
 try {
-    // Use variables from config.php
-    $dsn = "mysql:host=$dbservername;dbname=$dbname;charset=utf8";
+    $dsn = "mysql:host={$dbservername};port={$dbport};dbname={$dbname};charset=utf8mb4";
+
     $options = [
         PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
@@ -14,15 +14,21 @@ try {
     $conn = new PDO($dsn, $dbusername, $dbpassword, $options);
 
 } catch (PDOException $e) {
-    // Log the actual error for server logs
-    error_log(date('[Y-m-d H:i:s] ') . "Database connection failed: " . $e->getMessage());
+    error_log(date('[Y-m-d H:i:s] ') . '[database.php] Connection failed: ' . $e->getMessage());
 
-    // Set session message for user-friendly error page
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+
     $_SESSION['error_code'] = 500;
-    $_SESSION['error_message'] =
-        "A database connection error occurred. Please try again later.";
+    $_SESSION['error_message'] = 'A database connection error occurred. Please try again later.';
 
-    // Redirect to error page
-    header('Location: /inventory_system/error.php');
-    exit;
+    $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
+    if ($currentPage !== 'error.php') {
+        header('Location: /inventory_system/error.php');
+        exit;
+    }
+
+    http_response_code(500);
+    exit('A database connection error occurred. Please try again later.');
 }

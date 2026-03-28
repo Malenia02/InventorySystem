@@ -28,7 +28,7 @@ $products   = ProductController::activeProductsForPOS($conn);
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
 <!-- POS Styles -->
-<link rel="stylesheet" href="/inventory_system/assets/css/pos.css">
+<link rel="stylesheet" href="/inventory_system/assets/css/pos-light.css">
 
 </head>
 <body>
@@ -95,7 +95,8 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
                data-vat="<?= $p['vatable'] ?>"
                data-category="<?= $p['category_id'] ?>"
                data-qty="<?= $qty ?>"
-               data-reorder="<?= $reorder ?>">
+               data-reorder="<?= $reorder ?>"
+               data-stock="<?= $qty ?>">
 
             <div class="qty-badge">0</div>
 
@@ -335,10 +336,22 @@ productCards.forEach(card => {
     const vatable    = Number(card.dataset.vat) === 1;
     const discount   = parseFloat(card.dataset.discount) || 0;
     const product_id = parseInt(card.dataset.id);
+    const maxStock   = parseInt(card.dataset.stock) || 0;
 
     card.querySelector('.increase').addEventListener('click', e => {
         e.stopPropagation();
-        if (card.classList.contains('stock-out')) return; // block out of stock
+        if (card.classList.contains('stock-out')) return;
+
+        // Cap at available stock
+        const currentQty = cart[name]?.qty || 0;
+        if (currentQty >= maxStock) {
+            // Shake the button to indicate limit reached
+            const btn = card.querySelector('.increase');
+            btn.classList.add('shake-limit');
+            setTimeout(() => btn.classList.remove('shake-limit'), 500);
+            return;
+        }
+
         changeProductQty(card, name, price, vatable, discount, product_id, 1);
     });
 
@@ -411,6 +424,10 @@ function renderCart() {
             cartItemsEl.appendChild(div);
 
             div.querySelector('.cart-increase').addEventListener('click', () => {
+                const maxStock = parseInt(
+                    document.querySelector(`.product-card[data-name="${CSS.escape(item)}"]`)?.dataset.stock || 9999
+                );
+                if (cart[item].qty >= maxStock) return;
                 cart[item].qty++;
                 syncCardQty(item, cart[item].qty);
                 renderCart();
@@ -993,7 +1010,7 @@ confirmCheckoutBtn.addEventListener('click', async () => {
     setCheckoutStatus('busy', 'Saving sale…');
 
     try {
-        const res  = await fetch('/inventory_system/middleware/checkout.php', {
+        const res  = await fetch('/inventory_system/checkout.php', {
             method:  'POST',
             headers: { 'Content-Type': 'application/json' },
             body:    JSON.stringify(payload),

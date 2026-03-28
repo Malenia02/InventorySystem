@@ -1,34 +1,17 @@
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $salesData in C:\xampp\htdocs\inventory_system\index.php on line 67
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 67
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $salesData in C:\xampp\htdocs\inventory_system\index.php on line 68
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 68
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $revenueData in C:\xampp\htdocs\inventory_system\index.php on line 103
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 103
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $revenueData in C:\xampp\htdocs\inventory_system\index.php on line 104
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 104
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $totalProds in C:\xampp\htdocs\inventory_system\index.php on line 130
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $outOfStock in C:\xampp\htdocs\inventory_system\index.php on line 131
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $chartDates in C:\xampp\htdocs\inventory_system\index.php on line 152
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Warning:  Undefined variable $chartSales in C:\xampp\htdocs\inventory_system\index.php on line 153
-[23-Mar-2026 11:25:51 Asia/Manila] PHP Fatal error:  Uncaught TypeError: array_map(): Argument #2 ($array) must be of type array, null given in C:\xampp\htdocs\inventory_system\index.php:153
-Stack trace:
-#0 C:\xampp\htdocs\inventory_system\index.php(153): array_map('intval', NULL)
-#1 {main}
-  thrown in C:\xampp\htdocs\inventory_system\index.php on line 153
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $salesData in C:\xampp\htdocs\inventory_system\index.php on line 67
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 67
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $salesData in C:\xampp\htdocs\inventory_system\index.php on line 68
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 68
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $revenueData in C:\xampp\htdocs\inventory_system\index.php on line 103
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 103
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $revenueData in C:\xampp\htdocs\inventory_system\index.php on line 104
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Trying to access array offset on value of type null in C:\xampp\htdocs\inventory_system\index.php on line 104
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $totalProds in C:\xampp\htdocs\inventory_system\index.php on line 130
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $outOfStock in C:\xampp\htdocs\inventory_system\index.php on line 131
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $chartDates in C:\xampp\htdocs\inventory_system\index.php on line 152
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Warning:  Undefined variable $chartSales in C:\xampp\htdocs\inventory_system\index.php on line 153
-[23-Mar-2026 11:25:52 Asia/Manila] PHP Fatal error:  Uncaught TypeError: array_map(): Argument #2 ($array) must be of type array, null given in C:\xampp\htdocs\inventory_system\index.php:153
-Stack trace:
-#0 C:\xampp\htdocs\inventory_system\index.php(153): array_map('intval', NULL)
-#1 {main}
-  thrown in C:\xampp\htdocs\inventory_system\index.php on line 153
+[28-Mar-2026 20:13:06 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:28:39 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:28:49 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:29:21 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:29:36 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:30:07 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:36:12 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:36:16 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:36:54 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:41:32 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:41:37 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 21:38:46 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:38:49 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:38:53 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:40:05 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:58:00 Asia/Manila] [activity_log.php] SQLSTATE[HY093]: Invalid parameter number
+[28-Mar-2026 21:58:04 Asia/Manila] [activity_log.php] SQLSTATE[HY093]: Invalid parameter number

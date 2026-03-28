@@ -2,7 +2,7 @@
     "name": "louie/inventory_system",
     "autoload": {
         "psr-4": {
-            "Louie\\InventorySystem\\": "src/"
+            "InventorySystem\\": "src/"
         }
     },
     "authors": [
@@ -10,5 +10,9 @@
             "name": "Louie"
         }
     ],
-    "require": {}
+    "require": {
+        "vlucas/phpdotenv": "^5.6",
+        "cboden/ratchet": "^0.4.4",
+        "ratchet/rfc6455": "0.3.1"
+    }
 }

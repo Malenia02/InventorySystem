@@ -1235,3 +1235,25 @@ h6 {
 /*--------------------------------------------------------------
 # Buttons Products
 --------------------------------------------------------------*/
+
+
+#editProductModal .form-label {
+    margin-bottom: 6px;
+    font-size: 0.92rem;
+}
+
+#editProductModal .form-control,
+#editProductModal .form-select,
+#editProductModal .input-group-text {
+    border-radius: 0.75rem;
+}
+
+#editProductModal .input-group .form-control {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+#editProductModal .input-group .input-group-text {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}

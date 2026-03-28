@@ -1,21 +1,27 @@
-# Config
-config/config.php
-config/config.json
+# Environment secrets
 .env
+.env.*
+!.env.example
 
 # Uploads
 assets/uploads/
 
-# System files
-.DS_Store
-Thumbs.db
+# Logs
+logs/
+*.log
+
+# Dependencies
+vendor/
+node_modules/
 
 # IDE
 .vscode/
 .idea/
 
-# Node / Composer
-node_modules/
-vendor/
+# OS files
+.DS_Store
+Thumbs.db
 
-log/php-error.log
+# Optional cache/temp
+*.cache
+*.tmp
