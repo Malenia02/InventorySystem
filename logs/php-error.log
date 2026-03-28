@@ -1,0 +1,17 @@
+[28-Mar-2026 20:13:06 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:28:39 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:28:49 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:29:21 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:29:36 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:30:07 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:36:12 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:36:16 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:36:54 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:41:32 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 20:41:37 Asia/Manila] [Security] Direct access blocked for AJAX endpoint: /inventory_system/http/ajax/product_actions.php from IP ::1
+[28-Mar-2026 21:38:46 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:38:49 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:38:53 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:40:05 Asia/Manila] [Security] CSRF Blocked: Missing or Invalid token from IP ::1
+[28-Mar-2026 21:58:00 Asia/Manila] [activity_log.php] SQLSTATE[HY093]: Invalid parameter number
+[28-Mar-2026 21:58:04 Asia/Manila] [activity_log.php] SQLSTATE[HY093]: Invalid parameter number

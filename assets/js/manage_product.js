@@ -1,281 +1,493 @@
-document.addEventListener("DOMContentLoaded", function() {
-const BASE_URL = `${window.location.origin}/inventory_system/http/ajax/`;
-    const productMessages = document.getElementById('productMessages');
-    const productsTableBody = document.querySelector('#productsTable tbody');
+const csrfToken = document.querySelector('input[name="csrf_token"]')?.value || "";
 
-    const addProductModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('addProductModal'));
-    const editProductModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('editProductModal'));
+// SweetAlert Toast
+const Toast = Swal.mixin({
+  toast: true,
+  position: "top-end",
+  showConfirmButton: false,
+  timer: 3000,
+  timerProgressBar: true
+});
 
-    // ==========================
-    // HELPER: SHOW MESSAGES
-    // ==========================
-    const showMessage = (type, msg) => {
-        if (!productMessages) return;
-        productMessages.innerHTML = `
-            <div class="alert alert-${type} alert-dismissible fade show" role="alert">
-                ${msg}
-                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
-            </div>`;
-        setTimeout(() => { productMessages.innerHTML = ''; }, 4000);
-    };
+function showToast(message, icon = "success") {
+  Toast.fire({ icon, title: message });
+}
 
-    // ==========================
-    // ATTACH EVENTS TO ROW
-    // ==========================
-    function attachRowEvents(row) {
-        const editBtn = row.querySelector('.editProductBtn');
-        const toggleBtn = row.querySelector('.toggleProductStatusBtn');
+function sendWS(event = "notification_update", type = "general") {
+  if (window.socket && window.socket.readyState === WebSocket.OPEN) {
+    window.socket.send(JSON.stringify({ event, type }));
+  } else {
+    console.warn("WebSocket not connected");
+  }
+}
 
-        if(editBtn) {
-            editBtn.addEventListener('click', function() {
-                const dataset = this.dataset;
-                document.getElementById('editProductId').value = dataset.id;
-                document.getElementById('editProductName').value = dataset.name || '';
-                document.getElementById('editProductCategory').value = dataset.category || '';
+// POST helper
+function postData(url, formData) {
+  if (!(formData instanceof FormData)) formData = new FormData();
+  if (!formData.has("csrf_token")) formData.append("csrf_token", csrfToken);
 
-                // SAFE supplier handling
-                const supplierSelect = document.getElementById('editProductSupplierSelect');
-                if (dataset.supplier && dataset.supplier !== '0') {
-                    supplierSelect.value = dataset.supplier;
-                } else {
-                    supplierSelect.value = '';
-                }
+  return fetch(url, {
+    method: "POST",
+    headers:{
+      "X-Requested-With": "XMLHttpRequest"
+    },
+    body: formData
+  }).then(async (res) => {
+    const data = await res.json();
+    return data;
+  });
+}
 
-                document.getElementById('editProductSku').value = dataset.sku || '';
-                document.getElementById('editProductPrice').value = dataset.price || '';
-                document.getElementById('editProductSalePrice').value = dataset.sale_price || '';
-                document.getElementById('editProductVatable').value = dataset.vatable || 0;
-                document.getElementById('editProductReorderLevel').value = dataset.reorder || 5;
-                document.getElementById('editProductPhotoPreview').src = dataset.photo || '/inventory_system/assets/uploads/products/images.jpeg';
+// Helper function to properly hide modal and remove backdrop
+function hideModal(modalId) {
+  const modalEl = document.getElementById(modalId);
+  if (!modalEl) return;
 
-                editProductModal.show();
-            });
-        }
+  let modal = bootstrap.Modal.getInstance(modalEl);
+  if (!modal) {
+    modal = new bootstrap.Modal(modalEl);
+  }
 
-        if(toggleBtn) {
-            toggleBtn.addEventListener('click', function() {
-                const productId = this.dataset.id;
-                if(!confirm(`Are you sure you want to change this product's status?`)) return;
+  modal.hide();
+  setTimeout(cleanupModals, 120);
+}
 
-                const formData = new FormData();
-                formData.append('toggle_id', productId);
-                formData.append('csrf_token', CSRF_TOKEN); // ✅ keep CSRF
+// Clean up all modal artifacts
+function cleanupModals() {
+  document.querySelectorAll(".modal-backdrop").forEach((backdrop) => {
+    backdrop.remove();
+  });
 
-                fetch(BASE_URL +'product_actions.php', {
-                    method: 'POST',
-                    body: formData
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.error) return showMessage('danger', data.error);
-                    if (data.success) {
-                        showMessage('success', data.success);
-                        const row = document.getElementById('productRow' + productId);
-                        const badge = row.querySelector('span.badge');
+  document.body.classList.remove("modal-open");
+  document.body.style.overflow = "";
+  document.body.style.paddingRight = "";
+}
 
-                        if(data.new_status === 'active') {
-                            badge.textContent = 'Active';
-                            badge.classList.replace('bg-secondary', 'bg-success');
-                            toggleBtn.classList.replace('btn-success', 'btn-danger');
-                            toggleBtn.innerHTML = '<i class="bi bi-slash-circle"></i>';
-                        } else {
-                            badge.textContent = 'Inactive';
-                            badge.classList.replace('bg-success', 'bg-secondary');
-                            toggleBtn.classList.replace('btn-danger', 'btn-success');
-                            toggleBtn.innerHTML = '<i class="bi bi-check-circle"></i>';
-                        }
-                    }
-                })
-                .catch(() => showMessage('danger', 'Something went wrong!'));
-            });
-        }
+// IMAGE PREVIEW FUNCTIONS
+const addProductPhotoInput = document.querySelector('#addProductForm input[name="photo"]');
+const addProductPhotoPreview = document.getElementById('addProductPhotoPreview');
+
+if (addProductPhotoInput && addProductPhotoPreview) {
+  addProductPhotoInput.addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        addProductPhotoPreview.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    } else {
+      addProductPhotoPreview.src = "/inventory_system/assets/img/card.jpg";
     }
+  });
+}
 
-    // Attach events to existing rows
-    document.querySelectorAll('#productsTable tbody tr').forEach(row => attachRowEvents(row));
+const editProductPhotoInput = document.querySelector('#editProductForm input[name="photo"]');
+const editProductPhotoPreview = document.getElementById('editProductPhotoPreview');
 
-    // ==========================
-    // ADD PRODUCT
-    // ==========================
-    const addForm = document.getElementById('addProductForm');
-    if (addForm) {
-        addForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const submitBtn = this.querySelector("button[type='submit']");
-            submitBtn.disabled = true;
-
-            const formData = new FormData(this);
-            formData.append('add_product', true);
-
-            // ✅ keep CSRF token from hidden input
-
-            fetch(BASE_URL +'product_actions.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.error) showMessage('danger', data.error);
-                if(data.success) {
-                    showMessage('success', data.success);
-
-                    const temp = document.createElement('tbody');
-                    temp.innerHTML = data.newProductRow;
-                    const newRow = temp.firstElementChild;
-                    productsTableBody.prepend(newRow);
-                    attachRowEvents(newRow);
-
-                    addProductModal.hide();
-                    this.reset();
-                    document.getElementById('addProductPhotoPreview').src = '/inventory_system/assets/uploads/products/images.jpeg';
-                }
-            })
-            .catch(() => showMessage('danger', 'Something went wrong!'))
-            .finally(() => submitBtn.disabled = false);
-        });
+if (editProductPhotoInput && editProductPhotoPreview) {
+  editProductPhotoInput.addEventListener("change", function (e) {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = function (ev) {
+        editProductPhotoPreview.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
     }
+  });
+}
 
-    // ==========================
-    // EDIT PRODUCT
-    // ==========================
-    const editForm = document.getElementById('editProductForm');
-    if(editForm) {
-        editForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const submitBtn = this.querySelector("button[type='submit']");
-            submitBtn.disabled = true;
+document.getElementById("addProductModal")?.addEventListener("hidden.bs.modal", function () {
+  const form = document.getElementById("addProductForm");
+  if (form) {
+    form.reset();
+    const preview = document.getElementById("addProductPhotoPreview");
+    if (preview) preview.src = "/inventory_system/assets/img/card.jpg";
+  }
+});
 
-            // FRONTEND VALIDATION: Supplier must be valid
-            const supplierValue = document.getElementById('editProductSupplierSelect').value;
-            if (supplierValue !== '' && isNaN(parseInt(supplierValue))) {
-                showMessage('danger', 'Invalid supplier selected.');
-                submitBtn.disabled = false;
-                return;
+document.getElementById("editProductModal")?.addEventListener("hidden.bs.modal", function () {
+  const form = document.getElementById("editProductForm");
+  if (form) {
+    form.reset();
+    const preview = document.getElementById("editProductPhotoPreview");
+    if (preview) preview.src = "/inventory_system/assets/img/card.jpg";
+  }
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("hidden.bs.modal", function () {
+    cleanupModals();
+  });
+
+  const table = document.getElementById("productsTable");
+  const addForm = document.getElementById("addProductForm");
+  const editForm = document.getElementById("editProductForm");
+  const restockForm = document.getElementById("restockForm");
+  const stockOutForm = document.getElementById("stockOutForm");
+
+  if (table && window.simpleDatatables && simpleDatatables.DataTable) {
+    new simpleDatatables.DataTable(table, {
+      searchable: true,
+      fixedHeight: true,
+      perPage: 10
+    });
+  }
+
+  function updateRowNumbers() {
+    if (!table) return;
+
+    table.querySelectorAll("tbody tr").forEach((tr, idx) => {
+      const firstCell = tr.querySelector("td:first-child");
+      if (firstCell) firstCell.innerText = idx + 1;
+    });
+  }
+
+  function replaceRow(oldRow, newRowHtml) {
+    const temp = document.createElement("tbody");
+    temp.innerHTML = newRowHtml.trim();
+
+    const newRow = temp.firstElementChild;
+    if (!newRow || !oldRow) return;
+
+    oldRow.innerHTML = newRow.innerHTML;
+    updateRowNumbers();
+  }
+
+  // ADD PRODUCT
+  if (addForm) {
+    addForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(addForm);
+      formData.append("add_product", "1");
+
+      postData("/inventory_system/http/ajax/product_actions.php", formData)
+        .then((res) => {
+          if (res.success && res.newRowHtml) {
+            const temp = document.createElement("tbody");
+            temp.innerHTML = res.newRowHtml.trim();
+            const newRow = temp.firstElementChild;
+
+            const tbody = table?.querySelector("tbody");
+            if (tbody && newRow) {
+              tbody.prepend(newRow);
+              newRow.classList.add("table-success");
+              setTimeout(() => newRow.classList.remove("table-success"), 3000);
             }
 
-            const formData = new FormData(this);
-            formData.append('edit_product', true);
-            formData.append('csrf_token', CSRF_TOKEN); // ✅ keep CSRF
+            updateRowNumbers();
+            hideModal("addProductModal");
+            addForm.reset();
+            showToast(res.message || "Product added successfully", "success");
+            sendWS(res.event, res.type);
+          } else {
+            showToast(res.error || "Add failed", "error");
+          }
+        })
+        .catch(() => showToast("Server error!", "error"));
+    });
+  }
 
-            fetch(BASE_URL +'product_actions.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                if(data.error) showMessage('danger', data.error);
-                if(data.success) {
-                    showMessage('success', data.success);
+  // TABLE-LEVEL DELEGATION
+  if (table) {
+    table.addEventListener("click", (e) => {
+      const editBtn = e.target.closest(".editProductBtn");
+      const toggleBtn = e.target.closest(".toggleProductStatusBtn");
+      const restockBtn = e.target.closest(".restock-btn");
+      const stockOutBtn = e.target.closest(".stockout-btn");
 
-                    const productId = document.getElementById('editProductId').value;
-                    const row = document.getElementById('productRow' + productId);
+      // EDIT PRODUCT
+      if (editBtn) {
+        const d = editBtn.dataset;
 
-                    const temp = document.createElement('tbody');
-                    temp.innerHTML = data.updatedRowHtml;
-                    const newRow = temp.firstElementChild;
+        document.getElementById("editProductId").value = d.id || "";
+        document.getElementById("editProductName").value = d.name || "";
+        document.getElementById("editProductSku").value = d.sku || "";
+        document.getElementById("editProductCategory").value = d.category || "";
+        document.getElementById("editProductSupplierSelect").value = d.supplier || "";
+        document.getElementById("editProductPrice").value = d.price || 0;
+        document.getElementById("editProductSalePrice").value = d.sale_price || "";
+        document.getElementById("editProductVatable").value = d.vatable || 0;
+        document.getElementById("editProductReorderLevel").value = d.reorder || 5;
+        document.getElementById("editProductPhotoPreview").src =
+          d.photo || "/inventory_system/assets/img/card.jpg";
 
-                    row.replaceWith(newRow);
-                    attachRowEvents(newRow);
+        new bootstrap.Modal(document.getElementById("editProductModal")).show();
+        return;
+      }
 
-                    editProductModal.hide();
-                    this.reset();
+      // TOGGLE STATUS
+      if (toggleBtn) {
+        const id = parseInt(toggleBtn.dataset.id, 10);
+        const currentStatus = toggleBtn.dataset.status || "";
+        const isCurrentlyActive = currentStatus === "active";
+        const newAction = isCurrentlyActive ? "Deactivate" : "Activate";
+
+        if (!id || id <= 0) {
+          showToast("Invalid product ID", "error");
+          return;
+        }
+
+        Swal.fire({
+          title: `${newAction} Product?`,
+          text: "You can change it back later.",
+          icon: "warning",
+          showCancelButton: true,
+          confirmButtonColor: "#3085d6",
+          cancelButtonColor: "#d33",
+          confirmButtonText: `Yes, ${newAction}`
+        }).then((result) => {
+          if (!result.isConfirmed) return;
+
+          const formData = new FormData();
+          formData.append("toggle_id", String(id));
+
+          postData("/inventory_system/http/ajax/product_actions.php", formData)
+            .then((res) => {
+              if (res.success && res.new_status) {
+                const row = document.getElementById(`productRow${id}`);
+                if (row) {
+                  const badge = row.querySelector(".badge");
+                  const btn = row.querySelector(".toggleProductStatusBtn");
+
+                  if (badge) {
+                    badge.textContent =
+                      res.new_status.charAt(0).toUpperCase() + res.new_status.slice(1);
+
+                    badge.classList.remove("bg-success", "bg-secondary");
+                    badge.classList.add(res.new_status === "active" ? "bg-success" : "bg-secondary");
+                  }
+
+                  if (btn) {
+                    btn.classList.remove("btn-success", "btn-danger");
+                    btn.classList.add(res.new_status === "active" ? "btn-danger" : "btn-success");
+                    btn.innerHTML =
+                      res.new_status === "active"
+                        ? '<i class="bi bi-slash-circle"></i>'
+                        : '<i class="bi bi-check-circle"></i>';
+
+                    btn.dataset.status = res.new_status;
+                  }
                 }
+
+                showToast(res.message || "Status updated", "success");
+                sendWS(res.event, res.type);
+              } else {
+                showToast(res.error || "Action failed", "error");
+              }
             })
-            .catch(() => showMessage('danger', 'Something went wrong!'))
-            .finally(() => submitBtn.disabled = false);
+            .catch(() => showToast("Server error!", "error"));
         });
-    }
 
-    // ==========================
-    // ADD SUPPLIER (FROM ADD PRODUCT)
-    // ==========================
-    const addSupplierForm = document.getElementById('addSupplierForm');
-    if(addSupplierForm) {
-        addSupplierForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
+        return;
+      }
 
-            fetch(BASE_URL +'product_actions.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                const messageBox = document.getElementById('supplierMessage');
-                if(data.success) {
-                    messageBox.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+      // RESTOCK PRODUCT
+      if (restockBtn) {
+        const productId = parseInt(restockBtn.dataset.id, 10);
+        const productName = restockBtn.dataset.name || "";
 
-                    const select = document.getElementById('addProductSupplierSelect');
-                    const option = document.createElement('option');
-                    option.value = data.id;
-                    option.textContent = data.name;
-                    option.selected = true;
-                    select.appendChild(option);
+        if (!productId || productId <= 0) {
+          console.error("Invalid product ID:", restockBtn.dataset.id);
+          showToast("Invalid product ID", "error");
+          return;
+        }
 
-                    this.reset();
+        const hiddenId = document.getElementById("restockProductId");
+        const nameInput = document.getElementById("restockProductName");
 
-                    setTimeout(() => {
-                        const supplierModal = bootstrap.Modal.getInstance(document.getElementById('addSupplierModal'));
-                        supplierModal.hide();
-                        messageBox.innerHTML = '';
-                        addProductModal.show();
-                    }, 600);
+        if (!hiddenId || !nameInput) {
+          showToast("Restock form elements not found", "error");
+          return;
+        }
 
-                } else {
-                    messageBox.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
-                }
-            })
-            .catch(err => {
-                document.getElementById('supplierMessage').innerHTML = `<div class="alert alert-danger">Server error. Check console.</div>`;
-                console.error(err);
-            });
-        });
-    }
+        hiddenId.value = String(productId);
+        nameInput.value = productName;
 
-    // ==========================
-    // ADD SUPPLIER (FROM EDIT PRODUCT)
-    // ==========================
-    const editAddSupplierForm = document.getElementById('editAddSupplierForm');
-    if(editAddSupplierForm) {
-        editAddSupplierForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const formData = new FormData(this);
+        new bootstrap.Modal(document.getElementById("restockModal")).show();
+        return;
+      }
 
-            fetch(BASE_URL +'product_actions.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(res => res.json())
-            .then(data => {
-                const messageBox = document.getElementById('editSupplierMessage');
-                if(data.success) {
-                    messageBox.innerHTML = `<div class="alert alert-success">${data.message}</div>`;
+      // STOCK OUT PRODUCT
+      if (stockOutBtn) {
+        const productId = parseInt(stockOutBtn.dataset.id, 10);
+        const productName = stockOutBtn.dataset.name || "";
 
-                    const select = document.getElementById('editProductSupplierSelect');
-                    const option = document.createElement('option');
-                    option.value = data.id;
-                    option.textContent = data.name;
-                    option.selected = true;
-                    select.appendChild(option);
+        if (!productId || productId <= 0) {
+          showToast("Invalid product ID", "error");
+          return;
+        }
 
-                    this.reset();
+        const hiddenId = document.getElementById("stockOutProductId");
+        const nameInput = document.getElementById("stockOutProductName");
 
-                    setTimeout(() => {
-                        const supplierModal = bootstrap.Modal.getInstance(document.getElementById('editAddSupplierModal'));
-                        supplierModal.hide();
-                        messageBox.innerHTML = '';
-                        editProductModal.show();
-                    }, 600);
+        if (!hiddenId || !nameInput) {
+          showToast("Stock-out form elements not found", "error");
+          return;
+        }
 
-                } else {
-                    messageBox.innerHTML = `<div class="alert alert-danger">${data.message}</div>`;
-                }
-            })
-            .catch(err => {
-                document.getElementById('editSupplierMessage').innerHTML = `<div class="alert alert-danger">Server error. Check console.</div>`;
-                console.error(err);
-            });
-        });
-    }
+        hiddenId.value = String(productId);
+        nameInput.value = productName;
 
+        new bootstrap.Modal(document.getElementById("stockOutModal")).show();
+        return;
+      }
+    });
+  }
+
+  // EDIT PRODUCT
+  if (editForm) {
+    editForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(editForm);
+      formData.append("edit_product", "1");
+
+      postData("/inventory_system/http/ajax/product_actions.php", formData)
+        .then((res) => {
+          if (res.success && res.newRowHtml) {
+            const id = document.getElementById("editProductId").value;
+            const oldRow = document.getElementById(`productRow${id}`);
+
+            if (oldRow) {
+              replaceRow(oldRow, res.newRowHtml);
+              oldRow.classList.add("table-warning");
+              setTimeout(() => oldRow.classList.remove("table-warning"), 3000);
+            }
+
+            hideModal("editProductModal");
+            editForm.reset();
+            showToast(res.message || "Product updated", "success");
+            sendWS(res.event, res.type);
+          } else {
+            showToast(res.error || "Update failed", "error");
+          }
+        })
+        .catch(() => showToast("Server error!", "error"));
+    });
+  }
+
+  // RESTOCK PRODUCT
+  if (restockForm) {
+    restockForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const productId = document.getElementById("restockProductId")?.value || "";
+      const quantity = restockForm.querySelector('input[name="quantity"]')?.value || "";
+
+      if (!productId || parseInt(productId, 10) <= 0) {
+        showToast("Invalid product ID", "error");
+        return;
+      }
+
+      if (!quantity || parseInt(quantity, 10) <= 0) {
+        showToast("Invalid quantity", "error");
+        return;
+      }
+
+      const formData = new FormData(restockForm);
+      formData.set("product_id", productId);
+      formData.append("restock_product", "1");
+
+      postData("/inventory_system/http/ajax/product_actions.php", formData)
+        .then((res) => {
+          if (!res.success) {
+            return showToast(res.error || "Restock failed", "error");
+          }
+
+          const row = document.getElementById(`productRow${res.product_id}`);
+          if (row) {
+            const qtyCell = row.querySelector(".product-quantity");
+            if (qtyCell) {
+              qtyCell.textContent = res.new_quantity;
+              qtyCell.classList.add("fw-bold");
+              setTimeout(() => qtyCell.classList.remove("fw-bold"), 700);
+            }
+          }
+
+          hideModal("restockModal");
+          restockForm.reset();
+
+          const restockName = document.getElementById("restockProductName");
+          const restockId = document.getElementById("restockProductId");
+          if (restockName) restockName.value = "";
+          if (restockId) restockId.value = "";
+
+          showToast(res.message || "Product restocked", "success");
+          sendWS(res.event, res.type);
+        })
+        .catch(() => showToast("Server error!", "error"));
+    });
+  }
+
+  // STOCK OUT PRODUCT
+  if (stockOutForm) {
+    stockOutForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+
+      const productId = document.getElementById("stockOutProductId")?.value || "";
+      const quantity = stockOutForm.querySelector('input[name="quantity"]')?.value || "";
+      const reasonSelect = stockOutForm.querySelector('select[name="reason"]')?.value || "";
+      const customReason = document.getElementById("customStockOutReason")?.value.trim() || "";
+
+      if (!productId || parseInt(productId, 10) <= 0) {
+        showToast("Invalid product ID", "error");
+        return;
+      }
+
+      if (!quantity || parseInt(quantity, 10) <= 0) {
+        showToast("Invalid quantity", "error");
+        return;
+      }
+
+      let finalReason = reasonSelect;
+      if (reasonSelect === "Other" && customReason !== "") {
+        finalReason = customReason;
+      }
+
+      if (!finalReason) {
+        showToast("Please provide a reason", "error");
+        return;
+      }
+
+      const formData = new FormData(stockOutForm);
+      formData.set("product_id", productId);
+      formData.set("reason", finalReason);
+      formData.append("stockout_product", "1");
+
+      postData("/inventory_system/http/ajax/product_actions.php", formData)
+        .then((res) => {
+          if (!res.success) {
+            return showToast(res.error || "Stock out failed", "error");
+          }
+
+          const row = document.getElementById(`productRow${res.product_id}`);
+          if (row) {
+            const qtyCell = row.querySelector(".product-quantity");
+            if (qtyCell) {
+              qtyCell.textContent = res.new_quantity;
+              qtyCell.classList.add("fw-bold");
+              setTimeout(() => qtyCell.classList.remove("fw-bold"), 700);
+            }
+          }
+
+          hideModal("stockOutModal");
+          stockOutForm.reset();
+
+          const productNameInput = document.getElementById("stockOutProductName");
+          const productIdInput = document.getElementById("stockOutProductId");
+          const customReasonInput = document.getElementById("customStockOutReason");
+
+          if (productNameInput) productNameInput.value = "";
+          if (productIdInput) productIdInput.value = "";
+          if (customReasonInput) customReasonInput.value = "";
+
+          showToast(res.message || "Stock out recorded", "success");
+          sendWS(res.event, res.type);
+        })
+        .catch(() => showToast("Server error!", "error"));
+    });
+  }
 });

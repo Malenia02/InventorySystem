@@ -4,42 +4,53 @@ define('AUTH_CONTEXT', 'public');
 require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/AuthController.php';
 
-// Redirect logged-in users
+// Users table config
+$userConfig = [
+    'table'          => $table_users,
+    'col_id'         => $user_id,
+    'col_username'   => $user_username,
+    'col_password'   => $user_password,
+    'col_role'       => $user_role,
+    'col_status'     => $user_status,
+    'col_first_name' => $user_firstname,
+    'col_last_name'  => $user_lastname,
+    'col_photo'      => $user_photoPath,
+];
+
+// Activity log config
+$logConfig = [
+    'table'       => $table_activity_logs,
+    'col_user_id' => $activity_log_user_id,
+    'col_action'  => $activity_log_action,
+    'col_desc'    => $activity_log_desc,
+    'col_ip'      => $activity_log_ip,
+    'col_created' => $activity_log_created,
+];
+
+// Try secure remember-me auto-login first
+AuthController::consumeRememberMe($conn, $userConfig);
+
+// Redirect already logged-in users
 if (isset($_SESSION['user_id'])) {
     header('Location: /inventory_system/index.php');
     exit;
 }
 
-// ✅ generate CSRF token for form
-$csrf_token = AuthController::generateCSRFToken();
-
+// Generate CSRF token for form
+$csrf_token    = AuthController::generateCsrfToken();
 $error_message = '';
 
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $error_message = AuthController::login(
-        $conn,
-        $table_users,
-        $user_username,
-        $user_password,
-        $user_id,
-        $user_role,
-        $user_status,
-
-            // ✅ activity logs
-        $table_activity_logs,
-        $activity_log_user_id,
-        $activity_log_action,
-        $activity_log_desc,
-        $activity_log_ip,
-        $activity_log_created
-    );
+    $error_message = AuthController::login($conn, $userConfig, $logConfig);
 }
-?>
 
+// Re-read token after POST because failed login may rotate it
+$csrf_token = AuthController::generateCsrfToken();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
+
 <body>
 <main>
     <div class="container">
@@ -49,28 +60,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="col-lg-4 col-md-6 d-flex flex-column align-items-center justify-content-center">
 
                         <div class="d-flex justify-content-center py-4">
-                            <a href="index.php" class="logo d-flex align-items-center w-auto">
-                                <img src="assets/img/logo.png" alt="">
+                            <a href="/inventory_system/index.php" class="logo d-flex align-items-center w-auto">
+                                <img src="/inventory_system/assets/img/logo.png" alt="Logo">
                                 <span class="d-none d-lg-block">NiceAdmin</span>
                             </a>
                         </div>
 
-                        <div class="card mb-3">
+                        <div class="card mb-3 shadow-sm">
                             <div class="card-body">
                                 <div class="pt-4 pb-2">
                                     <h5 class="card-title text-center pb-0 fs-4">Login to Your Account</h5>
-                                    <p class="text-center small">Enter your username & password to login</p>
+                                    <p class="text-center small">Enter your username and password to log in</p>
                                 </div>
 
-                                <form class="row g-3 needs-validation" novalidate method="POST">
-
-                                    <!-- ✅ CSRF token -->
-                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+                                <form class="row g-3 needs-validation" novalidate method="POST" action="">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8') ?>">
 
                                     <?php if (!empty($error_message)): ?>
                                         <div class="col-12">
-                                            <div class="alert alert-danger text-center small">
-                                                <?= htmlspecialchars($error_message) ?>
+                                            <div class="alert alert-danger text-center small mb-0">
+                                                <?= htmlspecialchars($error_message, ENT_QUOTES, 'UTF-8') ?>
                                             </div>
                                         </div>
                                     <?php endif; ?>
@@ -79,20 +88,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                         <label for="yourUsername" class="form-label">Username</label>
                                         <div class="input-group has-validation">
                                             <span class="input-group-text">@</span>
-                                            <input type="text" name="username" class="form-control" id="yourUsername" required>
+                                            <input
+                                                type="text"
+                                                name="username"
+                                                class="form-control"
+                                                id="yourUsername"
+                                                required
+                                                autocomplete="username"
+                                                value="<?= htmlspecialchars($_POST['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+                                            >
                                             <div class="invalid-feedback">Please enter your username.</div>
                                         </div>
                                     </div>
 
                                     <div class="col-12">
                                         <label for="yourPassword" class="form-label">Password</label>
-                                        <input type="password" name="password" class="form-control" id="yourPassword" required>
-                                        <div class="invalid-feedback">Please enter your password!</div>
+                                        <input
+                                            type="password"
+                                            name="password"
+                                            class="form-control"
+                                            id="yourPassword"
+                                            required
+                                            autocomplete="current-password"
+                                        >
+                                        <div class="invalid-feedback">Please enter your password.</div>
                                     </div>
 
                                     <div class="col-12">
                                         <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" name="remember" value="true" id="rememberMe">
+                                            <input
+                                                class="form-check-input"
+                                                type="checkbox"
+                                                name="remember"
+                                                value="1"
+                                                id="rememberMe"
+                                                <?= !empty($_POST['remember']) ? 'checked' : '' ?>
+                                            >
                                             <label class="form-check-label" for="rememberMe">Remember me</label>
                                         </div>
                                     </div>
@@ -104,8 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             </div>
                         </div>
 
-                        <div class="credits">
-                            Designed by <a href="https://bootstrapmade.com/">BootstrapMade</a>
+                        <div class="credits text-center small">
+                            Designed by <a href="https://bootstrapmade.com/" target="_blank" rel="noopener noreferrer">BootstrapMade</a>
                         </div>
 
                     </div>
@@ -117,17 +148,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <script>
 (() => {
-    'use strict'
-    const forms = document.querySelectorAll('.needs-validation')
+    'use strict';
+    const forms = document.querySelectorAll('.needs-validation');
+
     Array.from(forms).forEach(form => {
         form.addEventListener('submit', event => {
             if (!form.checkValidity()) {
-                event.preventDefault()
-                event.stopPropagation()
+                event.preventDefault();
+                event.stopPropagation();
             }
-            form.classList.add('was-validated')
-        }, false)
-    })
+            form.classList.add('was-validated');
+        }, false);
+    });
 })();
 </script>
 

@@ -1,6 +1,16 @@
 <?php
 // File: controllers/SupplierController.php
+if (php_sapi_name() !== 'cli' && realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
 
+    $_SESSION['error_code'] = 403;
+    $_SESSION['error_message'] = 'Direct access is not allowed.';
+
+    header('Location: /inventory_system/error.php');
+    exit;
+}
 class SupplierController {
 
     // Fetch all suppliers

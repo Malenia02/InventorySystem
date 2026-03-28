@@ -1,245 +1,383 @@
 <?php
 header('Content-Type: application/json');
-ini_set('display_errors', 1);
-ini_set('display_startup_errors', 1);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
 error_reporting(E_ALL);
 
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/middleware/csrf.php';
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/ProductController.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/middleware/Middleware.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/ProductController.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/NotificationController.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/AuthController.php';
 
-$response = ['success' => false, 'error' => 'Invalid action'];
+Middleware::auth()
+    ->role('admin')
+    ->ajax()
+    ->methods(['POST'])
+    ->csrf();
 
-// ============================
-// CSRF PROTECTION
-// ============================
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
-        echo json_encode(['error' => 'Invalid CSRF token.']);
-        exit;
-    }
-}
 
 try {
+    $sessionUserId = (int)($_SESSION['user_id'] ?? 0);
+    $sessionRole   = $_SESSION['role'] ?? 'admin';
 
-    // ==========================
+    $logConfig = [
+        'table'       => $table_activity_logs,
+        'col_user_id' => $activity_log_user_id,
+        'col_action'  => $activity_log_action,
+        'col_desc'    => $activity_log_desc,
+        'col_ip'      => $activity_log_ip,
+        'col_created' => $activity_log_created,
+    ];
+
+    if ($sessionUserId <= 0) {
+        echo json_encode([
+            'success' => false,
+            'error'   => 'Unauthorized'
+        ]);
+        exit;
+    }
+
+    // ============================
     // ADD PRODUCT
-    // ==========================
-    if(isset($_POST['add_product'])) {
-        $name       = trim($_POST['product_name']);
-        $categoryId = (int)$_POST['category_id'];
-        $supplier   = (int)$_POST['supplier_id'];
-        $sku        = trim($_POST['sku'] ?? '');
-        $price      = (float)$_POST['price'];
-        $sale_price = isset($_POST['sale_price']) && $_POST['sale_price'] !== '' ? (float)$_POST['sale_price'] : null;
-        $vatable    = (int)$_POST['vatable'];
-        $quantity   = isset($_POST['initial_quantity']) ? (int)$_POST['initial_quantity'] : 0;
-        $reorder    = isset($_POST['reorder_level']) ? (int)$_POST['reorder_level'] : 5;
+    // ============================
+    if (isset($_POST['add_product'])) {
+        $name        = trim($_POST['product_name'] ?? '');
+        $categoryId  = (int)($_POST['category_id'] ?? 0);
+        $supplierId  = !empty($_POST['supplier_id']) ? (int)$_POST['supplier_id'] : null;
+        $sku         = trim($_POST['sku'] ?? '');
+        $price       = (float)($_POST['price'] ?? 0);
+        $salePrice   = (isset($_POST['sale_price']) && $_POST['sale_price'] !== '') ? (float)$_POST['sale_price'] : null;
+        $vatable     = (int)($_POST['vatable'] ?? 0);
+        $quantity    = (int)($_POST['initial_quantity'] ?? 0);
+        $reorder     = (int)($_POST['reorder_level'] ?? 5);
 
-        // Handle photo upload
-        $photoPath = ProductController::handlePhotoUpload('photo', $name);
+        try {
+            $photoPath = ProductController::handlePhotoUpload('photo', $name);
+        } catch (Exception $e) {
+            echo json_encode([
+                'success' => false,
+                'error'   => $e->getMessage()
+            ]);
+            exit;
+        }
 
-        $id = ProductController::addProduct(
+        $productId = ProductController::addProduct($conn, [
+            'name'             => $name,
+            'category_id'      => $categoryId,
+            'supplier_id'      => $supplierId,
+            'price'            => $price,
+            'sale_price'       => $salePrice,
+            'vatable'          => $vatable,
+            'initial_quantity' => $quantity,
+            'photo'            => $photoPath,
+            'sku'              => $sku,
+            'user_id'          => $sessionUserId,
+            'reorder_level'    => $reorder
+        ]);
+
+        $product = ProductController::getProductById($conn, $productId);
+
+        ob_start();
+        include $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/templates/product_row.php';
+        $newRowHtml = ob_get_clean();
+
+        NotificationController::create(
             $conn,
-            'products',
-            $name,
-            $categoryId,
-            $supplier,
-            $price,
-            $sale_price,
-            $vatable,
-            $photoPath,
-            $sku
+            $sessionUserId,
+            'admin',
+            'product',
+            'Product Added',
+            "{$name} was added to inventory.",
+            'bi-box-seam',
+            'text-success',
+            '/inventory_system/product_management/manage_product.php'
         );
 
-        // Fetch full product info with category & supplier names
-        $stmt = $conn->prepare("SELECT p.*, c.category_name, s.supplier_name 
-                                FROM products p 
-                                LEFT JOIN categories c ON p.category_id = c.category_id
-                                LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
-                                WHERE p.product_id = :id");
-        $stmt->execute(['id' => $id]);
-        $product = $stmt->fetch(PDO::FETCH_ASSOC);
+        AuthController::logActivity(
+            $conn,
+            $logConfig,
+            $sessionUserId,
+            'product_add',
+            "Added product: {$name}" . ($sku !== '' ? " (SKU: {$sku})" : '')
+        );
 
-        // Build new row HTML
-        ob_start(); ?>
-<tr id="productRow<?= $product['product_id'] ?>">
-    <td>#</td>
-    <td class="text-center">
-        <img src="<?= $product['photo'] ?: '/inventory_system/assets/uploads/products/images.jpeg' ?>" style="width:50px;height:50px;object-fit:cover;">
-    </td>
-    <td><?= htmlspecialchars($product['product_name'] ?? '') ?></td>
-    <td><?= htmlspecialchars($product['category_name'] ?? '') ?></td>
-    <td><?= htmlspecialchars($product['supplier_name'] ?? '') ?></td>
-    <td><?= htmlspecialchars($product['sku'] ?? '') ?></td>
-    <td><?= $product['quantity'] ?? 0 ?></td>
-    <td>₱<?= number_format($product['price'] ?? 0, 2) ?></td>
-    <td><?= isset($product['sale_price']) ? '₱'.number_format($product['sale_price'], 2) : '-' ?></td>
-    <td><?= !empty($product['vatable']) ? 'Yes' : 'No' ?></td>
-    <td><?= $product['reorder_level'] ?? 5 ?></td>
-    <td>
-        <span class="badge <?= ($product['status'] ?? 'inactive') === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-            <?= ucfirst($product['status'] ?? 'inactive') ?>
-        </span>
-    </td>
-    <td>
-        <button class="btn btn-sm btn-warning editProductBtn" 
-                data-id="<?= $product['product_id'] ?>"
-                data-name="<?= htmlspecialchars($product['product_name'] ?? '') ?>"
-                data-category="<?= $product['category_id'] ?? 0 ?>"
-                data-supplier="<?= $product['supplier_id'] ?? 0 ?>"
-                data-sku="<?= htmlspecialchars($product['sku'] ?? '') ?>"
-                data-quantity="<?= $product['quantity'] ?? 0 ?>"
-                data-price="<?= $product['price'] ?? 0 ?>"
-                data-sale_price="<?= $product['sale_price'] ?? '' ?>"
-                data-vatable="<?= $product['vatable'] ?? 0 ?>"
-                data-reorder="<?= $product['reorder_level'] ?? 5 ?>"
-                data-photo="<?= $product['photo'] ?? '' ?>"
-                data-bs-toggle="modal" data-bs-target="#editProductModal">
-            <i class="bi bi-pencil-square"></i>
-        </button>
-        <button class="btn btn-sm btn-danger toggleProductStatusBtn"
-                data-id="<?= $product['product_id'] ?>" data-status="deactivate">
-            <i class="bi bi-slash-circle"></i>
-        </button>
-    </td>
-</tr>
-<?php
-        $response = ['success' => 'Product added successfully!', 'newProductRow' => ob_get_clean()];
+        echo json_encode([
+            'success'    => true,
+            'message'    => "{$name} added successfully!",
+            'event'      => 'notification_update',
+            'type'       => 'product',
+            'newRowHtml' => $newRowHtml
+        ]);
+        exit;
     }
 
-    // ==========================
+    // ============================
     // EDIT PRODUCT
-    // ==========================
+    // ============================
     if (isset($_POST['edit_product'])) {
+        $id        = (int)($_POST['product_id'] ?? 0);
+        $name      = trim($_POST['product_name'] ?? '');
+        $category  = (int)($_POST['category_id'] ?? 0);
+        $supplier  = !empty($_POST['supplier_id']) ? (int)$_POST['supplier_id'] : null;
+        $sku       = trim($_POST['sku'] ?? '');
+        $price     = (float)($_POST['price'] ?? 0);
+        $salePrice = (isset($_POST['sale_price']) && $_POST['sale_price'] !== '') ? (float)$_POST['sale_price'] : null;
+        $vatable   = (int)($_POST['vatable'] ?? 0);
+        $reorder   = (int)($_POST['reorder_level'] ?? 5);
 
-        $id         = (int)$_POST['product_id'];
-        $name       = trim($_POST['product_name']);
-        $category   = (int)$_POST['category_id'];
-        $supplier   = (!empty($_POST['supplier_id'])) ? (int)$_POST['supplier_id'] : null;
-        $sku        = trim($_POST['sku'] ?? '');
-        $price      = (float)$_POST['price'];
-        $sale_price = ($_POST['sale_price'] !== '') ? (float)$_POST['sale_price'] : null;
-        $vatable    = (int)$_POST['vatable'];
-        $reorder    = isset($_POST['reorder_level']) ? (int)$_POST['reorder_level'] : 5;
-
-        // Validate supplier exists
-        if ($supplier !== null) {
-            $checkSupplier = $conn->prepare("SELECT supplier_id FROM suppliers WHERE supplier_id = :supplier_id LIMIT 1");
-            $checkSupplier->execute([':supplier_id' => $supplier]);
-            if (!$checkSupplier->fetch()) {
-                echo json_encode(['success' => false, 'message' => 'Selected supplier does not exist.']);
-                exit;
-            }
+        $old = ProductController::getProductById($conn, $id);
+        if (!$old) {
+            throw new Exception('Product not found.');
         }
 
-        // Handle photo upload
-        $photoPath = !empty($_FILES['photo']['name']) ? ProductController::handlePhotoUpload('photo', $name) : null;
-
-        // UPDATE PRODUCT including SKU
-        $sql = "
-            UPDATE products SET
-                product_name   = :name,
-                category_id    = :category,
-                supplier_id    = :supplier,
-                sku            = :sku,
-                price          = :price,
-                sale_price     = :sale_price,
-                vatable        = :vatable,
-                reorder_level  = :reorder
-                " . ($photoPath ? ", photo = :photo" : "") . "
-            WHERE product_id = :id
-        ";
-
-        $stmt = $conn->prepare($sql);
-        $params = [
-            ':name'       => $name,
-            ':category'   => $category,
-            ':supplier'   => $supplier,
-            ':sku'        => $sku,
-            ':price'      => $price,
-            ':sale_price' => $sale_price,
-            ':vatable'    => $vatable,
-            ':reorder'    => $reorder,
-            ':id'         => $id
-        ];
-        if ($photoPath) $params[':photo'] = $photoPath;
-        $stmt->execute($params);
-
-        // Fetch updated product and return row HTML
-        $stmt = $conn->prepare("
-            SELECT p.*, c.category_name, s.supplier_name
-            FROM products p
-            LEFT JOIN categories c ON p.category_id = c.category_id
-            LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
-            WHERE p.product_id = :id
-        ");
-        $stmt->execute([':id' => $id]);
-        $product = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        ob_start(); ?>
-<tr id="productRow<?= $product['product_id'] ?>">
-    <td>#</td>
-    <td class="text-center">
-        <img src="<?= $product['photo'] ?: '/inventory_system/assets/uploads/products/images.jpeg' ?>" style="width:50px;height:50px;object-fit:cover;">
-    </td>
-    <td><?= htmlspecialchars($product['product_name'] ?? '') ?></td>
-    <td><?= htmlspecialchars($product['category_name'] ?? '') ?></td>
-    <td><?= htmlspecialchars(string: $product['supplier_name'] ?? '') ?></td>
-    <td><?= htmlspecialchars($product['sku'] ?? '') ?></td>
-    <td><?= $product['quantity'] ?? 0 ?></td>
-    <td>₱<?= number_format($product['price'] ?? 0, 2) ?></td>
-    <td><?= isset($product['sale_price']) ? '₱'.number_format($product['sale_price'], 2) : '-' ?></td>
-    <td><?= !empty($product['vatable']) ? 'Yes' : 'No' ?></td>
-    <td><?= $product['reorder_level'] ?? 5 ?></td>
-    <td>
-        <span class="badge <?= ($product['status'] ?? 'inactive') === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-            <?= ucfirst($product['status'] ?? 'inactive') ?>
-        </span>
-    </td>
-    <td>
-        <button class="btn btn-sm btn-warning editProductBtn"
-                data-id="<?= $product['product_id'] ?>"
-                data-name="<?= htmlspecialchars($product['product_name'] ?? '') ?>"
-                data-category="<?= $product['category_id'] ?? 0 ?>"
-                data-supplier="<?= $product['supplier_id'] ?? 0 ?>"
-                data-sku="<?= htmlspecialchars($product['sku'] ?? '') ?>"
-                data-quantity="<?= $product['quantity'] ?? 0 ?>"
-                data-price="<?= $product['price'] ?? 0 ?>"
-                data-sale_price="<?= $product['sale_price'] ?? '' ?>"
-                data-vatable="<?= $product['vatable'] ?? 0 ?>"
-                data-reorder="<?= $product['reorder_level'] ?? 5 ?>"
-                data-photo="<?= $product['photo'] ?? '' ?>"
-                data-bs-toggle="modal" data-bs-target="#editProductModal">
-            <i class="bi bi-pencil-square"></i>
-        </button>
-        <button class="btn btn-sm <?= ($product['status'] ?? 'inactive') === 'active' ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
-                data-id="<?= $product['product_id'] ?>"
-                data-status="<?= ($product['status'] ?? 'inactive') === 'active' ? 'deactivate' : 'activate' ?>">
-            <?= ($product['status'] ?? 'inactive') === 'active' ? '<i class="bi bi-slash-circle"></i>' : '<i class="bi bi-check-circle"></i>' ?>
-        </button>
-    </td>
-</tr>
-<?php
-        $response = ['success' => 'Product updated successfully!', 'updatedRowHtml' => ob_get_clean()];
-    }
-
-    // ==========================
-    // TOGGLE PRODUCT STATUS
-    // ==========================
-    if(isset($_POST['toggle_id'])) {
-        $id = (int)$_POST['toggle_id'];
-        $newStatus = ProductController::toggleStatus($conn, 'products', $id);
-
-        if(!$newStatus) {
-            $response = ['error' => 'Product not found'];
-        } else {
-            $response = ['success' => "Status updated to $newStatus", 'new_status' => $newStatus];
+        $photoPath = null;
+        if (!empty($_FILES['photo']['name'])) {
+            $photoPath = ProductController::handlePhotoUpload('photo', $name);
         }
+
+        ProductController::updateProduct($conn, $id, [
+            'name'          => $name,
+            'category_id'   => $category,
+            'supplier_id'   => $supplier,
+            'sku'           => $sku,
+            'price'         => $price,
+            'sale_price'    => $salePrice,
+            'vatable'       => $vatable,
+            'reorder_level' => $reorder,
+            'photo'         => $photoPath
+        ]);
+
+        $product = ProductController::getProductById($conn, $id);
+
+        $changes = [];
+        if ($old['product_name'] !== $name) $changes[] = "Name: {$old['product_name']} → {$name}";
+        if ((string)$old['sku'] !== (string)$sku) $changes[] = "SKU: {$old['sku']} → {$sku}";
+        if ((float)$old['price'] !== $price) $changes[] = "Price: {$old['price']} → {$price}";
+        if ((string)$old['sale_price'] !== (string)$salePrice) $changes[] = "Sale Price: {$old['sale_price']} → {$salePrice}";
+        if ((int)$old['vatable'] !== $vatable) $changes[] = "Vatable: {$old['vatable']} → {$vatable}";
+        if ((int)$old['reorder_level'] !== $reorder) $changes[] = "Reorder Level: {$old['reorder_level']} → {$reorder}";
+        if ((int)$old['category_id'] !== $category) $changes[] = "Category: {$old['category_name']} → {$product['category_name']}";
+        if ((int)$old['supplier_id'] !== (int)$supplier) $changes[] = "Supplier: {$old['supplier_name']} → {$product['supplier_name']}";
+
+        ob_start();
+        include $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/templates/product_row.php';
+        $newRowHtml = ob_get_clean();
+
+        $message = !empty($changes)
+            ? "<b>{$old['product_name']}</b> was updated:<br>" . implode("<br>", $changes)
+            : "No changes were made.";
+
+        NotificationController::create(
+            $conn,
+            $sessionUserId,
+            'admin',
+            'product',
+            'Product Updated',
+            "{$name} was updated.",
+            'bi-pencil-square',
+            'text-warning',
+            '/inventory_system/product_management/manage_product.php'
+        );
+
+        AuthController::logActivity(
+            $conn,
+            $logConfig,
+            $sessionUserId,
+            'product_update',
+            !empty($changes)
+                ? "Updated product {$old['product_name']}: " . implode(' | ', $changes)
+                : "Opened update on {$old['product_name']} but no changes were made"
+        );
+
+        echo json_encode([
+            'success'    => true,
+            'message'    => $message,
+            'event'      => 'notification_update',
+            'type'       => 'product',
+            'newRowHtml' => $newRowHtml
+        ]);
+        exit;
     }
 
-} catch(Exception $e) {
-    $response = ['error' => $e->getMessage()];
+    // ============================
+    // TOGGLE STATUS
+    // ============================
+    if (isset($_POST['toggle_id'])) {
+        $id = (int)($_POST['toggle_id'] ?? 0);
+
+        $product = ProductController::getProductById($conn, $id);
+        if (!$product) {
+            throw new Exception('Product not found.');
+        }
+
+        $newStatus = ProductController::toggleStatus($conn, $id);
+        $product   = ProductController::getProductById($conn, $id);
+
+        ob_start();
+        include $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/templates/product_row.php';
+        $newRowHtml = ob_get_clean();
+
+        NotificationController::create(
+            $conn,
+            $sessionUserId,
+            'admin',
+            'product_status',
+            'Product Status Changed',
+            $product['product_name'] . ' status changed to ' . ucfirst($newStatus),
+            'bi-arrow-repeat',
+            'text-info',
+            '/inventory_system/product_management/manage_product.php'
+        );
+
+        AuthController::logActivity(
+            $conn,
+            $logConfig,
+            $sessionUserId,
+            'product_status_update',
+            $product['product_name'] . ' status changed to ' . ucfirst($newStatus)
+        );
+
+        echo json_encode([
+            'success'    => true,
+            'message'    => $product['product_name'] . ' status changed to ' . ucfirst($newStatus),
+            'event'      => 'notification_update',
+            'type'       => 'product_status',
+            'new_status' => $newStatus,
+            'newRowHtml' => $newRowHtml
+        ]);
+        exit;
+    }
+
+    // ============================
+    // RESTOCK
+    // ============================
+    if (isset($_POST['restock_product'])) {
+        $productId = (int)($_POST['product_id'] ?? 0);
+        $quantity  = (int)($_POST['quantity'] ?? 0);
+
+        if ($productId <= 0 || $quantity <= 0) {
+            echo json_encode([
+                'success' => false,
+                'error'   => 'Invalid product or quantity.'
+            ]);
+            exit;
+        }
+
+        $product = ProductController::getProductById($conn, $productId);
+        if (!$product || $product['status'] !== 'active') {
+            echo json_encode([
+                'success' => false,
+                'error'   => 'Product not found or inactive. Refresh page.'
+            ]);
+            exit;
+        }
+
+        ProductController::restockProduct($conn, $productId, $quantity, $sessionUserId);
+        $updated = ProductController::getProductById($conn, $productId);
+
+        NotificationController::create(
+            $conn,
+            $sessionUserId,
+            'admin',
+            'stock_in',
+            'Product Restocked',
+            $product['product_name'] . " (+{$quantity}) = {$updated['quantity']} units",
+            'bi-box-arrow-in-down',
+            'text-success',
+            '/inventory_system/product_management/manage_product.php'
+        );
+
+        AuthController::logActivity(
+            $conn,
+            $logConfig,
+            $sessionUserId,
+            'product_restock',
+            $product['product_name'] . " restocked by {$quantity} unit(s). New quantity: {$updated['quantity']}"
+        );
+
+        echo json_encode([
+            'success'      => true,
+            'message'      => $product['product_name'] . " (+{$quantity}) = {$updated['quantity']} units",
+            'event'        => 'notification_update',
+            'type'         => 'stock_in',
+            'new_quantity' => $updated['quantity'],
+            'product_id'   => $productId
+        ]);
+        exit;
+    }
+
+    // ============================
+    // STOCK OUT
+    // ============================
+    if (isset($_POST['stockout_product'])) {
+        $productId = (int)($_POST['product_id'] ?? 0);
+        $quantity  = (int)($_POST['quantity'] ?? 0);
+        $reason    = trim($_POST['reason'] ?? '');
+
+        if ($productId <= 0 || $quantity <= 0) {
+            echo json_encode([
+                'success' => false,
+                'error'   => 'Invalid product or quantity.'
+            ]);
+            exit;
+        }
+
+        $product = ProductController::getProductById($conn, $productId);
+        if (!$product || $product['status'] !== 'active') {
+            echo json_encode([
+                'success' => false,
+                'error'   => 'Product not found or inactive.'
+            ]);
+            exit;
+        }
+
+        ProductController::stockOutProduct($conn, $productId, $quantity, $reason, $sessionUserId);
+        $updated = ProductController::getProductById($conn, $productId);
+
+        NotificationController::create(
+            $conn,
+            $sessionUserId,
+            'admin',
+            'stock_out',
+            'Stock Out',
+            $product['product_name'] . " (-{$quantity}) = {$updated['quantity']} units",
+            'bi-box-arrow-up',
+            'text-danger',
+            '/inventory_system/product_management/manage_product.php'
+        );
+
+        AuthController::logActivity(
+            $conn,
+            $logConfig,
+            $sessionUserId,
+            'product_stock_out',
+            $product['product_name'] . " stock-out by {$quantity} unit(s)" . ($reason !== '' ? " | Reason: {$reason}" : '') . ". New quantity: {$updated['quantity']}"
+        );
+
+        echo json_encode([
+            'success'      => true,
+            'message'      => $product['product_name'] . " (-{$quantity}) = {$updated['quantity']} units",
+            'event'        => 'notification_update',
+            'type'         => 'stock_out',
+            'new_quantity' => $updated['quantity'],
+            'product_id'   => $productId
+        ]);
+        exit;
+    }
+
+    echo json_encode([
+        'success' => false,
+        'error'   => 'Invalid action'
+    ]);
+    exit;
+
+} catch (\Throwable $e) {
+    error_log('[product_actions ERROR] ' . $e->getMessage());
+
+    echo json_encode([
+        'success' => false,
+        'error'   => 'Internal server error'
+    ]);
+    exit;
 }
-
-echo json_encode($response);
