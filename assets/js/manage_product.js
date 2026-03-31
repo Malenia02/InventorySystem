@@ -13,6 +13,12 @@ function showToast(message, icon = "success") {
   Toast.fire({ icon, title: message });
 }
 
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
 function sendWS(event = "notification_update", type = "general") {
   if (window.socket && window.socket.readyState === WebSocket.OPEN) {
     window.socket.send(JSON.stringify({ event, type }));
@@ -28,13 +34,19 @@ function postData(url, formData) {
 
   return fetch(url, {
     method: "POST",
-    headers:{
+    headers: {
       "X-Requested-With": "XMLHttpRequest"
     },
     body: formData
   }).then(async (res) => {
-    const data = await res.json();
-    return data;
+    const text = await res.text();
+
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      console.error("Invalid JSON response:", text);
+      throw new Error("Server returned invalid JSON.");
+    }
   });
 }
 
@@ -104,6 +116,7 @@ document.getElementById("addProductModal")?.addEventListener("hidden.bs.modal", 
     form.reset();
     const preview = document.getElementById("addProductPhotoPreview");
     if (preview) preview.src = "/inventory_system/assets/img/card.jpg";
+    document.getElementById("addProductCategory")?.dispatchEvent(new Event("change"));
   }
 });
 
@@ -113,6 +126,7 @@ document.getElementById("editProductModal")?.addEventListener("hidden.bs.modal",
     form.reset();
     const preview = document.getElementById("editProductPhotoPreview");
     if (preview) preview.src = "/inventory_system/assets/img/card.jpg";
+    document.getElementById("editProductCategory")?.dispatchEvent(new Event("change"));
   }
 });
 
@@ -126,6 +140,47 @@ document.addEventListener("DOMContentLoaded", () => {
   const editForm = document.getElementById("editProductForm");
   const restockForm = document.getElementById("restockForm");
   const stockOutForm = document.getElementById("stockOutForm");
+
+  const supplierForm = document.getElementById("supplierForm");
+  const supplierMessage = document.getElementById("supplierMessage");
+  const supplierModalEl = document.getElementById("supplierModal");
+  const saveSupplierBtn = document.getElementById("saveSupplierBtn");
+  const addCategorySelect = document.getElementById("addProductCategory");
+  const addSubcategorySelect = document.getElementById("addProductSubcategory");
+  const editCategorySelect = document.getElementById("editProductCategory");
+  const editSubcategorySelect = document.getElementById("editProductSubcategory");
+
+  function cacheSubcategoryOptions(select) {
+    if (!select) return [];
+
+    return Array.from(select.options).map((option) => ({
+      value: option.value,
+      label: option.textContent,
+      categoryId: option.dataset.categoryId || ""
+    }));
+  }
+
+  const addSubcategoryOptions = cacheSubcategoryOptions(addSubcategorySelect);
+  const editSubcategoryOptions = cacheSubcategoryOptions(editSubcategorySelect);
+
+  function populateSubcategorySelect(select, options, categoryId, selectedValue = "") {
+    if (!select) return;
+
+    const normalizedCategory = String(categoryId || "");
+    const normalizedSelected = String(selectedValue || "");
+    const filteredOptions = options.filter((option) => (
+      option.value === "" || option.categoryId === normalizedCategory
+    ));
+
+    select.innerHTML = filteredOptions.map((option) => {
+      const selected = option.value === normalizedSelected ? " selected" : "";
+      return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.label)}</option>`;
+    }).join("");
+
+    if (!Array.from(select.options).some((option) => option.value === normalizedSelected)) {
+      select.value = "";
+    }
+  }
 
   if (table && window.simpleDatatables && simpleDatatables.DataTable) {
     new simpleDatatables.DataTable(table, {
@@ -153,6 +208,136 @@ document.addEventListener("DOMContentLoaded", () => {
 
     oldRow.innerHTML = newRow.innerHTML;
     updateRowNumbers();
+  }
+
+  function showSupplierMessage(message, type = "success") {
+    if (!supplierMessage) return;
+
+    supplierMessage.innerHTML = `
+      <div class="alert alert-${type} alert-dismissible fade show mb-0" role="alert">
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    `;
+  }
+
+  function clearSupplierMessage() {
+    if (supplierMessage) {
+      supplierMessage.innerHTML = "";
+    }
+  }
+
+  populateSubcategorySelect(
+    addSubcategorySelect,
+    addSubcategoryOptions,
+    addCategorySelect?.value || "",
+    addSubcategorySelect?.value || ""
+  );
+  populateSubcategorySelect(
+    editSubcategorySelect,
+    editSubcategoryOptions,
+    editCategorySelect?.value || "",
+    editSubcategorySelect?.value || ""
+  );
+
+  addCategorySelect?.addEventListener("change", () => {
+    populateSubcategorySelect(
+      addSubcategorySelect,
+      addSubcategoryOptions,
+      addCategorySelect.value,
+      ""
+    );
+  });
+
+  editCategorySelect?.addEventListener("change", () => {
+    populateSubcategorySelect(
+      editSubcategorySelect,
+      editSubcategoryOptions,
+      editCategorySelect.value,
+      editSubcategorySelect?.value || ""
+    );
+  });
+
+  if (supplierModalEl) {
+    supplierModalEl.addEventListener("shown.bs.modal", () => {
+      clearSupplierMessage();
+      document.getElementById("supplier_name")?.focus();
+    });
+
+    supplierModalEl.addEventListener("hidden.bs.modal", () => {
+      clearSupplierMessage();
+
+      if (supplierForm) {
+        supplierForm.reset();
+      }
+
+      if (saveSupplierBtn) {
+        saveSupplierBtn.disabled = false;
+        saveSupplierBtn.innerHTML = '<i class="bi bi-save me-1"></i>Add Supplier';
+      }
+    });
+  }
+
+  // ADD SUPPLIER
+  if (supplierForm) {
+    supplierForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      clearSupplierMessage();
+
+      if (saveSupplierBtn) {
+        saveSupplierBtn.disabled = true;
+        saveSupplierBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+      }
+
+      const formData = new FormData(supplierForm);
+
+      postData("/inventory_system/http/ajax/supplier_actions.php", formData)
+        .then((res) => {
+          if (!res.success) {
+            showSupplierMessage(res.error || "Failed to add supplier", "danger");
+            return;
+          }
+
+          const supplierId = String(res.supplier_id || "");
+          const supplierName = res.supplier_name || "";
+
+          if (supplierId && supplierName) {
+            const selects = document.querySelectorAll('select[name="supplier_id"]');
+
+            selects.forEach((select) => {
+              let existingOption = Array.from(select.options).find(
+                (option) => option.value === supplierId
+              );
+
+              if (!existingOption) {
+                existingOption = new Option(supplierName, supplierId, true, true);
+                select.add(existingOption);
+              } else {
+                select.value = supplierId;
+              }
+
+              select.dispatchEvent(new Event("change"));
+            });
+          }
+
+          showSupplierMessage(res.message || "Supplier added successfully", "success");
+          showToast(res.message || "Supplier added successfully", "success");
+
+          setTimeout(() => {
+            hideModal("supplierModal");
+          }, 900);
+        })
+        .catch((err) => {
+          console.error(err);
+          showSupplierMessage("Server error!", "danger");
+        })
+        .finally(() => {
+          if (saveSupplierBtn) {
+            saveSupplierBtn.disabled = false;
+            saveSupplierBtn.innerHTML = '<i class="bi bi-save me-1"></i>Add Supplier';
+          }
+        });
+    });
   }
 
   // ADD PRODUCT
@@ -206,6 +391,13 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("editProductName").value = d.name || "";
         document.getElementById("editProductSku").value = d.sku || "";
         document.getElementById("editProductCategory").value = d.category || "";
+        populateSubcategorySelect(
+          editSubcategorySelect,
+          editSubcategoryOptions,
+          d.category || "",
+          d.subcategory || ""
+        );
+        document.getElementById("editProductSubcategory").value = d.subcategory || "";
         document.getElementById("editProductSupplierSelect").value = d.supplier || "";
         document.getElementById("editProductPrice").value = d.price || 0;
         document.getElementById("editProductSalePrice").value = d.sale_price || "";
@@ -221,6 +413,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // TOGGLE STATUS
       if (toggleBtn) {
         const id = parseInt(toggleBtn.dataset.id, 10);
+        const productName = toggleBtn.dataset.name || "this product";
         const currentStatus = toggleBtn.dataset.status || "";
         const isCurrentlyActive = currentStatus === "active";
         const newAction = isCurrentlyActive ? "Deactivate" : "Activate";
@@ -231,8 +424,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         Swal.fire({
-          title: `${newAction} Product?`,
-          text: "You can change it back later.",
+          title: `${newAction} ${productName}?`,
+          html: `
+            <p class="mb-1">You're about to <strong>${newAction.toLowerCase()}</strong> this product.</p>
+            <small class="text-muted">You can change it back later anytime.</small>
+          `,
           icon: "warning",
           showCancelButton: true,
           confirmButtonColor: "#3085d6",
@@ -269,10 +465,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         : '<i class="bi bi-check-circle"></i>';
 
                     btn.dataset.status = res.new_status;
+                    btn.dataset.name = productName;
                   }
                 }
 
-                showToast(res.message || "Status updated", "success");
+                const successMessage = res.message || `${productName} is now ${res.new_status}.`;
+                showToast(`All set. ${successMessage}`, "success");
                 sendWS(res.event, res.type);
               } else {
                 showToast(res.error || "Action failed", "error");

@@ -1,17 +1,24 @@
 <?php
-// Load config first (this defines $conn)
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/config/config.php';
+declare(strict_types=1);
+
+require_once __DIR__ . '/../bootstrap/app.php';
+require_once __DIR__ . '/../middleware/Middleware.php';
 
 // Load controllers after config
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/CategoryController.php';
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/ProductController.php';
+require_once __DIR__ . '/../controllers/CategoryController.php';
+require_once __DIR__ . '/../controllers/SubcategoryController.php';
+require_once __DIR__ . '/../controllers/ProductController.php';
+require_once __DIR__ . '/../controllers/PosConfigController.php';
 
-if (!isset($conn)) {
-    die('❌ $conn is NOT defined. config.php did not load correctly.');
-}
+Middleware::auth()->role(['admin','cashier']);
 
-$categories = CategoryController::all($conn, $table_categories);
+$categories = CategoryController::all($conn);
+$subcategories = SubcategoryController::all($conn, null, 'active');
 $products   = ProductController::activeProductsForPOS($conn);
+$posConfig  = PosConfigController::get($conn);
+$vatRate    = (float) ($posConfig['tax_rate'] ?? 12);
+$defaultCashier = trim((string) ($_SESSION['first_name'] ?? '') . ' ' . (string) ($_SESSION['last_name'] ?? ''));
+$defaultCashier = $defaultCashier !== '' ? $defaultCashier : (string) ($_SESSION['username'] ?? 'Cashier');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -20,7 +27,7 @@ $products   = ProductController::activeProductsForPOS($conn);
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>POS — Point of Sale</title>
 
-<?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
+<?php require __DIR__ . '/../components/head.php'; ?>
 
 <!-- Google Fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -34,8 +41,8 @@ $products   = ProductController::activeProductsForPOS($conn);
 <body>
 
 <?php
-require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/header.php';
-require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
+require __DIR__ . '/../components/header.php';
+require __DIR__ . '/../components/sidebar.php';
 ?>
 
 <main id="main" class="main">
@@ -77,6 +84,16 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
       </div>
     </div>
 
+    <div class="subcategory-section is-hidden" id="subcategorySection">
+      <div class="subcategory-bar-wrapper">
+        <button class="cat-arrow" id="subcategoryPrev">&#8592;</button>
+        <div class="subcategory-bar" id="subcategoryBar">
+          <button class="subcat-btn active" data-id="all">All</button>
+        </div>
+        <button class="cat-arrow" id="subcategoryNext">&#8594;</button>
+      </div>
+    </div>
+
     <!-- Product grid -->
     <div class="product-area">
       <div class="product-grid" id="product-grid">
@@ -94,6 +111,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
                data-price="<?= $price ?>"
                data-vat="<?= $p['vatable'] ?>"
                data-category="<?= $p['category_id'] ?>"
+               data-subcategory="<?= (int) ($p['subcategory_id'] ?? 0) ?>"
                data-qty="<?= $qty ?>"
                data-reorder="<?= $reorder ?>"
                data-stock="<?= $qty ?>">
@@ -110,7 +128,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
                  alt="<?= htmlspecialchars($p['product_name']) ?>">
             <div class="card-body">
               <div class="card-name"><?= htmlspecialchars($p['product_name']) ?></div>
-              <div class="card-price">₱<?= number_format($price, 2) ?></div>
+              <div class="card-price">₱<?= number_format((float)$price, 2) ?></div>
               <div class="qty-row">
                 <button class="qty-btn decrease">−</button>
                 <span class="qty-display qty">0</span>
@@ -160,7 +178,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
         <span class="value discount" id="total-discount">−₱0.00</span>
       </div>
       <div class="summary-line">
-        <span class="label">VAT (12%)</span>
+        <span class="label">VAT (<?= htmlspecialchars(number_format($vatRate, 2), ENT_QUOTES, 'UTF-8') ?>%)</span>
         <span class="value" id="vat">₱0.00</span>
       </div>
 
@@ -200,7 +218,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
         <span>Discount</span><span id="co-discount" style="color:var(--accent-red);">−₱0.00</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:6px;">
-        <span>VAT (12%)</span><span id="co-vat">₱0.00</span>
+        <span>VAT (<?= htmlspecialchars(number_format($vatRate, 2), ENT_QUOTES, 'UTF-8') ?>%)</span><span id="co-vat">₱0.00</span>
       </div>
       <div style="height:1px;background:var(--border);margin:8px 0;"></div>
       <div style="display:flex;justify-content:space-between;align-items:baseline;">
@@ -278,19 +296,19 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
 
     <div class="print-field">
       <label>Store Name</label>
-      <input type="text" id="pStoreName" placeholder="e.g. My Store">
+      <input type="text" id="pStoreName" placeholder="e.g. My Store" value="<?= htmlspecialchars((string) ($posConfig['store_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
     </div>
     <div class="print-field">
       <label>Address</label>
-      <input type="text" id="pAddress" placeholder="e.g. 123 Main St, Manila">
+      <input type="text" id="pAddress" placeholder="e.g. 123 Main St, Manila" value="<?= htmlspecialchars((string) ($posConfig['store_address'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
     </div>
     <div class="print-field">
       <label>Phone</label>
-      <input type="text" id="pPhone" placeholder="e.g. 09XX-XXX-XXXX">
+      <input type="text" id="pPhone" placeholder="e.g. 09XX-XXX-XXXX" value="<?= htmlspecialchars((string) ($posConfig['store_phone'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
     </div>
     <div class="print-field">
       <label>Cashier Name</label>
-      <input type="text" id="pCashier" placeholder="e.g. Juan Dela Cruz">
+      <input type="text" id="pCashier" placeholder="e.g. Juan Dela Cruz" value="<?= htmlspecialchars($defaultCashier, ENT_QUOTES, 'UTF-8') ?>">
     </div>
 
     <div class="print-modal-divider"></div>
@@ -305,9 +323,33 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
   </div>
 </div>
 
-<?php require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/js_script.php'; ?>
+<?php require __DIR__ . '/../components/js_script.php'; ?>
 
 <script>
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+const POS_CONFIG = {
+    storeName: <?= json_encode((string) ($posConfig['store_name'] ?? 'My Store')) ?>,
+    address: <?= json_encode((string) ($posConfig['store_address'] ?? '')) ?>,
+    phone: <?= json_encode((string) ($posConfig['store_phone'] ?? '')) ?>,
+    cashier: <?= json_encode($defaultCashier) ?>,
+    vatRate: <?= json_encode($vatRate) ?>,
+};
+const POS_SUBCATEGORIES = <?= json_encode(array_values(array_map(static function (array $subcategory): array {
+    return [
+        'subcategory_id' => (int) ($subcategory['subcategory_id'] ?? 0),
+        'category_id' => (int) ($subcategory['category_id'] ?? 0),
+        'subcategory_name' => (string) ($subcategory['subcategory_name'] ?? ''),
+    ];
+}, $subcategories)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
 // ================================================================
 //  CLOCK
 // ================================================================
@@ -402,14 +444,14 @@ function renderCart() {
             const lineTotal       = qty * discountedPrice;
             subtotal      += lineTotal;
             totalDiscount += qty * (price - discountedPrice);
-            if (vatable) totalVAT += lineTotal * 0.12;
+            if (vatable) totalVAT += lineTotal * (Number(POS_CONFIG.vatRate || 12) / 100);
             itemCount     += qty;
 
             const div = document.createElement('div');
             div.className = 'cart-item';
             div.innerHTML = `
                 <div class="cart-item-row">
-                    <span class="cart-item-name">${item}</span>
+                    <span class="cart-item-name">${escapeHtml(item)}</span>
                     <span class="cart-item-line-total">₱${lineTotal.toFixed(2)}</span>
                 </div>
                 <div class="cart-item-meta">
@@ -472,6 +514,7 @@ function syncCardQty(name, qty) {
 //  STATE
 // ================================================================
 let activeCategoryId = 'all';
+let activeSubcategoryId = 'all';
 let searchTerm       = '';
 let currentPage      = 1;
 
@@ -492,20 +535,107 @@ sidebarObserver.observe(document.body, { attributes: true, attributeFilter: ['cl
 // ================================================================
 //  CATEGORY FILTER
 // ================================================================
-const catBtns = document.querySelectorAll('.cat-btn');
-catBtns.forEach(btn => {
-    btn.addEventListener('click', () => {
-        catBtns.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        activeCategoryId = btn.dataset.id;
-        currentPage = 1;
-        applyFilters();
+const categoryBar = document.getElementById('categoryBar');
+const subcategoryBar = document.getElementById('subcategoryBar');
+const subcategorySection = document.getElementById('subcategorySection');
+const subcategoryPrev = document.getElementById('subcategoryPrev');
+const subcategoryNext = document.getElementById('subcategoryNext');
+
+function setActiveButton(container, selector, activeId) {
+    container.querySelectorAll(selector).forEach((button) => {
+        button.classList.toggle('active', button.dataset.id === activeId);
     });
+}
+
+function renderSubcategoryBar() {
+    if (activeCategoryId === 'all') {
+        activeSubcategoryId = 'all';
+        subcategoryBar.innerHTML = '<button class="subcat-btn active" data-id="all">All</button>';
+        subcategoryBar.scrollLeft = 0;
+        subcategorySection.classList.add('is-hidden');
+        return;
+    }
+
+    const scopedSubcategories = POS_SUBCATEGORIES.filter((subcategory) => (
+        String(subcategory.category_id) === activeCategoryId
+    ));
+
+    if (scopedSubcategories.length === 0) {
+        activeSubcategoryId = 'all';
+        subcategoryBar.innerHTML = '<button class="subcat-btn active" data-id="all">All</button>';
+        subcategoryBar.scrollLeft = 0;
+        subcategorySection.classList.add('is-hidden');
+        return;
+    }
+
+    if (!scopedSubcategories.some((subcategory) => String(subcategory.subcategory_id) === activeSubcategoryId)) {
+        activeSubcategoryId = 'all';
+    }
+
+    subcategoryBar.innerHTML = `
+        <button class="subcat-btn ${activeSubcategoryId === 'all' ? 'active' : ''}" data-id="all">All</button>
+        ${scopedSubcategories.map((subcategory) => `
+            <button class="subcat-btn ${String(subcategory.subcategory_id) === activeSubcategoryId ? 'active' : ''}" data-id="${subcategory.subcategory_id}">
+                ${escapeHtml(subcategory.subcategory_name)}
+            </button>
+        `).join('')}
+    `;
+    subcategoryBar.scrollLeft = 0;
+    subcategorySection.classList.remove('is-hidden');
+}
+
+function syncCategoryArrowState() {
+    const prev = document.getElementById('categoryPrev');
+    const next = document.getElementById('categoryNext');
+    prev.disabled = categoryBar.scrollLeft <= 0;
+    next.disabled = categoryBar.scrollLeft + categoryBar.clientWidth >= categoryBar.scrollWidth - 2;
+}
+
+function syncSubcategoryArrowState() {
+    if (subcategorySection.classList.contains('is-hidden')) {
+        subcategoryPrev.disabled = true;
+        subcategoryNext.disabled = true;
+        return;
+    }
+
+    subcategoryPrev.disabled = subcategoryBar.scrollLeft <= 0;
+    subcategoryNext.disabled = subcategoryBar.scrollLeft + subcategoryBar.clientWidth >= subcategoryBar.scrollWidth - 2;
+}
+
+function queueSubcategoryArrowStateSync() {
+    window.requestAnimationFrame(syncSubcategoryArrowState);
+}
+
+categoryBar.addEventListener('scroll', syncCategoryArrowState);
+subcategoryBar.addEventListener('scroll', syncSubcategoryArrowState);
+
+categoryBar.addEventListener('click', (event) => {
+    const button = event.target.closest('.cat-btn');
+    if (!button) return;
+
+    activeCategoryId = button.dataset.id;
+    activeSubcategoryId = 'all';
+    currentPage = 1;
+    setActiveButton(categoryBar, '.cat-btn', activeCategoryId);
+    renderSubcategoryBar();
+    queueSubcategoryArrowStateSync();
+    applyFilters();
 });
 
-const categoryBar = document.getElementById('categoryBar');
+subcategoryBar.addEventListener('click', (event) => {
+    const button = event.target.closest('.subcat-btn');
+    if (!button) return;
+
+    activeSubcategoryId = button.dataset.id;
+    currentPage = 1;
+    setActiveButton(subcategoryBar, '.subcat-btn', activeSubcategoryId);
+    applyFilters();
+});
+
 document.getElementById('categoryPrev').addEventListener('click', () => categoryBar.scrollBy({ left: -160, behavior: 'smooth' }));
 document.getElementById('categoryNext').addEventListener('click', () => categoryBar.scrollBy({ left:  160, behavior: 'smooth' }));
+subcategoryPrev.addEventListener('click', () => subcategoryBar.scrollBy({ left: -160, behavior: 'smooth' }));
+subcategoryNext.addEventListener('click', () => subcategoryBar.scrollBy({ left:  160, behavior: 'smooth' }));
 
 // ================================================================
 //  SEARCH
@@ -524,13 +654,14 @@ function applyFilters() {
 
     const matched = productCards.filter(card => {
         const categoryMatch = activeCategoryId === 'all' || card.dataset.category === activeCategoryId;
+        const subcategoryMatch = activeSubcategoryId === 'all' || card.dataset.subcategory === activeSubcategoryId;
         const searchMatch   = searchTerm === '' || card.dataset.name.toLowerCase().includes(searchTerm);
-        return categoryMatch && searchMatch;
+        return categoryMatch && subcategoryMatch && searchMatch;
     });
 
     productCards.forEach(c => c.style.display = 'none');
 
-    if (activeCategoryId === 'all' && searchTerm === '') {
+    if (activeCategoryId === 'all' && activeSubcategoryId === 'all' && searchTerm === '') {
         matched.forEach(c => c.style.display = '');
         buildPagination(0, 0);
         return;
@@ -565,6 +696,9 @@ function buildPagination(active, total) {
     mkBtn('»', active + 1, active === total);
 }
 
+renderSubcategoryBar();
+syncCategoryArrowState();
+queueSubcategoryArrowStateSync();
 applyFilters();
 
 // ================================================================
@@ -581,10 +715,10 @@ const SETTINGS_KEY      = 'pos_print_settings';
 function loadPrintSettings() {
     try {
         const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-        if (s.storeName)  document.getElementById('pStoreName').value  = s.storeName;
-        if (s.address)    document.getElementById('pAddress').value    = s.address;
-        if (s.phone)      document.getElementById('pPhone').value      = s.phone;
-        if (s.cashier)    document.getElementById('pCashier').value    = s.cashier;
+        document.getElementById('pStoreName').value = s.storeName || POS_CONFIG.storeName || '';
+        document.getElementById('pAddress').value = s.address || POS_CONFIG.address || '';
+        document.getElementById('pPhone').value = s.phone || POS_CONFIG.phone || '';
+        document.getElementById('pCashier').value = s.cashier || POS_CONFIG.cashier || '';
     } catch(e) {}
 }
 
@@ -1004,15 +1138,21 @@ confirmCheckoutBtn.addEventListener('click', async () => {
         total_amount:    parseAmt('grand-total'),
         tax_amount:      parseAmt('vat'),
         discount_amount: parseAmt('total-discount'),
+        csrf_token: document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
     };
 
     confirmCheckoutBtn.disabled = true;
     setCheckoutStatus('busy', 'Saving sale…');
 
     try {
-        const res  = await fetch('/inventory_system/checkout.php', {
+        const res  = await fetch('/inventory_system/http/ajax/checkout.php', {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-Token': payload.csrf_token,
+            },
             body:    JSON.stringify(payload),
         });
         const data = await res.json();
@@ -1072,7 +1212,7 @@ function printReceipt(sale) {
         const lineTotal = (unitPrice * item.qty).toFixed(2);
         itemsHtml += `
             <tr>
-                <td class="item-name">${item.name}${item.discount > 0 ? ` <span class="disc-tag">-${item.discount}%</span>` : ''}</td>
+                <td class="item-name">${escapeHtml(item.name)}${item.discount > 0 ? ` <span class="disc-tag">-${Number(item.discount)}%</span>` : ''}</td>
                 <td class="item-qty">${item.qty}</td>
                 <td class="item-price">₱${unitPrice.toFixed(2)}</td>
                 <td class="item-total">₱${lineTotal}</td>
@@ -1123,12 +1263,12 @@ function printReceipt(sale) {
 </head>
 <body>
 <div class="receipt">
-    <div class="sale-no">Sale #${sale.sale_id}</div>
-    <div class="r-store">${storeName}</div>
-    <div class="r-info">${address ? address + '<br>' : ''}${phone ? 'Tel: ' + phone : ''}</div>
+    <div class="sale-no">Sale #${Number(sale.sale_id) || 0}</div>
+    <div class="r-store">${escapeHtml(storeName)}</div>
+    <div class="r-info">${address ? escapeHtml(address) + '<br>' : ''}${phone ? 'Tel: ' + escapeHtml(phone) : ''}</div>
     <hr class="r-eq">
-    <div class="r-meta">Date    : ${sale.date}</div>
-    <div class="r-meta">Cashier : ${cashier}</div>
+    <div class="r-meta">Date    : ${escapeHtml(sale.date)}</div>
+    <div class="r-meta">Cashier : ${escapeHtml(cashier)}</div>
     <hr class="r-dash">
     <table>
         <thead><tr>
@@ -1146,11 +1286,11 @@ function printReceipt(sale) {
     <hr class="r-solid">
     <table class="totals">
         <tr class="grand-row"><td class="t-label">TOTAL</td><td class="t-value">${sale.grand_total}</td></tr>
-        <tr class="payment-row"><td class="t-label">Payment</td><td class="t-value">${paymentLabel}</td></tr>
-        ${sale.payment === 'cash' ? `<tr class="change-row"><td class="t-label">Change</td><td class="t-value">${sale.change}</td></tr>` : ''}
+        <tr class="payment-row"><td class="t-label">Payment</td><td class="t-value">${escapeHtml(paymentLabel)}</td></tr>
+        ${sale.payment === 'cash' ? `<tr class="change-row"><td class="t-label">Change</td><td class="t-value">${escapeHtml(sale.change)}</td></tr>` : ''}
     </table>
     <hr class="r-eq">
-    <div class="r-footer"><div class="thank">Thank you!</div>Please come again.<br><small>${sale.date}</small></div>
+    <div class="r-footer"><div class="thank">Thank you!</div>Please come again.<br><small>${escapeHtml(sale.date)}</small></div>
 </div>
 <script>window.onload = () => window.print();<\/script>
 </body></html>`;

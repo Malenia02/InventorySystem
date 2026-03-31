@@ -1,0 +1,3 @@
+product_name,category,supplier,sku,price,sale_price,vatable,initial_quantity,reorder_level,status
+Sample Product A,Category Name or ID,,SKU-001,25.50,22.00,yes,100,10,active
+Sample Product B,Category Name or ID,,SKU-002,18.00,,no,60,8,inactive

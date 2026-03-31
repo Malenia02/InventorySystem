@@ -2,13 +2,18 @@
 <html lang="en">
 
 <?php
-require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/DashboardController.php';
+require_once __DIR__ . '/bootstrap/app.php';
+require_once __DIR__ . '/controllers/DashboardController.php';
+
+$pageTitle = 'Dashboard';
 
 if (!isset($_SESSION['user_id'])) {
     header('Location: /inventory_system/login.php');
     exit;
 }
+
+$currentRole = strtolower(trim((string) ($_SESSION['role'] ?? '')));
+$isAdmin = $currentRole === 'admin';
 
 // ── Allowed periods ───────────────────────────────────────────
 $allowedPeriods = ['today', 'month', 'year'];
@@ -41,6 +46,7 @@ $reportPeriod  = sanitizePeriod('report_period',  'month');
 $topPeriod     = sanitizePeriod('top_period',     'month');
 $recentPeriod  = sanitizePeriod('recent_period',  'month');
 $payPeriod     = sanitizePeriod('pay_period',     'month');
+$sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
 
 // ── Fetch all dashboard data ──────────────────────────────────
 $salesData    = DashboardController::salesChange($conn, $salesPeriod);
@@ -52,7 +58,7 @@ $topSelling   = DashboardController::topSellingProducts($conn, $topPeriod, 5);
 $recentSales  = DashboardController::recentSales($conn, 10, $recentPeriod);
 $chartData    = DashboardController::salesChartData($conn, $reportPeriod);
 $activityLimit = min(20, max(6, (int)($_GET['activity_limit'] ?? 6)));
-$recentStock  = DashboardController::recentStockActivity($conn, $activityLimit);
+$recentStock  = DashboardController::recentStockActivity($conn, $activityLimit, $isAdmin ? null : $sessionUserId);
 $payBreakdown = DashboardController::paymentBreakdown($conn, $payPeriod);
 
 // Chart arrays for JS
@@ -62,15 +68,15 @@ $chartRevenue = json_encode(array_map('floatval', array_column($chartData, 'reve
 $payLabels    = json_encode(array_map('ucfirst',  array_column($payBreakdown, 'payment_method')));
 $payTotals    = json_encode(array_map('floatval', array_column($payBreakdown, 'total')));
 
-require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
+require __DIR__ . '/components/head.php';
 ?>
 
 <body>
 
   <?php
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/header.php';
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/breadcrumb.php';
+    require __DIR__ . '/components/header.php';
+    require __DIR__ . '/components/sidebar.php';
+    require __DIR__ . '/components/breadcrumb.php';
   ?>
 
     <section class="section dashboard">
@@ -99,7 +105,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                       <i class="bi bi-cart"></i>
                     </div>
                     <div class="ps-3">
-                      <h6><?= number_format($salesData['current']) ?></h6>
+                      <h6><?= number_format((float)($salesData['current'] ?? 0)) ?></h6>
                       <?php if ($salesData['change'] > 0): ?>
                         <span class="<?= $salesData['direction'] === 'up' ? 'text-success' : 'text-danger' ?> small pt-1 fw-bold"><?= $salesData['change'] ?>%</span>
                         <span class="text-muted small pt-2 ps-1"><?= $salesData['direction'] === 'up' ? 'increase' : 'decrease' ?></span>
@@ -112,6 +118,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
               </div>
             </div><!-- End Sales Card -->
 
+            <?php if ($isAdmin): ?>
             <!-- Revenue Card -->
             <div class="col-xxl-4 col-md-6">
               <div class="card info-card revenue-card">
@@ -131,7 +138,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                       <i class="bi bi-currency-dollar"></i>
                     </div>
                     <div class="ps-3">
-                      <h6>₱<?= number_format($revenueData['current'], 2) ?></h6>
+                      <h6>₱<?= number_format((float)($revenueData['current'] ?? 0), 2) ?></h6>
                       <?php if ($revenueData['change'] > 0): ?>
                         <span class="<?= $revenueData['direction'] === 'up' ? 'text-success' : 'text-danger' ?> small pt-1 fw-bold"><?= $revenueData['change'] ?>%</span>
                         <span class="text-muted small pt-2 ps-1"><?= $revenueData['direction'] === 'up' ? 'increase' : 'decrease' ?></span>
@@ -143,6 +150,25 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                 </div>
               </div>
             </div><!-- End Revenue Card -->
+            <?php else: ?>
+            <!-- Out of Stock Card -->
+            <div class="col-xxl-4 col-md-6">
+              <div class="card info-card revenue-card">
+                <div class="card-body">
+                  <h5 class="card-title">Out of Stock <span>| Current</span></h5>
+                  <div class="d-flex align-items-center">
+                    <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                      <i class="bi bi-exclamation-octagon"></i>
+                    </div>
+                    <div class="ps-3">
+                      <h6><?= number_format((int) $outOfStock) ?></h6>
+                      <span class="text-muted small pt-2">Items needing replenishment</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div><!-- End Out of Stock Card -->
+            <?php endif; ?>
 
             <!-- Products Card -->
             <div class="col-xxl-4 col-xl-12">
@@ -154,7 +180,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                       <i class="bi bi-box-seam"></i>
                     </div>
                     <div class="ps-3">
-                      <h6><?= number_format($totalProds) ?></h6>
+                      <h6><?= number_format((float)$totalProds) ?></h6>
                       <?php if ($outOfStock > 0): ?>
                         <span class="text-danger small pt-1 fw-bold"><?= $outOfStock ?></span>
                         <span class="text-muted small pt-2 ps-1">out of stock</span>
@@ -167,6 +193,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
               </div>
             </div><!-- End Products Card -->
 
+            <?php if ($isAdmin): ?>
             <!-- Reports Chart -->
             <div class="col-12">
               <div class="card">
@@ -218,7 +245,9 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                 </div>
               </div>
             </div><!-- End Reports -->
+            <?php endif; ?>
 
+            <?php if ($isAdmin): ?>
             <!-- Recent Sales -->
             <div class="col-12">
               <div class="card recent-sales overflow-auto">
@@ -258,7 +287,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                             <th scope="row"><a href="#">#<?= $sale['sale_id'] ?></a></th>
                             <td><?= htmlspecialchars($cashier) ?></td>
                             <td><?= $sale['item_count'] ?> item<?= $sale['item_count'] != 1 ? 's' : '' ?></td>
-                            <td>₱<?= number_format($sale['total_amount'], 2) ?></td>
+                            <td>₱<?= number_format((float)($sale['total_amount'] ?? 0), 2) ?></td>
                             <td><span class="badge <?= $badge ?>"><?= ucfirst($sale['payment_method']) ?></span></td>
                             <td class="text-muted small"><?= date('M d, Y h:i A', strtotime($sale['sale_date'])) ?></td>
                           </tr>
@@ -270,7 +299,9 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                 </div>
               </div>
             </div><!-- End Recent Sales -->
+            <?php endif; ?>
 
+            <?php if ($isAdmin): ?>
             <!-- Top Selling -->
             <div class="col-12">
               <div class="card top-selling overflow-auto">
@@ -309,9 +340,9 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                               </a>
                             </th>
                             <td><a href="#" class="text-primary fw-bold"><?= htmlspecialchars($p['product_name']) ?></a></td>
-                            <td>₱<?= number_format($p['price'], 2) ?></td>
-                            <td class="fw-bold"><?= number_format($p['total_sold']) ?></td>
-                            <td>₱<?= number_format($p['total_revenue'], 2) ?></td>
+                            <td>₱<?= number_format((float)($p['price'] ?? 0), 2) ?></td>
+                            <td class="fw-bold"><?= number_format((float)($p['total_sold'] ?? 0)) ?></td>
+                            <td>₱<?= number_format((float)($p['total_revenue'] ?? 0), 2) ?></td>
                           </tr>
                         <?php endforeach; ?>
                       <?php endif; ?>
@@ -321,6 +352,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
                 </div>
               </div>
             </div><!-- End Top Selling -->
+            <?php endif; ?>
 
           </div>
         </div><!-- End Left side columns -->
@@ -371,6 +403,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
             </div>
           </div><!-- End Recent Activity -->
 
+          <?php if ($isAdmin): ?>
           <!-- Payment Breakdown (replaces Budget Report) -->
           <div class="card">
             <div class="filter">
@@ -417,6 +450,7 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
 
             </div>
           </div><!-- End Payment Chart -->
+          <?php endif; ?>
 
           <!-- Low Stock Alert (replaces Website Traffic) -->
           <div class="card">
@@ -475,24 +509,13 @@ require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php';
 
   </main><!-- End #main -->
 
-  <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/footer.php'; ?>
+  <?php require __DIR__ . '/components/footer.php'; ?>
 
   <a href="#" class="back-to-top d-flex align-items-center justify-content-center">
     <i class="bi bi-arrow-up-short"></i>
   </a>
 
-  <!-- Vendor JS Files -->
-  <script src="assets/vendor/apexcharts/apexcharts.min.js"></script>
-  <script src="assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-  <script src="assets/vendor/chart.js/chart.umd.js"></script>
-  <script src="assets/vendor/echarts/echarts.min.js"></script>
-  <script src="assets/vendor/quill/quill.js"></script>
-  <script src="assets/vendor/simple-datatables/simple-datatables.js"></script>
-  <script src="assets/vendor/tinymce/tinymce.min.js"></script>
-  <script src="assets/vendor/php-email-form/validate.js"></script>
-
-  <!-- Template Main JS File -->
-  <script src="assets/js/main.js"></script>
+  <?php require __DIR__ . '/components/js_script.php'; ?>
 
 </body>
 

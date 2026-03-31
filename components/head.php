@@ -1,5 +1,5 @@
 <?php
-require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
+require_once __DIR__ . '/../config/config.php';
 
 // Default title if page does not set one
 if (!isset($pageTitle)) {

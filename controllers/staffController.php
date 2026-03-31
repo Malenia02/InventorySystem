@@ -1,294 +1,293 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+declare(strict_types=1);
 
-// ==========================
-// ALLOWED STAFF ROLES
-// ==========================
-$allowedRoles = ['admin', 'staff', 'cashier'];
-
-// ==========================
-// GET ALL STAFF
-// ==========================
-function getAllStaff($conn, $table_users) {
-    $stmt = $conn->prepare("SELECT * FROM {$table_users} ORDER BY role ASC, status ASC, user_id DESC");
-    $stmt->execute();
-    return $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-// ==========================
-// GET STAFF BY ID
-// ==========================
-function getStaffById($conn, $table_users, $id) {
-    $stmt = $conn->prepare("SELECT * FROM {$table_users} WHERE user_id = :id");
-    $stmt->execute(['id' => $id]);
-    return $stmt->fetch(PDO::FETCH_ASSOC);
-}
-
-// ==========================
-// HANDLE PHOTO UPLOAD
-// ==========================
-function handlePhotoUpload($fileInputName, $staffName = 'unknown') {
-    if (empty($_FILES[$fileInputName]['name'])) return null;
-
-    $allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
-    $maxFileSize = 2 * 1024 * 1024; // 2MB
-
-    $fileType = mime_content_type($_FILES[$fileInputName]['tmp_name']);
-    $fileSize = $_FILES[$fileInputName]['size'];
-
-    if (!in_array($fileType, $allowedTypes)) throw new Exception("Invalid file type. Only JPG, PNG, WEBP allowed.");
-    if ($fileSize > $maxFileSize) throw new Exception("File too large. Max 2MB.");
-
-    // Extra security: make sure it's actually an image
-    $imageInfo = getimagesize($_FILES[$fileInputName]['tmp_name']);
-    if ($imageInfo === false) throw new Exception("Uploaded file is not a valid image.");
-
-    $safeName = preg_replace("/[^a-zA-Z0-9_-]/", "_", strtolower($staffName));
-    $uploadDir = $_SERVER['DOCUMENT_ROOT'] . "/inventory_system/assets/uploads/staff/{$safeName}/";
-    if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
-
-    $ext = pathinfo($_FILES[$fileInputName]['name'], PATHINFO_EXTENSION);
-    $photoName = uniqid('photo_', true) . '.' . $ext;
-
-    if (!move_uploaded_file($_FILES[$fileInputName]['tmp_name'], $uploadDir . $photoName)) {
-        throw new Exception("Failed to move uploaded file.");
-    }
-
-    return "/inventory_system/assets/uploads/staff/{$safeName}/" . $photoName;
-}
-
-// ==========================
-// ADD STAFF
-// ==========================
-function addStaff($conn, $table_users, $username, $password, $firstname, $lastname, $email, $photoPath = null, $role='staff') {
-    global $allowedRoles;
-    if (!in_array($role, $allowedRoles)) $role = 'staff';
-
-    // Optional: check duplicate username/email
-    $stmtCheck = $conn->prepare("SELECT COUNT(*) FROM {$table_users} WHERE username = :username OR email = :email");
-    $stmtCheck->execute(['username' => $username, 'email' => $email]);
-    if ($stmtCheck->fetchColumn() > 0) throw new Exception("Username or email already exists.");
-
-    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-
-    $stmt = $conn->prepare("
-        INSERT INTO {$table_users}
-        (first_name, last_name, email, username, password, role, status, photo)
-        VALUES
-        (:firstname, :lastname, :email, :username, :password, :role, 'active', :photo)
-    ");
-
-    return $stmt->execute([
-        'firstname' => $firstname,
-        'lastname'  => $lastname,
-        'email'     => $email,
-        'username'  => $username,
-        'password'  => $hashedPassword,
-        'photo'     => $photoPath,
-        'role'      => $role
-    ]);
-}
-
-// ==========================
-// UPDATE STAFF
-// ==========================
-function updateStaff($conn, $table_users, $id, $username, $firstname, $lastname, $email, $password = null, $photoPath = null, $role = null) {
-    global $allowedRoles;
-
-    $fields = [
-        "first_name = :firstname",
-        "last_name = :lastname",
-        "email = :email",
-        "username = :username"
-    ];
-    $params = [
-        'firstname' => $firstname,
-        'lastname'  => $lastname,
-        'email'     => $email,
-        'username'  => $username,
-        'id'        => $id
+final class StaffController
+{
+    private const TABLE = 'users';
+    private const ALLOWED_ROLES = ['admin', 'staff', 'cashier'];
+    private const DEFAULT_PHOTO = '/inventory_system/assets/img/default-user.png';
+    private const MAX_PHOTO_SIZE = 2097152; // 2MB
+    private const ALLOWED_MIME_TYPES = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp',
     ];
 
-    if (!empty($password)) {
-        $fields[] = "password = :password";
-        $params['password'] = password_hash($password, PASSWORD_DEFAULT);
+    public static function getAllStaff(PDO $conn): array
+    {
+        $stmt = $conn->prepare("
+            SELECT user_id, first_name, last_name, email, username, role, status, photo, deactivated_at
+            FROM " . self::TABLE . "
+            ORDER BY role ASC, status ASC, user_id DESC
+        ");
+        $stmt->execute();
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    if (!empty($photoPath)) {
-        $fields[] = "photo = :photo";
-        $params['photo'] = $photoPath;
-    }
-
-    if (!empty($role) && in_array($role, $allowedRoles)) {
-        $fields[] = "role = :role";
-        $params['role'] = $role;
-    }
-
-    $sql = "UPDATE {$table_users} SET " . implode(", ", $fields) . " WHERE user_id = :id";
-    $stmt = $conn->prepare($sql);
-
-    return $stmt->execute($params);
-}
-
-// ==========================
-// DEACTIVATE / REACTIVATE
-// ==========================
-function deactivateStaff($conn, $table_users, $id) {
-    // Only admin can deactivate
-    if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') return false;
-
-    $stmt = $conn->prepare("UPDATE {$table_users} SET status = 'inactive', deactivated_at = NOW() WHERE user_id = :id");
-    return $stmt->execute(['id' => $id]);
-}
-
-function reactivateStaff($conn, $table_users, $id) {
-    // Only admin can reactivate
-    if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') return false;
-
-    $stmt = $conn->prepare("UPDATE {$table_users} SET status = 'active', deactivated_at = NULL WHERE user_id = :id");
-    return $stmt->execute(['id' => $id]);
-}
-
-// ==========================
-// GENERATE STAFF ROW HTML
-// ==========================
-function generateStaffRowHtml($staff) {
-    $photo = !empty($staff['photo']) ? $staff['photo'] : '/inventory_system/assets/img/default-user.png';
-    $statusClass = $staff['status'] === 'active' ? 'bg-success' : 'bg-secondary';
-    $btnClass = $staff['status'] === 'active' ? 'btn-secondary' : 'btn-success';
-    $btnIcon  = $staff['status'] === 'active' ? 'bi-person-x' : 'bi-person-check';
-
-    $role = htmlspecialchars($staff['role']);
-
-    return "
-    <tr id='staffRow{$staff['user_id']}'>
-        <td>0</td>
-        <td class='text-center'>
-            <img src='{$photo}' style='width:50px;height:50px;object-fit:cover;'>
-        </td>
-        <td>".htmlspecialchars($staff['username'])."</td>
-        <td>".htmlspecialchars($staff['email'])."</td>
-        <td>{$role}</td>
-        <td>
-            <span class='badge {$statusClass}' id='staffStatus{$staff['user_id']}'>".ucfirst($staff['status'])."</span>
-        </td>
-        <td>
-            <button class='btn btn-sm btn-warning editStaffBtn' 
-                data-id='{$staff['user_id']}' 
-                data-username='".htmlspecialchars($staff['username'])."' 
-                data-firstname='".htmlspecialchars($staff['first_name'])."' 
-                data-lastname='".htmlspecialchars($staff['last_name'])."' 
-                data-email='".htmlspecialchars($staff['email'])."' 
-                data-photo='{$photo}' 
-                data-role='{$role}' 
-                data-bs-toggle='modal' data-bs-target='#editStaffModal' title='Edit'>
-                <i class='bi bi-pencil-square'></i>
-            </button>
-
-            <!-- Toggle Status Button only for admin -->
-            ".(isset($_SESSION['role']) && $_SESSION['role'] === 'admin' ? "
-            <button class='btn btn-sm {$btnClass} toggleStatusBtn' data-id='{$staff['user_id']}'>
-                <i class='bi {$btnIcon}'></i>
-            </button>
-            " : "")."
-        </td>
-    </tr>
-    ";
-}
-
-// ==========================
-// HANDLE STAFF REQUESTS (AJAX)
-// ==========================
-function handleStaffRequest($conn, $table_users) {
-    $errorMsg = null;
-    $successMsg = null;
-
-    try {
-        // ==========================
-        // ADD STAFF
-        // ==========================
-        if (isset($_POST['add_staff'])) {
-            $staffName = $_POST['firstname'] . '_' . $_POST['lastname'];
-            $photoPath = handlePhotoUpload('photo', $staffName);
-            $role = $_POST['role'] ?? 'staff';
-
-            addStaff($conn, $table_users, $_POST['username'], $_POST['password'], $_POST['firstname'], $_POST['lastname'], $_POST['email'], $photoPath, $role);
-
-            $staff = getStaffById($conn, $table_users, $conn->lastInsertId());
-            $newStaffRow = generateStaffRowHtml($staff);
-
-            $successMsg = "Staff '{$role}: {$_POST['firstname']} {$_POST['lastname']}' added successfully.";
-            echo json_encode(['success' => $successMsg, 'newStaffRow' => $newStaffRow]);
-            exit;
+    public static function getStaffById(PDO $conn, int $id): ?array
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Invalid staff ID.');
         }
 
-        // ==========================
-        // EDIT STAFF
-        // ==========================
-        if (isset($_POST['edit_staff'])) {
-            $staffName = $_POST['firstname'] . '_' . $_POST['lastname'];
-            $photoPath = handlePhotoUpload('photo', $staffName);
-            $role = $_POST['role'] ?? null;
+        $stmt = $conn->prepare("
+            SELECT user_id, first_name, last_name, email, username, role, status, photo, deactivated_at
+            FROM " . self::TABLE . "
+            WHERE user_id = :id
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $id]);
 
-            updateStaff(
-                $conn, 
-                $table_users, 
-                $_POST['staff_id'], 
-                $_POST['username'], 
-                $_POST['firstname'], 
-                $_POST['lastname'], 
-                $_POST['email'], 
-                $_POST['password'] ?: null, 
-                $photoPath, 
-                $role
-            );
+        $staff = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            $staff = getStaffById($conn, $table_users, $_POST['staff_id']);
-            $updatedRowHtml = generateStaffRowHtml($staff);
-
-            $successMsg = "Staff '{$_POST['firstname']} {$_POST['lastname']}' updated successfully.";
-            echo json_encode(['success' => $successMsg, 'updatedRowHtml' => $updatedRowHtml, 'staff_id' => $staff['user_id']]);
-            exit;
-        }
-
-        // ==========================
-        // TOGGLE STATUS
-        // ==========================
-        if (isset($_POST['toggle_id'])) {
-            // Only admin can toggle
-            if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'admin') {
-                echo json_encode(['error' => 'Unauthorized']);
-                exit;
-            }
-
-            $id = intval($_POST['toggle_id']);
-            $staff = getStaffById($conn, $table_users, $id);
-
-            if ($staff) {
-                if ($staff['status'] === 'active') deactivateStaff($conn, $table_users, $id);
-                else reactivateStaff($conn, $table_users, $id);
-
-                $staff = getStaffById($conn, $table_users, $id);
-                $updatedRowHtml = generateStaffRowHtml($staff);
-                $successMsg = "Staff '{$staff['first_name']} {$staff['last_name']}' status updated.";
-
-                echo json_encode([
-                    'success' => $successMsg,
-                    'updatedRowHtml' => $updatedRowHtml,
-                    'staff_id' => $id
-                ]);
-                exit;
-            } else {
-                $errorMsg = "Staff not found.";
-            }
-        }
-
-    } catch (Exception $e) {
-        $errorMsg = $e->getMessage();
+        return $staff ?: null;
     }
 
-    echo json_encode(['error' => $errorMsg, 'success' => $successMsg]);
-    exit;
+    public static function addStaff(PDO $conn, array $data): int
+    {
+        $payload = self::validatePayload($data, false);
+        self::assertUniqueCredentials($conn, $payload['username'], $payload['email']);
+
+        $stmt = $conn->prepare("
+            INSERT INTO " . self::TABLE . "
+                (first_name, last_name, email, username, password, role, status, photo)
+            VALUES
+                (:first_name, :last_name, :email, :username, :password, :role, 'active', :photo)
+        ");
+
+        $stmt->execute([
+            ':first_name' => $payload['first_name'],
+            ':last_name'  => $payload['last_name'],
+            ':email'      => $payload['email'],
+            ':username'   => $payload['username'],
+            ':password'   => password_hash((string) $payload['password'], PASSWORD_DEFAULT),
+            ':role'       => $payload['role'],
+            ':photo'      => $payload['photo'] ?? self::DEFAULT_PHOTO,
+        ]);
+
+        return (int) $conn->lastInsertId();
+    }
+
+    public static function updateStaff(PDO $conn, int $id, array $data): void
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Invalid staff ID.');
+        }
+
+        $existing = self::getStaffById($conn, $id);
+        if (!$existing) {
+            throw new RuntimeException('Staff not found.');
+        }
+
+        $payload = self::validatePayload($data, true);
+        self::assertUniqueCredentials($conn, $payload['username'], $payload['email'], $id);
+
+        $fields = [
+            'first_name = :first_name',
+            'last_name = :last_name',
+            'email = :email',
+            'username = :username',
+            'role = :role',
+        ];
+
+        $params = [
+            ':id'         => $id,
+            ':first_name' => $payload['first_name'],
+            ':last_name'  => $payload['last_name'],
+            ':email'      => $payload['email'],
+            ':username'   => $payload['username'],
+            ':role'       => $payload['role'],
+        ];
+
+        if ($payload['password'] !== null) {
+            $fields[] = 'password = :password';
+            $params[':password'] = password_hash($payload['password'], PASSWORD_DEFAULT);
+        }
+
+        if ($payload['photo'] !== null) {
+            $fields[] = 'photo = :photo';
+            $params[':photo'] = $payload['photo'];
+        }
+
+        $sql = "UPDATE " . self::TABLE . " SET " . implode(', ', $fields) . " WHERE user_id = :id";
+        $stmt = $conn->prepare($sql);
+        $stmt->execute($params);
+    }
+
+    public static function toggleStatus(PDO $conn, int $id, int $sessionUserId): string
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Invalid staff ID.');
+        }
+
+        if ($id === $sessionUserId) {
+            throw new RuntimeException('You cannot deactivate your own account while signed in.');
+        }
+
+        $staff = self::getStaffById($conn, $id);
+        if (!$staff) {
+            throw new RuntimeException('Staff not found.');
+        }
+
+        $newStatus = (($staff['status'] ?? 'inactive') === 'active') ? 'inactive' : 'active';
+        $deactivatedAtSql = $newStatus === 'inactive' ? 'NOW()' : 'NULL';
+
+        $stmt = $conn->prepare("
+            UPDATE " . self::TABLE . "
+            SET status = :status, deactivated_at = {$deactivatedAtSql}
+            WHERE user_id = :id
+        ");
+        $stmt->execute([
+            ':status' => $newStatus,
+            ':id'     => $id,
+        ]);
+
+        return $newStatus;
+    }
+
+    public static function handlePhotoUpload(string $fileInputName, string $staffName = 'unknown'): ?string
+    {
+        if (
+            !isset($_FILES[$fileInputName]) ||
+            !is_array($_FILES[$fileInputName]) ||
+            ($_FILES[$fileInputName]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE
+        ) {
+            return null;
+        }
+
+        $file = $_FILES[$fileInputName];
+
+        if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Upload failed.');
+        }
+
+        $tmpName = (string) ($file['tmp_name'] ?? '');
+        if ($tmpName === '' || !is_uploaded_file($tmpName)) {
+            throw new RuntimeException('Invalid uploaded file.');
+        }
+
+        $fileSize = (int) ($file['size'] ?? 0);
+        if ($fileSize <= 0 || $fileSize > self::MAX_PHOTO_SIZE) {
+            throw new RuntimeException('File too large. Max size is 2MB.');
+        }
+
+        $mimeType = mime_content_type($tmpName);
+        if (!is_string($mimeType) || !array_key_exists($mimeType, self::ALLOWED_MIME_TYPES)) {
+            throw new RuntimeException('Invalid file type. Only JPG, PNG, and WEBP are allowed.');
+        }
+
+        if (getimagesize($tmpName) === false) {
+            throw new RuntimeException('Uploaded file is not a valid image.');
+        }
+
+        $extension = self::ALLOWED_MIME_TYPES[$mimeType];
+        $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '_', strtolower(trim($staffName))) ?: 'unknown';
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        $uploadDir = $basePath . '/uploads/staff/' . $safeName . '/';
+
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+            throw new RuntimeException('Failed to create upload directory.');
+        }
+
+        $photoName = bin2hex(random_bytes(16)) . '.' . $extension;
+        $fullPath = $uploadDir . $photoName;
+
+        if (!move_uploaded_file($tmpName, $fullPath)) {
+            throw new RuntimeException('Failed to save uploaded file.');
+        }
+
+        return '/inventory_system/uploads/staff/' . $safeName . '/' . $photoName;
+    }
+
+    public static function normalizeForView(array $staff): array
+    {
+        $photo = !empty($staff['photo']) ? (string) $staff['photo'] : self::DEFAULT_PHOTO;
+        $status = (string) ($staff['status'] ?? 'inactive');
+
+        return [
+            'user_id'      => (int) ($staff['user_id'] ?? 0),
+            'first_name'   => (string) ($staff['first_name'] ?? ''),
+            'last_name'    => (string) ($staff['last_name'] ?? ''),
+            'full_name'    => trim((string) (($staff['first_name'] ?? '') . ' ' . ($staff['last_name'] ?? ''))),
+            'email'        => (string) ($staff['email'] ?? ''),
+            'username'     => (string) ($staff['username'] ?? ''),
+            'role'         => (string) ($staff['role'] ?? 'staff'),
+            'status'       => $status,
+            'status_label' => ucfirst($status),
+            'photo'        => $photo,
+        ];
+    }
+
+    private static function validatePayload(array $data, bool $isUpdate): array
+    {
+        $firstName = trim((string) ($data['first_name'] ?? ''));
+        $lastName  = trim((string) ($data['last_name'] ?? ''));
+        $email     = trim((string) ($data['email'] ?? ''));
+        $username  = trim((string) ($data['username'] ?? ''));
+        $password  = isset($data['password']) ? trim((string) $data['password']) : '';
+        $photo     = isset($data['photo']) ? trim((string) $data['photo']) : null;
+        $role      = trim((string) ($data['role'] ?? 'staff'));
+
+        if ($firstName === '' || $lastName === '' || $email === '' || $username === '') {
+            throw new InvalidArgumentException('Please fill in all required staff details.');
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('Please enter a valid email address.');
+        }
+
+        if (!in_array($role, self::ALLOWED_ROLES, true)) {
+            throw new InvalidArgumentException('Invalid staff role.');
+        }
+
+        if (!$isUpdate && $password === '') {
+            throw new InvalidArgumentException('Password is required for new staff.');
+        }
+
+        if ($password !== '' && strlen($password) < 8) {
+            throw new InvalidArgumentException('Password must be at least 8 characters long.');
+        }
+
+        if ($photo !== null && $photo === '') {
+            $photo = null;
+        }
+
+        return [
+            'first_name' => $firstName,
+            'last_name'  => $lastName,
+            'email'      => $email,
+            'username'   => $username,
+            'password'   => $password !== '' ? $password : null,
+            'photo'      => $photo,
+            'role'       => $role,
+        ];
+    }
+
+    private static function assertUniqueCredentials(PDO $conn, string $username, string $email, ?int $excludeId = null): void
+    {
+        $sql = "
+            SELECT COUNT(*)
+            FROM " . self::TABLE . "
+            WHERE (username = :username OR email = :email)
+        ";
+
+        $params = [
+            ':username' => $username,
+            ':email'    => $email,
+        ];
+
+        if ($excludeId !== null && $excludeId > 0) {
+            $sql .= " AND user_id <> :exclude_id";
+            $params[':exclude_id'] = $excludeId;
+        }
+
+        $stmt = $conn->prepare($sql);
+        $stmt->execute($params);
+
+        if ((int) $stmt->fetchColumn() > 0) {
+            throw new RuntimeException('Username or email already exists.');
+        }
+    }
 }

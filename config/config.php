@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 require_once __DIR__ . '/../vendor/autoload.php';
 
 use Dotenv\Dotenv;
@@ -28,7 +30,7 @@ if (!function_exists('app_is_https')) {
     {
         return (
             (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ||
-            (($_SERVER['SERVER_PORT'] ?? null) == 443)
+            (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443)
         );
     }
 }
@@ -37,23 +39,50 @@ if (!function_exists('app_is_ajax_or_json')) {
     function app_is_ajax_or_json(): bool
     {
         $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
-            strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+            strtolower((string) $_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
 
         $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-        $isJson = str_contains($contentType, 'application/json');
+        $isJson = str_contains(strtolower($contentType), 'application/json');
 
         return $isAjax || $isJson;
     }
 }
 
+if (!function_exists('safe_redirect')) {
+    function safe_redirect(string $location, int $statusCode = 302): never
+    {
+        header('Location: ' . $location, true, $statusCode);
+        exit;
+    }
+}
+
 // ==========================
-// OPTIONAL NON-SENSITIVE JSON CONFIG
+// PATH CONSTANTS
+// ==========================
+if (!defined('BASE_PATH')) {
+    define('BASE_PATH', $projectRoot);
+}
+
+if (!defined('CONFIG_PATH')) {
+    define('CONFIG_PATH', BASE_PATH . '/config');
+}
+
+if (!defined('DATABASE_PATH')) {
+    define('DATABASE_PATH', BASE_PATH . '/database');
+}
+
+if (!defined('LOG_PATH')) {
+    define('LOG_PATH', BASE_PATH . '/logs');
+}
+
+// ==========================
+// OPTIONAL JSON CONFIG
 // ==========================
 $appConfig = [];
-$configJsonPath = __DIR__ . '/config.json';
+$configJsonPath = CONFIG_PATH . '/config.json';
 
 if (file_exists($configJsonPath)) {
-    $json = json_decode(file_get_contents($configJsonPath), true);
+    $json = json_decode((string) file_get_contents($configJsonPath), true);
     if (is_array($json)) {
         $appConfig = $json;
     } else {
@@ -66,7 +95,7 @@ if (file_exists($configJsonPath)) {
 // ==========================
 $appEnv      = (string) env_value('APP_ENV', 'production');
 $appDebug    = filter_var(env_value('APP_DEBUG', false), FILTER_VALIDATE_BOOL);
-$appUrl      = (string) env_value('APP_URL', 'http://localhost/inventory_system');
+$appUrl      = rtrim((string) env_value('APP_URL', 'http://localhost/inventory_system'), '/');
 $appTimezone = (string) env_value('APP_TIMEZONE', 'Asia/Manila');
 
 date_default_timezone_set($appTimezone);
@@ -74,20 +103,42 @@ date_default_timezone_set($appTimezone);
 // ==========================
 // ERROR LOGGING
 // ==========================
+if (!is_dir(LOG_PATH)) {
+    mkdir(LOG_PATH, 0755, true);
+}
+
 ini_set('log_errors', '1');
 ini_set('display_errors', $appDebug ? '1' : '0');
+ini_set('error_log', LOG_PATH . '/php-error.log');
 error_reporting(E_ALL);
 
-$logDir = $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/logs';
-if (!is_dir($logDir)) {
-    @mkdir($logDir, 0755, true);
+// ==========================
+// SECURITY HEADERS
+// ==========================
+if (!headers_sent()) {
+    header('X-Frame-Options: SAMEORIGIN');
+    header('X-Content-Type-Options: nosniff');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+
+    if (app_is_https()) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
 }
-ini_set('error_log', $logDir . '/php-error.log');
+
+// ==========================
+// FORCE HTTPS IN PRODUCTION
+// ==========================
+if ($appEnv === 'production' && !app_is_https() && php_sapi_name() !== 'cli') {
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $uri  = $_SERVER['REQUEST_URI'] ?? '/inventory_system/';
+    safe_redirect('https://' . $host . $uri, 301);
+}
 
 // ==========================
 // SESSION HARDENING
 // ==========================
-if (session_status() === PHP_SESSION_NONE) {
+if (session_status() === PHP_SESSION_NONE && php_sapi_name() !== 'cli') {
     $isHttps = app_is_https();
 
     ini_set('session.use_strict_mode', '1');
@@ -96,6 +147,7 @@ if (session_status() === PHP_SESSION_NONE) {
     ini_set('session.cookie_secure', $isHttps ? '1' : '0');
     ini_set('session.cookie_samesite', 'Lax');
 
+    session_name('INVSYSSESSID');
     session_set_cookie_params([
         'lifetime' => 0,
         'path'     => '/',
@@ -105,7 +157,6 @@ if (session_status() === PHP_SESSION_NONE) {
         'samesite' => 'Lax',
     ]);
 
-    session_name('INVSYSSESSID');
     session_start();
 }
 
@@ -116,10 +167,10 @@ if (!defined('SESSION_TIMEOUT')) {
     define('SESSION_TIMEOUT', (int) env_value('SESSION_TIMEOUT', 1800));
 }
 
-if (isset($_SESSION['user_id'])) {
+if (php_sapi_name() !== 'cli' && isset($_SESSION['user_id'])) {
     $lastActivity = $_SESSION['last_activity'] ?? null;
 
-    if ($lastActivity !== null && (time() - $lastActivity) > SESSION_TIMEOUT) {
+    if ($lastActivity !== null && (time() - (int) $lastActivity) > SESSION_TIMEOUT) {
         $_SESSION = [];
         session_unset();
 
@@ -140,7 +191,7 @@ if (isset($_SESSION['user_id'])) {
 
         if (app_is_ajax_or_json()) {
             http_response_code(401);
-            header('Content-Type: application/json');
+            header('Content-Type: application/json; charset=UTF-8');
             echo json_encode([
                 'success'  => false,
                 'error'    => 'Session expired. Please log in again.',
@@ -149,8 +200,7 @@ if (isset($_SESSION['user_id'])) {
             exit;
         }
 
-        header('Location: /inventory_system/login.php?reason=timeout');
-        exit;
+        safe_redirect('/inventory_system/login.php?reason=timeout');
     }
 
     $_SESSION['last_activity'] = time();
@@ -164,65 +214,23 @@ if (isset($_SESSION['user_id'])) {
 // CONSTANTS
 // ==========================
 if (!defined('HOSTURL')) {
-    define('HOSTURL', rtrim($appUrl, '/'));
+    define('HOSTURL', $appUrl);
 }
 
 // ==========================
-// DATABASE CONFIG FROM ENV
+// DATABASE ENV
 // ==========================
 $dbservername = (string) env_value('DB_HOST', '127.0.0.1');
 $dbport       = (string) env_value('DB_PORT', '3306');
-$dbusername   = (string) env_value('DB_USER', 'root');
+$dbusername   = (string) env_value('DB_USER', '');
 $dbpassword   = (string) env_value('DB_PASS', '');
 $dbname       = (string) env_value('DB_NAME', '');
 
-if ($dbname === '') {
-    error_log('[config.php] Missing DB_NAME in .env');
+if ($dbusername === '' || $dbname === '') {
+    error_log('[config.php] Missing DB_USER or DB_NAME in .env');
     http_response_code(500);
     exit('Application configuration error.');
 }
-
-// ==========================
-// DB CONNECTION
-// ==========================
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/database/database.php';
-
-register_shutdown_function(function () {
-    $error = error_get_last();
-
-    if (!$error) {
-        return;
-    }
-
-    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR];
-
-    if (!in_array($error['type'], $fatalTypes, true)) {
-        return;
-    }
-
-    error_log('[shutdown] Fatal error: ' . $error['message'] . ' in ' . $error['file'] . ':' . $error['line']);
-
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-
-    // 🚨 Prevent infinite loop
-    $currentPage = basename($_SERVER['SCRIPT_NAME'] ?? '');
-    if ($currentPage === 'error.php') {
-        return;
-    }
-
-    $_SESSION['error_code'] = 500;
-    $_SESSION['error_message'] = 'A fatal server error occurred. Please try again later.';
-
-    if (!headers_sent()) {
-        header('Location: /inventory_system/error.php');
-        exit;
-    }
-});
-
-
-
 
 // ==========================
 // TABLE REFERENCES

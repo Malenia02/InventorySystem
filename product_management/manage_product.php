@@ -3,25 +3,43 @@
  * manage_product.php
  * Admin-only page for managing products.
  */
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/middleware/Middleware.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/ProductController.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/CategoryController.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/SupplierController.php';
+require_once __DIR__ . '/../bootstrap/app.php';
+require_once __DIR__ . '/../middleware/Middleware.php';
+require_once __DIR__ . '/../controllers/ProductController.php';
+require_once __DIR__ . '/../controllers/CategoryController.php';
+require_once __DIR__ . '/../controllers/SubcategoryController.php';
+require_once __DIR__ . '/../controllers/SupplierController.php';
 
 Middleware::auth()->role('admin');
 
 $csrf_token = Middleware::generateCsrfToken();
 
-$categories = CategoryController::all($conn, $table_categories);
+$categories = CategoryController::all($conn);
+$subcategories = SubcategoryController::all($conn);
 $products   = ProductController::allProducts($conn);
-$suppliers  = SupplierController::all($conn, $table_suppliers);
+$suppliers  = SupplierController::all($conn);
+
+function renderSubcategoryOptions(array $subcategories): string
+{
+    $html = '<option value="">No subcategory</option>';
+
+    foreach ($subcategories as $subcategory) {
+        $html .= sprintf(
+            '<option value="%d" data-category-id="%d">%s</option>',
+            (int) ($subcategory['subcategory_id'] ?? 0),
+            (int) ($subcategory['category_id'] ?? 0),
+            htmlspecialchars((string) ($subcategory['subcategory_name'] ?? '-'), ENT_QUOTES, 'UTF-8')
+        );
+    }
+
+    return $html;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
+    <?php require __DIR__ . '/../components/head.php'; ?>
     <title>Manage Products</title>
     <style>
         .modal-message-center {
@@ -106,9 +124,9 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
 <body>
     <?php
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/header.php';
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/breadcrumb.php';
+    require __DIR__ . '/../components/header.php';
+    require __DIR__ . '/../components/sidebar.php';
+    require __DIR__ . '/../components/breadcrumb.php';
     ?>
 
     <main class="main">
@@ -121,10 +139,15 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
                             <div id="productMessages"></div>
 
-                            <button type="button" class="btn btn-primary mb-3"
-                                data-bs-toggle="modal" data-bs-target="#addProductModal">
-                                <i class="bi bi-plus-circle"></i> Add New Product
-                            </button>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <button type="button" class="btn btn-primary"
+                                    data-bs-toggle="modal" data-bs-target="#addProductModal">
+                                    <i class="bi bi-plus-circle"></i> Add New Product
+                                </button>
+                                <a href="/inventory_system/product_management/bulk_upload_products.php" class="btn btn-outline-primary">
+                                    <i class="bi bi-upload"></i> Bulk Create
+                                </a>
+                            </div>
 
                             <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
                                 <table id="productsTable" class="table table-striped table-bordered">
@@ -134,6 +157,7 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                             <th>Photo</th>
                                             <th>Name</th>
                                             <th>Category</th>
+                                            <th>Subcategory</th>
                                             <th>Supplier</th>
                                             <th>SKU</th>
                                             <th>Quantity</th>
@@ -159,6 +183,7 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                 </td>
                                                 <td><?= htmlspecialchars($p['product_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['category_name'] ?? '-') ?></td>
+                                                <td><?= htmlspecialchars($p['subcategory_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['supplier_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
                                                 <td class="product-quantity"><?= (int)($p['quantity'] ?? 0) ?></td>
@@ -178,6 +203,7 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                             data-id="<?= (int)$p['product_id'] ?>"
                                                             data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>"
                                                             data-category="<?= (int)($p['category_id'] ?? 0) ?>"
+                                                            data-subcategory="<?= (int)($p['subcategory_id'] ?? 0) ?>"
                                                             data-supplier="<?= (int)($p['supplier_id'] ?? 0) ?>"
                                                             data-sku="<?= htmlspecialchars($p['sku'] ?? '') ?>"
                                                             data-price="<?= (float)($p['price'] ?? 0) ?>"
@@ -204,6 +230,7 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
                                                         <button class="btn btn-sm <?= $isActive ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
                                                             data-id="<?= (int)$p['product_id'] ?>"
+                                                            data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>"
                                                             data-status="<?= $status ?>">
                                                             <i class="bi <?= $isActive ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i>
                                                         </button>
@@ -269,12 +296,19 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
                                                         <div class="col-md-6">
                                                             <label class="form-label">Category</label>
-                                                            <select class="form-select" name="category_id" required>
+                                                            <select class="form-select" name="category_id" id="addProductCategory" required>
                                                                 <?php foreach ($categories as $cat): ?>
                                                                     <option value="<?= (int)$cat['category_id'] ?>">
                                                                         <?= htmlspecialchars($cat['category_name']) ?>
                                                                     </option>
                                                                 <?php endforeach; ?>
+                                                            </select>
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Subcategory</label>
+                                                            <select class="form-select" name="subcategory_id" id="addProductSubcategory">
+                                                                <?= renderSubcategoryOptions($subcategories) ?>
                                                             </select>
                                                         </div>
 
@@ -408,6 +442,13 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                                         <?= htmlspecialchars($cat['category_name']) ?>
                                                                     </option>
                                                                 <?php endforeach; ?>
+                                                            </select>
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Subcategory</label>
+                                                            <select class="form-select" name="subcategory_id" id="editProductSubcategory">
+                                                                <?= renderSubcategoryOptions($subcategories) ?>
                                                             </select>
                                                         </div>
 
@@ -587,72 +628,70 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                             </div>
                         </div>
 
-                        <!-- SUPPLIER MODAL -->
-                        <div class="modal fade modal-modern" id="supplierModal" tabindex="-1" aria-hidden="true">
-                            <div class="modal-dialog modal-dialog-centered">
-                                <div class="modal-content">
-                                    <form id="supplierForm">
-                                        <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                    <!-- SUPPLIER MODAL -->
+                    <div class="modal fade modal-modern" id="supplierModal" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content">
+                                <form id="supplierForm">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
 
-                                        <div class="modal-header bg-info-subtle">
-                                            <div>
-                                                <h5 class="modal-title fw-bold mb-1">
-                                                    <i class="bi bi-truck me-2"></i>Add New Supplier
-                                                </h5>
-                                                <small class="text-muted">Create a supplier record for product assignment.</small>
+                                    <div class="modal-header bg-info-subtle">
+                                        <div>
+                                            <h5 class="modal-title fw-bold mb-1">
+                                                <i class="bi bi-truck me-2"></i>Add New Supplier
+                                            </h5>
+                                            <small class="text-muted">Create a supplier record for product assignment.</small>
+                                        </div>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+
+                                    <div class="modal-body">
+                                        <div id="supplierMessage" class="modal-message-center"></div>
+
+                                        <div class="row g-3">
+                                            <div class="col-12">
+                                                <label class="form-label">Supplier Name</label>
+                                                <input type="text" class="form-control" id="supplier_name" name="supplier_name" required>
                                             </div>
-                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                        </div>
 
-                                        <div class="modal-body">
-                                            <div id="supplierMessage" class="modal-message-center"></div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Contact Person</label>
+                                                <input type="text" class="form-control" id="contact_person" name="contact_person">
+                                            </div>
 
-                                            <div class="row g-3">
-                                                <div class="col-12">
-                                                    <label class="form-label">Supplier Name</label>
-                                                    <input type="text" class="form-control" name="supplier_name" required>
-                                                </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Phone</label>
+                                                <input type="text" class="form-control" id="phone" name="phone">
+                                            </div>
 
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Contact Person</label>
-                                                    <input type="text" class="form-control" name="contact_person">
-                                                </div>
+                                            <div class="col-12">
+                                                <label class="form-label">Email</label>
+                                                <input type="email" class="form-control" id="email" name="email">
+                                            </div>
 
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Phone</label>
-                                                    <input type="text" class="form-control" name="phone">
-                                                </div>
-
-                                                <div class="col-12">
-                                                    <label class="form-label">Email</label>
-                                                    <input type="email" class="form-control" name="email">
-                                                </div>
-
-                                                <div class="col-12">
-                                                    <label class="form-label">Address</label>
-                                                    <textarea class="form-control" name="address" rows="3"></textarea>
-                                                </div>
+                                            <div class="col-12">
+                                                <label class="form-label">Address</label>
+                                                <textarea class="form-control" id="address" name="address" rows="3"></textarea>
                                             </div>
                                         </div>
+                                    </div>
 
-                                        <div class="modal-footer">
-                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-info px-4 text-white">
-                                                <i class="bi bi-save me-1"></i>Add Supplier
-                                            </button>
-                                        </div>
-                                    </form>
-                                </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                        <button type="submit" class="btn btn-info px-4 text-white" id="saveSupplierBtn">
+                                            <i class="bi bi-save me-1"></i>Add Supplier
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
                         </div>
-
-                    </div><!-- end card -->
+                    </div>
                 </div>
             </div>
         </section>
     </main>
 
-    <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/js_script.php'; ?>
+    <?php require __DIR__ . '/../components/js_script.php'; ?>
     <script src="<?= HOSTURL ?>/assets/js/manage_product.js"></script>
 
 </body>

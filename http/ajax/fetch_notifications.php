@@ -1,37 +1,51 @@
 <?php
-header('Content-Type: application/json');
+declare(strict_types=1);
 
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/middleware/Middleware.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/NotificationController.php';
+require_once __DIR__ . '/../../bootstrap/app.php';
+require_once __DIR__ . '/../../middleware/Middleware.php';
+require_once __DIR__ . '/../../controllers/NotificationController.php';
+
+header('Content-Type: application/json; charset=UTF-8');
 
 Middleware::auth()
     ->ajax()
     ->methods(['GET'])
     ->sameOrigin();
 
-$userId = (int)($_SESSION['user_id'] ?? 0);
-$role   = $_SESSION['role'] ?? 'staff';
-
-if ($userId <= 0) {
-    echo json_encode([
-        'success' => false,
-        'error'   => 'Unauthorized'
-    ]);
+function jsonResponse(array $payload, int $statusCode = 200): never
+{
+    http_response_code($statusCode);
+    echo json_encode($payload);
     exit;
 }
 
-$notifications = NotificationController::getNotifications($conn, $userId, $role, 8);
-$count = NotificationController::getUnreadCount($conn, $userId, $role);
+try {
+    $userId = (int) ($_SESSION['user_id'] ?? 0);
+    $role   = (string) ($_SESSION['role'] ?? '');
 
-foreach ($notifications as &$notif) {
-    $notif['time_ago'] = NotificationController::timeAgo($notif['time']);
+    if ($userId <= 0 || $role === '') {
+        jsonResponse([
+            'success' => false,
+            'error'   => 'Unauthorized.'
+        ], 401);
+    }
+
+    $feed = NotificationController::getNotificationFeed($conn, $userId, $role, 20);
+    $count = NotificationController::getUnreadCount($conn, $userId, $role);
+
+    jsonResponse([
+        'success'       => true,
+        'count'         => $count,
+        'notifications' => $feed['all'],
+        'unread'        => $feed['unread'],
+        'previous'      => $feed['previous'],
+        'last_seen'     => $feed['last_seen'],
+    ]);
+} catch (Throwable $e) {
+    error_log('[fetch_notifications] ' . $e->getMessage());
+
+    jsonResponse([
+        'success' => false,
+        'error'   => 'Failed to fetch notifications.'
+    ], 500);
 }
-unset($notif);
-
-echo json_encode([
-    'success'       => true,
-    'count'         => $count,
-    'notifications' => $notifications
-]);
-exit;

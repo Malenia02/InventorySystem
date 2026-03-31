@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__ . '/../config/config.php';
+require __DIR__ . '/../bootstrap/app.php';
 require_once __DIR__ . '/../middleware/Middleware.php';
 
-Middleware::auth()->role(['admin', 'staff', 'cashier']);
+Middleware::auth()->role(['admin', 'cashier', 'staff']);
 
 $isAdmin       = Middleware::is('admin');
 $sessionUserId = (int)($_SESSION['user_id'] ?? 0);
@@ -128,6 +128,8 @@ $params = [];
 if (!$isAdmin) {
     $where[] = "al.{$activity_log_user_id} = :session_user_id";
     $params[':session_user_id'] = $sessionUserId;
+    $where[] = "al.{$activity_log_action} <> 'login_failed'";
+    $where[] = "al.{$activity_log_action} NOT LIKE '%blocked%'";
 }
 
 if ($action !== '') {
@@ -214,13 +216,29 @@ try {
 
     $activityLogs = $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
+    $actionWhere = [];
+    $actionParams = [];
+
+    if (!$isAdmin) {
+        $actionWhere[] = "{$activity_log_user_id} = :session_user_id";
+        $actionWhere[] = "{$activity_log_action} <> 'login_failed'";
+        $actionWhere[] = "{$activity_log_action} NOT LIKE '%blocked%'";
+        $actionParams[':session_user_id'] = $sessionUserId;
+    }
+
+    $actionWhereSql = $actionWhere ? ('WHERE ' . implode(' AND ', $actionWhere)) : '';
     $actionSql = "
         SELECT DISTINCT {$activity_log_action} AS action
         FROM {$table_activity_logs}
+        {$actionWhereSql}
         ORDER BY {$activity_log_action} ASC
     ";
-    $actionStmt = $conn->query($actionSql);
-    $actionOptions = $actionStmt ? ($actionStmt->fetchAll(PDO::FETCH_COLUMN) ?: []) : [];
+    $actionStmt = $conn->prepare($actionSql);
+    foreach ($actionParams as $key => $value) {
+        $actionStmt->bindValue($key, $value);
+    }
+    $actionStmt->execute();
+    $actionOptions = $actionStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
 
 } catch (Throwable $e) {
     error_log('[activity_log.php] ' . $e->getMessage());
@@ -347,7 +365,9 @@ require __DIR__ . '/../components/sidebar.php';
                                         <?php endif; ?>
                                         <th>Action</th>
                                         <th>Description</th>
-                                        <th>IP Address</th>
+                                        <?php if ($isAdmin): ?>
+                                            <th>IP Address</th>
+                                        <?php endif; ?>
                                         <th>Date &amp; Time</th>
                                     </tr>
                                 </thead>
@@ -387,9 +407,11 @@ require __DIR__ . '/../components/sidebar.php';
                                                     <?= e($log['description'] ?? '—') ?>
                                                 </td>
 
-                                                <td class="text-muted small">
-                                                    <?= e(maskIp($log['ip_address'] ?? null, $isAdmin)) ?>
-                                                </td>
+                                                <?php if ($isAdmin): ?>
+                                                    <td class="text-muted small">
+                                                        <?= e(maskIp($log['ip_address'] ?? null, $isAdmin)) ?>
+                                                    </td>
+                                                <?php endif; ?>
 
                                                 <td class="text-muted small" style="white-space: nowrap;">
                                                     <strong><?= e(timeAgo($log['created_at'] ?? null)) ?></strong><br>
@@ -399,7 +421,7 @@ require __DIR__ . '/../components/sidebar.php';
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="<?= $isAdmin ? 7 : 5 ?>" class="text-center py-4 text-muted">
+                                            <td colspan="<?= $isAdmin ? 7 : 4 ?>" class="text-center py-4 text-muted">
                                                 No activity logs found.
                                             </td>
                                         </tr>
@@ -440,7 +462,7 @@ require __DIR__ . '/../components/sidebar.php';
 </main>
 
 <?php require __DIR__ . '/../components/footer.php'; ?>
-<?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/js_script.php'; ?>
+<?php require __DIR__ . '/../components/js_script.php'; ?>
 
 </body>
 </html>

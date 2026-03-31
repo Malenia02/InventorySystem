@@ -4,6 +4,7 @@
 !.env.example
 
 # Uploads
+uploads/
 assets/uploads/
 
 # Logs

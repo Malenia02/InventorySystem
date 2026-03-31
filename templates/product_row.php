@@ -19,6 +19,7 @@ $isActive = $status === 'active';
 
     <td><?= htmlspecialchars($product['product_name'] ?? '-') ?></td>
     <td><?= htmlspecialchars($product['category_name'] ?? '-') ?></td>
+    <td><?= htmlspecialchars($product['subcategory_name'] ?? '-') ?></td>
     <td><?= htmlspecialchars($product['supplier_name'] ?? '-') ?></td>
     <td><?= htmlspecialchars($product['sku'] ?? '-') ?></td>
 
@@ -50,6 +51,7 @@ $isActive = $status === 'active';
                 data-id="<?= (int)$product['product_id'] ?>"
                 data-name="<?= htmlspecialchars($product['product_name'] ?? '') ?>"
                 data-category="<?= (int)($product['category_id'] ?? 0) ?>"
+                data-subcategory="<?= (int)($product['subcategory_id'] ?? 0) ?>"
                 data-supplier="<?= (int)($product['supplier_id'] ?? 0) ?>"
                 data-sku="<?= htmlspecialchars($product['sku'] ?? '') ?>"
                 data-price="<?= (float)($product['price'] ?? 0) ?>"
@@ -76,6 +78,7 @@ $isActive = $status === 'active';
 
             <button class="btn btn-sm <?= $isActive ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
                 data-id="<?= (int)$product['product_id'] ?>"
+                data-name="<?= htmlspecialchars($product['product_name'] ?? '') ?>"
                 data-status="<?= $status ?>">
                 <i class="bi <?= $isActive ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i>
             </button>

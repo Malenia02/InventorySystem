@@ -1,12 +1,7 @@
 <?php
-session_start();
+declare(strict_types=1);
 
-// ── Get error code ────────────────────────────────────────────
-// Priority:
-// 1. Session (set manually by your PHP code)
-// 2. Apache's REDIRECT_STATUS (set automatically by ErrorDocument)
-// 3. Query string ?code=403 (set by Middleware redirect)
-// 4. Default 0
+require_once __DIR__ . '/config/config.php'; // adjust if needed
 
 $error_code = 0;
 
@@ -18,36 +13,55 @@ if (isset($_SESSION['error_code'])) {
     $error_code = (int) $_GET['code'];
 }
 
-// ── Get error message ─────────────────────────────────────────
-if (isset($_SESSION['error_message'])) {
-    $error_message = $_SESSION['error_message'];
-    unset($_SESSION['error_message']);
-    unset($_SESSION['error_code']);
-} else {
-    switch ($error_code) {
-        case 400:
-            $error_message = "Bad request. Please check your input and try again.";
-            break;
-        case 401:
-            $error_message = "You need to log in to access this page.";
-            break;
-        case 403:
-            $error_message = "You don't have permission to access this page.";
-            break;
-        case 404:
-            $error_message = "Sorry, the page you are looking for could not be found.";
-            break;
-        case 500:
-            $error_message = "Sorry, there is a problem with the server. Please try again later.";
-            break;
-        default:
-            $error_message = "An unexpected error occurred. Please try again later.";
-            break;
-    }
+if ($error_code < 400 || $error_code > 599) {
+    $error_code = 500;
 }
 
-// ── Fallback URL ──────────────────────────────────────────────
-$previous_url = htmlspecialchars($_SERVER['HTTP_REFERER'] ?? '/inventory_system/index.php');
+http_response_code($error_code);
+
+if (isset($_SESSION['error_message'])) {
+    $error_message = (string) $_SESSION['error_message'];
+} else {
+    $messages = [
+        400 => 'Bad request. Please check your input and try again.',
+        401 => 'You need to log in to access this page.',
+        403 => 'You do not have permission to access this page.',
+        404 => 'Sorry, the page you are looking for could not be found.',
+        500 => 'Sorry, there is a problem with the server. Please try again later.',
+    ];
+
+    $error_message = $messages[$error_code] ?? 'An unexpected error occurred. Please try again later.';
+}
+
+unset($_SESSION['error_code'], $_SESSION['error_message']);
+
+$titles = [
+    400 => 'Bad Request',
+    401 => 'Unauthorized',
+    403 => 'Access Denied',
+    404 => 'Page Not Found',
+    500 => 'Server Error',
+];
+
+$page_title = $titles[$error_code] ?? 'Something Went Wrong';
+
+$defaultBackUrl = '/inventory_system/index.php';
+$previous_url = $defaultBackUrl;
+
+if (!empty($_SERVER['HTTP_REFERER'])) {
+    $referer = parse_url($_SERVER['HTTP_REFERER']);
+    $currentHost = $_SERVER['HTTP_HOST'] ?? '';
+
+    $refererHost = $referer['host'] ?? '';
+    $refererPath = $referer['path'] ?? '';
+
+    if ($refererHost === $currentHost && str_starts_with($refererPath, '/inventory_system/')) {
+        $previous_url = $refererPath;
+        if (!empty($referer['query'])) {
+            $previous_url .= '?' . $referer['query'];
+        }
+    }
+}
 ?>
 
 <!DOCTYPE html>

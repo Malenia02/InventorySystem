@@ -1,21 +1,10 @@
 <?php
+declare(strict_types=1);
+
 define('AUTH_CONTEXT', 'public');
 
-require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/AuthController.php';
-
-// Users table config
-$userConfig = [
-    'table'          => $table_users,
-    'col_id'         => $user_id,
-    'col_username'   => $user_username,
-    'col_password'   => $user_password,
-    'col_role'       => $user_role,
-    'col_status'     => $user_status,
-    'col_first_name' => $user_firstname,
-    'col_last_name'  => $user_lastname,
-    'col_photo'      => $user_photoPath,
-];
+require_once __DIR__ . '/bootstrap/app.php';
+require_once __DIR__ . '/controllers/AuthController.php';
 
 // Activity log config
 $logConfig = [
@@ -28,28 +17,39 @@ $logConfig = [
 ];
 
 // Try secure remember-me auto-login first
-AuthController::consumeRememberMe($conn, $userConfig);
+AuthController::consumeRememberMe($conn);
 
 // Redirect already logged-in users
-if (isset($_SESSION['user_id'])) {
+if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] > 0) {
     header('Location: /inventory_system/index.php');
     exit;
 }
 
 // Generate CSRF token for form
-$csrf_token    = AuthController::generateCsrfToken();
+$csrf_token = AuthController::generateCsrfToken();
 $error_message = '';
+$submittedUsername = (string) ($_POST['username'] ?? '');
+$loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $error_message = AuthController::login($conn, $userConfig, $logConfig);
+    $result = AuthController::login($conn, $_POST, $logConfig);
+
+    if (!empty($result['success'])) {
+        header('Location: ' . ($result['redirect'] ?? '/inventory_system/index.php'));
+        exit;
+    }
+
+    $error_message = (string) ($result['message'] ?? 'Login failed.');
 }
 
 // Re-read token after POST because failed login may rotate it
 $csrf_token = AuthController::generateCsrfToken();
+$submittedUsername = (string) ($_POST['username'] ?? '');
+$loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername);
 ?>
 <!DOCTYPE html>
 <html lang="en">
-<?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
+<?php require __DIR__ . '/components/head.php'; ?>
 
 <body>
 <main>
@@ -76,7 +76,7 @@ $csrf_token = AuthController::generateCsrfToken();
                                 <form class="row g-3 needs-validation" novalidate method="POST" action="">
                                     <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8') ?>">
 
-                                    <?php if (!empty($error_message)): ?>
+                                    <?php if ($error_message !== ''): ?>
                                         <div class="col-12">
                                             <div class="alert alert-danger text-center small mb-0">
                                                 <?= htmlspecialchars($error_message, ENT_QUOTES, 'UTF-8') ?>
@@ -127,6 +127,35 @@ $csrf_token = AuthController::generateCsrfToken();
                                             <label class="form-check-label" for="rememberMe">Remember me</label>
                                         </div>
                                     </div>
+
+                                    <?php if (!empty($loginSecurity['captcha_required'])): ?>
+                                        <div class="col-12">
+                                            <label for="captchaAnswer" class="form-label">
+                                                Verification Challenge
+                                            </label>
+                                            <div class="input-group has-validation">
+                                                <span class="input-group-text">
+                                                    <?= htmlspecialchars((string) ($loginSecurity['captcha_prompt'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                                                </span>
+                                                <input
+                                                    type="text"
+                                                    name="captcha_answer"
+                                                    class="form-control"
+                                                    id="captchaAnswer"
+                                                    inputmode="numeric"
+                                                    pattern="[0-9]+"
+                                                    required
+                                                    autocomplete="off"
+                                                >
+                                                <div class="invalid-feedback">
+                                                    Please answer the verification challenge.
+                                                </div>
+                                            </div>
+                                            <div class="form-text">
+                                                This appears only after repeated failed login attempts.
+                                            </div>
+                                        </div>
+                                    <?php endif; ?>
 
                                     <div class="col-12">
                                         <button class="btn btn-primary w-100" type="submit">Login</button>

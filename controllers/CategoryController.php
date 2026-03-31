@@ -1,160 +1,229 @@
 <?php
-/**
- * CategoryController.php
- * Handles all category-related DB operations.
- */
+declare(strict_types=1);
 
-// Prevent direct browser access
-if (php_sapi_name() !== 'cli' && realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) {
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-
-    $_SESSION['error_code'] = 403;
-    $_SESSION['error_message'] = 'Direct access is not allowed.';
-
-    header('Location: /inventory_system/error.php');
-    exit;
-}
-class CategoryController
+final class CategoryController
 {
-    // ================================================================
-    //  GET ALL CATEGORIES
-    //  $status = null    → all categories
-    //  $status = 'active' → active only
-    //  $status = 'inactive' → inactive only
-    // ================================================================
-    public static function all(PDO $conn, string $table = 'categories', ?string $status = null): array
+    private const TABLE = 'categories';
+    private const VALID_STATUSES = ['active', 'inactive'];
+    private const MAX_NAME_LENGTH = 100;
+    private const MAX_DESCRIPTION_LENGTH = 1000;
+
+    public static function all(PDO $conn, ?string $status = null): array
     {
-        $sql = "SELECT * FROM {$table}";
+        $sql = "
+            SELECT
+                category_id,
+                category_name,
+                description,
+                status,
+                created_at
+            FROM " . self::TABLE;
+
+        $params = [];
 
         if ($status !== null) {
+            $status = self::validateStatus($status);
             $sql .= " WHERE status = :status";
+            $params[':status'] = $status;
         }
 
-        $sql .= " ORDER BY category_name ASC";
+        $sql .= " ORDER BY category_name ASC, category_id DESC";
 
         $stmt = $conn->prepare($sql);
+        $stmt->execute($params);
 
-        if ($status !== null) {
-            $stmt->bindValue(':status', $status);
-        }
-
-        $stmt->execute();
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
-    // ================================================================
-    //  GET CATEGORY BY ID
-    // ================================================================
-    public static function getCategoryById(PDO $conn, string $table, int $id): array|false
+    public static function getCategoryById(PDO $conn, int $id): ?array
     {
-        $stmt = $conn->prepare("SELECT * FROM {$table} WHERE category_id = ?");
-        $stmt->execute([$id]);
-        return $stmt->fetch(PDO::FETCH_ASSOC);
-    }
-
-    // ================================================================
-    //  ADD CATEGORY
-    //  Returns: int (new ID) | 'duplicate' | false
-    // ================================================================
-    public static function addCategory(PDO $conn, string $table, string $name): int|string|false
-    {
-        $name = trim($name);
-
-        if (empty($name)) {
-            return false;
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Invalid category ID.');
         }
-
-        try {
-            $stmt = $conn->prepare("
-                INSERT INTO {$table} (category_name, status)
-                VALUES (?, 'active')
-            ");
-            $stmt->execute([$name]);
-            return (int) $conn->lastInsertId();
-
-        } catch (PDOException $e) {
-            // Unique constraint violation — duplicate category name
-            if ($e->getCode() === '23000') {
-                return 'duplicate';
-            }
-            throw $e;
-        }
-    }
-
-    // ================================================================
-    //  UPDATE CATEGORY
-    //  Returns: true | 'duplicate' | false
-    // ================================================================
-    public static function updateCategory(PDO $conn, string $table, int $id, string $name): bool|string
-    {
-        $name = trim($name);
-
-        if (empty($name)) {
-            return false;
-        }
-
-        try {
-            $stmt = $conn->prepare("
-                UPDATE {$table}
-                SET category_name = ?
-                WHERE category_id = ?
-            ");
-            return $stmt->execute([$name, $id]);
-
-        } catch (PDOException $e) {
-            // Duplicate name on update
-            if ($e->getCode() === '23000') {
-                return 'duplicate';
-            }
-            throw $e;
-        }
-    }
-
-    // ================================================================
-    //  TOGGLE STATUS (active ↔ inactive)
-    //  Returns: 'active' | 'inactive' | false (not found)
-    // ================================================================
-    public static function toggleStatus(PDO $conn, string $table, int $id): string|false
-    {
-        $cat = self::getCategoryById($conn, $table, $id);
-
-        if (!$cat) {
-            return false;
-        }
-
-        $newStatus = $cat['status'] === 'active' ? 'inactive' : 'active';
 
         $stmt = $conn->prepare("
-            UPDATE {$table}
-            SET status = ?
-            WHERE category_id = ?
+            SELECT
+                category_id,
+                category_name,
+                description,
+                status,
+                created_at
+            FROM " . self::TABLE . "
+            WHERE category_id = :id
+            LIMIT 1
         ");
-        $stmt->execute([$newStatus, $id]);
+        $stmt->execute([':id' => $id]);
+
+        $category = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $category ?: null;
+    }
+
+    public static function addCategory(PDO $conn, string $name, ?string $description = null): int|string
+    {
+        $payload = self::validatePayload($name, $description);
+
+        try {
+            $stmt = $conn->prepare("
+                INSERT INTO " . self::TABLE . " (
+                    category_name,
+                    description,
+                    status
+                ) VALUES (
+                    :name,
+                    :description,
+                    'active'
+                )
+            ");
+
+            $stmt->execute([
+                ':name'        => $payload['name'],
+                ':description' => $payload['description'],
+            ]);
+
+            return (int) $conn->lastInsertId();
+        } catch (PDOException $e) {
+            if ($e->getCode() === '23000') {
+                return 'duplicate';
+            }
+
+            throw $e;
+        }
+    }
+
+    public static function updateCategory(PDO $conn, int $id, string $name, ?string $description = null): bool|string
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Invalid category ID.');
+        }
+
+        self::assertCategoryExists($conn, $id);
+        $payload = self::validatePayload($name, $description);
+
+        try {
+            $stmt = $conn->prepare("
+                UPDATE " . self::TABLE . "
+                SET
+                    category_name = :name,
+                    description   = :description
+                WHERE category_id = :id
+            ");
+
+            $stmt->execute([
+                ':name'        => $payload['name'],
+                ':description' => $payload['description'],
+                ':id'          => $id,
+            ]);
+
+            return true;
+        } catch (PDOException $e) {
+            if ($e->getCode() === '23000') {
+                return 'duplicate';
+            }
+
+            throw $e;
+        }
+    }
+
+    public static function toggleStatus(PDO $conn, int $id): string|false
+    {
+        $category = self::getCategoryById($conn, $id);
+
+        if (!$category) {
+            return false;
+        }
+
+        $currentStatus = (string) ($category['status'] ?? 'inactive');
+        $newStatus = $currentStatus === 'active' ? 'inactive' : 'active';
+
+        $stmt = $conn->prepare("
+            UPDATE " . self::TABLE . "
+            SET status = :status
+            WHERE category_id = :id
+        ");
+        $stmt->execute([
+            ':status' => $newStatus,
+            ':id'     => $id,
+        ]);
 
         return $newStatus;
     }
 
-    // ================================================================
-    //  COUNT CATEGORIES
-    //  Useful for dashboards
-    // ================================================================
-    public static function count(PDO $conn, string $table, ?string $status = null): int
+    public static function count(PDO $conn, ?string $status = null): int
     {
-        $sql = "SELECT COUNT(*) FROM {$table}";
+        $sql = "SELECT COUNT(*) FROM " . self::TABLE;
+        $params = [];
 
         if ($status !== null) {
+            $status = self::validateStatus($status);
             $sql .= " WHERE status = :status";
+            $params[':status'] = $status;
         }
 
         $stmt = $conn->prepare($sql);
+        $stmt->execute($params);
 
-        if ($status !== null) {
-            $stmt->bindValue(':status', $status);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private static function validatePayload(string $name, ?string $description): array
+    {
+        $name = self::normalizeName($name);
+        $description = self::nullableTrim($description);
+
+        if ($name === '') {
+            throw new InvalidArgumentException('Category name is required.');
         }
 
-        $stmt->execute();
-        return (int) $stmt->fetchColumn();
+        if (mb_strlen($name) > self::MAX_NAME_LENGTH) {
+            throw new InvalidArgumentException('Category name must not exceed ' . self::MAX_NAME_LENGTH . ' characters.');
+        }
+
+        if ($description !== null && mb_strlen($description) > self::MAX_DESCRIPTION_LENGTH) {
+            throw new InvalidArgumentException('Category description must not exceed ' . self::MAX_DESCRIPTION_LENGTH . ' characters.');
+        }
+
+        return [
+            'name'        => $name,
+            'description' => $description,
+        ];
+    }
+
+    private static function assertCategoryExists(PDO $conn, int $id): void
+    {
+        $stmt = $conn->prepare("
+            SELECT COUNT(*)
+            FROM " . self::TABLE . "
+            WHERE category_id = :id
+        ");
+        $stmt->execute([':id' => $id]);
+
+        if ((int) $stmt->fetchColumn() === 0) {
+            throw new RuntimeException('Category not found.');
+        }
+    }
+
+    private static function validateStatus(string $status): string
+    {
+        $status = strtolower(trim($status));
+
+        if (!in_array($status, self::VALID_STATUSES, true)) {
+            throw new InvalidArgumentException('Invalid category status.');
+        }
+
+        return $status;
+    }
+
+    private static function normalizeName(string $value): string
+    {
+        $value = trim($value);
+        $value = preg_replace('/\s+/', ' ', $value) ?? '';
+        return $value;
+    }
+
+    private static function nullableTrim(?string $value): ?string
+    {
+        $value = trim((string) $value);
+        return $value === '' ? null : $value;
     }
 }

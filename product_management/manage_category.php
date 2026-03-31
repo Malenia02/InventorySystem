@@ -1,24 +1,26 @@
 <?php
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'].'/inventory_system/controllers/CategoryController.php';
+declare(strict_types=1);
 
-if (!isset($conn)) die('❌ $conn is NOT defined.');
+require_once __DIR__ . '/../bootstrap/app.php';
+require_once __DIR__ . '/../middleware/Middleware.php';
+require_once __DIR__ . '/../controllers/CategoryController.php';
 
-$categories = CategoryController::all($conn, $table_categories);
+Middleware::auth()->role(['admin']);
+
+$categories = CategoryController::all($conn);
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <?php require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/head.php'; ?>
+    <?php require __DIR__ . '/../components/head.php'; ?>
     <!-- Include Simple-DataTables CSS -->
-    <link rel="stylesheet" href="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js">
 </head>
 <body>
 <?php
-require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/header.php';
-require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/sidebar.php';
-require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
+require __DIR__ . '/../components/header.php';
+require __DIR__ . '/../components/sidebar.php';
+require __DIR__ . '/../components/breadcrumb.php';
 ?>
 
 <section class="section">
@@ -55,6 +57,7 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
                                         </span>
                                     </td>
                                     <td>
+                                        <div class="d-flex gap-2 justify-content-center">
                                         <button class="btn btn-sm btn-warning editCategoryBtn"
                                                 data-id="<?= $cat['category_id'] ?>"
                                                 data-name="<?= htmlspecialchars($cat['category_name']) ?>"
@@ -64,12 +67,14 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
 
                                         <button class="btn btn-sm <?= $cat['status'] === 'active' ? 'btn-danger' : 'btn-success' ?> toggleCategoryStatusBtn"
                                                 data-id="<?= $cat['category_id'] ?>"
+                                                data-name="<?= htmlspecialchars($cat['category_name']) ?>"
                                                 data-status="<?= $cat['status'] ?>">
                                             <?= $cat['status'] === 'active'
                                                 ? '<i class="bi bi-slash-circle"></i>'
                                                 : '<i class="bi bi-check-circle"></i>' ?>
                                         </button>
                                     </td>
+                                    </div>
                                 </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -135,10 +140,9 @@ require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/breadcrumb.php';
     </div>
 </section>
 
-<?php require $_SERVER['DOCUMENT_ROOT'].'/inventory_system/components/js_script.php'; ?>
+<?php require __DIR__ . '/../components/js_script.php'; ?>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
 <script src="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="<?= HOSTURL ?>/assets/js/manage_category.js"></script>
 </body>
 </html>

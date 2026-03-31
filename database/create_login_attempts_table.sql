@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS `login_attempts` (
+    `attempt_id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `scope_type` ENUM('username', 'ip', 'username_ip') NOT NULL,
+    `scope_key` VARCHAR(191) NOT NULL,
+    `username` VARCHAR(100) DEFAULT NULL,
+    `ip_address` VARCHAR(45) DEFAULT NULL,
+    `attempt_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `first_attempt_at` DATETIME NOT NULL,
+    `last_attempt_at` DATETIME NOT NULL,
+    `locked_until` DATETIME DEFAULT NULL,
+    `captcha_required` TINYINT(1) NOT NULL DEFAULT 0,
+    `last_notified_at` DATETIME DEFAULT NULL,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`attempt_id`),
+    UNIQUE KEY `unique_scope` (`scope_type`, `scope_key`),
+    KEY `idx_username` (`username`),
+    KEY `idx_ip_address` (`ip_address`),
+    KEY `idx_locked_until` (`locked_until`),
+    KEY `idx_last_attempt_at` (`last_attempt_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
