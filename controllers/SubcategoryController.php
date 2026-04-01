@@ -5,23 +5,28 @@ final class SubcategoryController
 {
     private const TABLE = 'subcategories';
     private const VALID_STATUSES = ['active', 'inactive'];
+    private static bool $schemaChecked = false;
 
     public static function ensureSchema(PDO $conn): void
     {
-        $conn->exec("
-            CREATE TABLE IF NOT EXISTS " . self::TABLE . " (
-                subcategory_id INT AUTO_INCREMENT PRIMARY KEY,
-                category_id INT NOT NULL,
-                subcategory_name VARCHAR(100) NOT NULL,
-                description TEXT NULL,
-                status ENUM('active','inactive') NOT NULL DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE KEY uniq_category_subcategory (category_id, subcategory_name),
-                KEY idx_subcategory_category (category_id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        if (self::$schemaChecked) {
+            return;
+        }
+
+        $tableStmt = $conn->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = :table_name
         ");
+        $tableStmt->execute([':table_name' => self::TABLE]);
+
+        if ((int) $tableStmt->fetchColumn() === 0) {
+            throw new RuntimeException('Subcategory schema is not installed.');
+        }
 
         self::ensureProductColumn($conn);
+        self::$schemaChecked = true;
     }
 
     public static function all(PDO $conn, ?int $categoryId = null, ?string $status = null): array
@@ -220,12 +225,17 @@ final class SubcategoryController
 
     private static function ensureProductColumn(PDO $conn): void
     {
-        $stmt = $conn->query("SHOW COLUMNS FROM products LIKE 'subcategory_id'");
-        $column = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        $stmt = $conn->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'products'
+              AND column_name = 'subcategory_id'
+        ");
+        $stmt->execute();
 
-        if ($column === false) {
-            $conn->exec("ALTER TABLE products ADD COLUMN subcategory_id INT NULL AFTER category_id");
-            $conn->exec("ALTER TABLE products ADD INDEX idx_products_subcategory (subcategory_id)");
+        if ((int) $stmt->fetchColumn() === 0) {
+            throw new RuntimeException('Product subcategory schema is not installed.');
         }
     }
 

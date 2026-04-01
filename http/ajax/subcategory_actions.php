@@ -145,7 +145,11 @@ try {
     }
 
     subcategoryJsonResponse(['success' => false, 'error' => 'Invalid action.'], 400);
+} catch (InvalidArgumentException $e) {
+    subcategoryJsonResponse(['success' => false, 'error' => $e->getMessage()], 422);
+} catch (RuntimeException $e) {
+    subcategoryJsonResponse(['success' => false, 'error' => $e->getMessage()], 400);
 } catch (Throwable $e) {
     error_log('[subcategory_actions] ' . $e->getMessage());
-    subcategoryJsonResponse(['success' => false, 'error' => $e->getMessage()], 500);
+    subcategoryJsonResponse(['success' => false, 'error' => 'Internal server error.'], 500);
 }

@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 namespace InventorySystem\WebSocket;
 
 if (php_sapi_name() !== 'cli') {
@@ -21,10 +23,7 @@ class NotificationWebSocket implements MessageComponentInterface
 {
     protected \SplObjectStorage $clients;
 
-    private array $allowedOrigins = [
-        'http://127.0.0.1',
-        'http://localhost',
-    ];
+    private array $allowedOrigins;
 
     private int $maxPayloadBytes = 4096;
     private int $maxClients = 100;
@@ -32,6 +31,7 @@ class NotificationWebSocket implements MessageComponentInterface
     public function __construct()
     {
         $this->clients = new \SplObjectStorage();
+        $this->allowedOrigins = $this->loadAllowedOrigins();
         echo "WebSocket notification server started.\n";
     }
 
@@ -53,7 +53,27 @@ class NotificationWebSocket implements MessageComponentInterface
             return;
         }
 
-        $this->clients->attach($conn);
+        $query = [];
+        if (isset($conn->httpRequest)) {
+            parse_str($conn->httpRequest->getUri()->getQuery(), $query);
+        }
+
+        $userId = (int) ($query['uid'] ?? 0);
+        $role = trim((string) ($query['role'] ?? ''));
+        $timestamp = (int) ($query['ts'] ?? 0);
+        $signature = trim((string) ($query['sig'] ?? ''));
+
+        if (!WebSocketSecurity::isValidToken($userId, $role, $origin, $timestamp, $signature)) {
+            echo "Rejected unauthenticated WebSocket connection.\n";
+            $conn->close();
+            return;
+        }
+
+        $this->clients->attach($conn, [
+            'user_id' => $userId,
+            'role' => strtolower($role),
+            'origin' => WebSocketSecurity::normalizedOrigin($origin),
+        ]);
         echo "New connection: " . spl_object_id($conn) . " | Origin: " . $origin . "\n";
     }
 
@@ -68,14 +88,23 @@ class NotificationWebSocket implements MessageComponentInterface
             return;
         }
 
+        if (!$this->clients->contains($from)) {
+            return;
+        }
+
         $event = $data['event'] ?? '';
         if ($event !== 'notification_update') {
             return;
         }
 
+        $type = trim((string) ($data['type'] ?? 'general'));
+        if ($type === '' || strlen($type) > 50 || !preg_match('/^[a-z0-9_-]+$/i', $type)) {
+            return;
+        }
+
         $payload = json_encode([
             'event' => 'notification_update',
-            'type'  => $data['type'] ?? 'general',
+            'type'  => $type,
         ]);
 
         foreach ($this->clients as $client) {
@@ -109,6 +138,31 @@ class NotificationWebSocket implements MessageComponentInterface
             return false;
         }
 
-        return in_array(rtrim($origin, '/'), $this->allowedOrigins, true);
+        return in_array(WebSocketSecurity::normalizedOrigin($origin), $this->allowedOrigins, true);
+    }
+
+    private function loadAllowedOrigins(): array
+    {
+        $origins = [
+            'http://127.0.0.1',
+            'http://localhost',
+        ];
+
+        if (function_exists('env_value')) {
+            $configured = trim((string) env_value('WS_ALLOWED_ORIGINS', ''));
+            if ($configured !== '') {
+                foreach (explode(',', $configured) as $origin) {
+                    $origin = trim($origin);
+                    if ($origin !== '') {
+                        $origins[] = $origin;
+                    }
+                }
+            }
+        }
+
+        return array_values(array_unique(array_map(
+            static fn (string $origin): string => WebSocketSecurity::normalizedOrigin($origin),
+            $origins
+        )));
     }
 }

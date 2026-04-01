@@ -5,6 +5,9 @@
  */
 require_once __DIR__ . '/../controllers/NotificationController.php';
 require_once __DIR__ . '/../middleware/Middleware.php';
+require_once __DIR__ . '/../src/WebSocket/WebSocketSecurity.php';
+
+use InventorySystem\WebSocket\WebSocketSecurity;
 
 $csrfToken = Middleware::generateCsrfToken();
 
@@ -25,6 +28,13 @@ $notifications = [];
 $unreadNotifications = [];
 $previousNotifications = [];
 $notifCount    = 0;
+$webSocketBaseUrl = (string) env_value('WS_PUBLIC_URL', 'ws://127.0.0.1:8080');
+$requestScheme = app_is_https() ? 'https' : 'http';
+$requestHost = (string) ($_SERVER['HTTP_HOST'] ?? '127.0.0.1');
+$requestOrigin = $requestScheme . '://' . $requestHost;
+$webSocketUrl = $sessionUserId > 0
+    ? WebSocketSecurity::buildConnectionUrl($webSocketBaseUrl, $sessionUserId, (string) $sessionRole, $requestOrigin)
+    : '';
 
 if ($sessionUserId && isset($conn)) {
     $feed = NotificationController::getNotificationFeed($conn, $sessionUserId, $sessionRole, 20);
@@ -74,6 +84,7 @@ function renderNotificationItems(array $items, string $emptyTitle, string $empty
 ?>
 
 <meta name="csrf-token" content="<?= htmlspecialchars($csrfToken) ?>">
+<meta name="websocket-url" content="<?= htmlspecialchars($webSocketUrl, ENT_QUOTES, 'UTF-8') ?>">
 
 <header id="header" class="header fixed-top d-flex align-items-center">
 
@@ -443,8 +454,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function connectWebSocket() {
+        const socketUrl = document.querySelector('meta[name="websocket-url"]')?.getAttribute('content') || '';
+        if (!socketUrl) {
+            return;
+        }
+
         try {
-            window.socket = new WebSocket('ws://127.0.0.1:8080');
+            window.socket = new WebSocket(socketUrl);
 
             window.socket.onopen = () => {
                 console.log('WebSocket connected');

@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 if (php_sapi_name() !== 'cli') {
     if (session_status() === PHP_SESSION_NONE) {
         session_start();
@@ -11,7 +13,7 @@ if (php_sapi_name() !== 'cli') {
     exit;
 }
 
-require __DIR__ . '/vendor/autoload.php';
+require __DIR__ . '/bootstrap/app.php';
 
 use Ratchet\Http\HttpServer;
 use Ratchet\Server\IoServer;
@@ -24,7 +26,8 @@ use InventorySystem\WebSocket\NotificationWebSocket;
 $loop = Factory::create();
 
 // ✅ PASS LOOP INTO SOCKET
-$socket = new SocketServer('127.0.0.1:8080', [], $loop);
+$socketAddress = (string) env_value('WS_BIND_ADDRESS', '127.0.0.1:8080');
+$socket = new SocketServer($socketAddress, [], $loop);
 
 // ✅ PASS LOOP INTO IOSERVER
 $server = new IoServer(
@@ -37,6 +40,6 @@ $server = new IoServer(
     $loop // <-- REQUIRED FIX
 );
 
-echo "Running WebSocket server on ws://127.0.0.1:8080\n";
+echo "Running WebSocket server on ws://{$socketAddress}\n";
 
 $server->run();

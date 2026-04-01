@@ -326,10 +326,10 @@ $subcategoryOptions = trim((string) ob_get_clean());
                                 </div>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label fw-semibold">Sale Price</label>
+                                <label class="form-label fw-semibold">Sale %</label>
                                 <div class="input-group">
-                                    <span class="input-group-text">₱</span>
-                                    <input type="number" class="form-control" name="products[__INDEX__][sale_price]" step="0.01" min="0">
+                                    <span class="input-group-text">%</span>
+                                    <input type="number" class="form-control" name="products[__INDEX__][sale_price]" step="0.01" min="0" max="100">
                                 </div>
                             </div>
                             <div class="col-md-4">

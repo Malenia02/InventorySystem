@@ -162,7 +162,7 @@ function renderSubcategoryOptions(array $subcategories): string
                                             <th>SKU</th>
                                             <th>Quantity</th>
                                             <th>Price</th>
-                                            <th>Sale Price</th>
+                                            <th>Sale %</th>
                                             <th>Vatable</th>
                                             <th>Reorder Level</th>
                                             <th>Status</th>
@@ -188,7 +188,7 @@ function renderSubcategoryOptions(array $subcategories): string
                                                 <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
                                                 <td class="product-quantity"><?= (int)($p['quantity'] ?? 0) ?></td>
                                                 <td>₱<?= number_format((float)($p['price'] ?? 0), 2) ?></td>
-                                                <td><?= !empty($p['sale_price']) ? '₱' . number_format((float)$p['sale_price'], 2) : '-' ?></td>
+                                                <td><?= !empty($p['sale_price']) ? rtrim(rtrim(number_format((float)$p['sale_price'], 2), '0'), '.') . '%' : '-' ?></td>
                                                 <td><?= !empty($p['vatable']) ? 'Yes' : 'No' ?></td>
                                                 <td><?= (int)($p['reorder_level'] ?? 5) ?></td>
                                                 <td>
@@ -344,10 +344,10 @@ function renderSubcategoryOptions(array $subcategories): string
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Sale Price</label>
+                                                            <label class="form-label">Sale %</label>
                                                             <div class="input-group">
-                                                                <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="sale_price" step="0.01">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="sale_price" step="0.01" min="0" max="100">
                                                             </div>
                                                         </div>
 
@@ -484,10 +484,10 @@ function renderSubcategoryOptions(array $subcategories): string
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Sale Price</label>
+                                                            <label class="form-label">Sale %</label>
                                                             <div class="input-group">
-                                                                <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="sale_price" id="editProductSalePrice" step="0.01">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="sale_price" id="editProductSalePrice" step="0.01" min="0" max="100">
                                                             </div>
                                                         </div>
 

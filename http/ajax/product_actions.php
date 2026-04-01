@@ -142,11 +142,18 @@ try {
                 ]);
 
                 $createdIds[] = $productId;
-            } catch (Throwable $e) {
+            } catch (InvalidArgumentException | RuntimeException $e) {
                 $errors[] = [
                     'row'     => $rowNumber,
                     'product' => $name,
                     'error'   => $e->getMessage(),
+                ];
+            } catch (Throwable $e) {
+                error_log('[product_actions bulk_create row] ' . $e->getMessage());
+                $errors[] = [
+                    'row'     => $rowNumber,
+                    'product' => $name,
+                    'error'   => 'Unable to create this product right now.',
                 ];
             }
         }
@@ -401,6 +408,6 @@ try {
 
     jsonResponse([
         'success' => false,
-        'error'   => $e->getMessage()
+        'error'   => 'Internal server error.'
     ], 500);
 }

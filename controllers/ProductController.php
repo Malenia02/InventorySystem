@@ -611,11 +611,11 @@ final class ProductController
         }
 
         if ($salePrice !== null && $salePrice < 0) {
-            throw new InvalidArgumentException('Sale price cannot be negative.');
+            throw new InvalidArgumentException('Sale percentage cannot be negative.');
         }
 
-        if ($salePrice !== null && $salePrice > $price) {
-            throw new InvalidArgumentException('Sale price cannot be greater than regular price.');
+        if ($salePrice !== null && $salePrice > 100) {
+            throw new InvalidArgumentException('Sale percentage cannot be greater than 100.');
         }
 
         if ($reorderLevel < 0) {

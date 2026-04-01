@@ -69,7 +69,7 @@ try {
             "Category '{$category['category_name']}' was added successfully.",
             'bi-tags',
             'text-success',
-            '/inventory_system/category_management/manage_category.php'
+            '/inventory_system/product_management/manage_category.php'
         );
 
         AuthController::logActivity(
@@ -128,7 +128,7 @@ try {
             "Category '{$category['category_name']}' was updated successfully.",
             'bi-pencil-square',
             'text-warning',
-            '/inventory_system/category_management/manage_category.php'
+            '/inventory_system/product_management/manage_category.php'
         );
 
         AuthController::logActivity(
@@ -185,7 +185,7 @@ try {
             "Category '{$category['category_name']}' status changed to " . ucfirst($newStatus) . '.',
             'bi-arrow-repeat',
             'text-info',
-            '/inventory_system/category_management/manage_category.php'
+            '/inventory_system/product_management/manage_category.php'
         );
 
         AuthController::logActivity(

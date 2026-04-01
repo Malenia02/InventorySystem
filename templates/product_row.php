@@ -29,11 +29,7 @@ $isActive = $status === 'active';
 
     <td>₱<?= number_format((float)($product['price'] ?? 0), 2) ?></td>
 
-    <td>
-        <?= !empty($product['sale_price'])
-            ? '₱' . number_format((float)$product['sale_price'], 2)
-            : '-' ?>
-    </td>
+    <td><?= !empty($product['sale_price']) ? rtrim(rtrim(number_format((float) $product['sale_price'], 2), '0'), '.') . '%' : '-' ?></td>
 
     <td><?= !empty($product['vatable']) ? 'Yes' : 'No' ?></td>
     <td><?= (int)($product['reorder_level'] ?? 5) ?></td>

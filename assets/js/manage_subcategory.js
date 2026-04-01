@@ -4,6 +4,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const table = document.getElementById("subcategoryTable");
   const addForm = document.getElementById("addSubcategoryForm");
   const editForm = document.getElementById("editSubcategoryForm");
+  let dataTable = null;
 
   if (!table || !addForm || !editForm) {
     return;
@@ -48,6 +49,26 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function initializeDataTable() {
+    if (typeof simpleDatatables === "undefined" || !simpleDatatables.DataTable) {
+      return;
+    }
+
+    if (dataTable) {
+      try {
+        dataTable.destroy();
+      } catch (error) {
+        console.warn("Failed to destroy existing subcategory DataTable instance.", error);
+      }
+    }
+
+    dataTable = new simpleDatatables.DataTable(table, {
+      searchable: true,
+      fixedHeight: false,
+      perPage: 10
+    });
+  }
+
   function createRowFromHtml(html) {
     const temp = document.createElement("tbody");
     temp.innerHTML = html.trim();
@@ -70,6 +91,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   updateRowNumbers();
+  initializeDataTable();
 
   addForm.addEventListener("submit", (event) => {
     event.preventDefault();

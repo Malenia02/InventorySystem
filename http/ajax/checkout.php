@@ -9,7 +9,7 @@ require_once __DIR__ . '/../../controllers/PosConfigController.php';
 header('Content-Type: application/json; charset=UTF-8');
 
 Middleware::auth()
-    ->role(['admin', 'staff', 'cashier'])
+    ->role(['admin', 'cashier'])
     ->ajax()
     ->methods(['POST'])
     ->csrf();
@@ -19,6 +19,15 @@ function checkout_json(array $payload, int $statusCode = 200): never
     http_response_code($statusCode);
     echo json_encode($payload);
     exit;
+}
+
+function checkout_discount_percent(array $product): float
+{
+    if (empty($product['on_sale']) || !isset($product['sale_price'])) {
+        return 0.0;
+    }
+
+    return max(0.0, min(100.0, (float) $product['sale_price']));
 }
 
 function checkout_normalize_items(array $items): array
@@ -153,9 +162,8 @@ try {
         }
 
         $regularPrice = round((float) ($product['price'] ?? 0), 2);
-        $unitPrice = !empty($product['on_sale']) && $product['sale_price'] !== null
-            ? round((float) $product['sale_price'], 2)
-            : $regularPrice;
+        $discountPercent = checkout_discount_percent($product);
+        $unitPrice = round($regularPrice * (1 - ($discountPercent / 100)), 2);
         $lineSubtotal = round($unitPrice * $quantity, 2);
         $lineDiscount = round(max(0, $regularPrice - $unitPrice) * $quantity, 2);
         $lineTax = !empty($product['vatable']) ? round($lineSubtotal * $vatRate, 2) : 0.0;
@@ -205,6 +213,25 @@ try {
             ':unit_price' => $saleItem['unit_price'],
             ':quantity'   => $saleItem['quantity'],
         ]);
+    }
+
+    $deductStockStmt = $conn->prepare("
+        UPDATE {$table_products}
+        SET quantity = quantity - :deduct_quantity
+        WHERE product_id = :product_id
+          AND quantity >= :available_quantity
+    ");
+
+    foreach ($saleItems as $saleItem) {
+        $deductStockStmt->execute([
+            ':product_id'         => $saleItem['product_id'],
+            ':deduct_quantity'    => $saleItem['quantity'],
+            ':available_quantity' => $saleItem['quantity'],
+        ]);
+
+        if ($deductStockStmt->rowCount() !== 1) {
+            throw new RuntimeException('Stock changed during checkout. Please refresh and try again.');
+        }
     }
 
     $conn->commit();

@@ -19,6 +19,37 @@ $posConfig  = PosConfigController::get($conn);
 $vatRate    = (float) ($posConfig['tax_rate'] ?? 12);
 $defaultCashier = trim((string) ($_SESSION['first_name'] ?? '') . ' ' . (string) ($_SESSION['last_name'] ?? ''));
 $defaultCashier = $defaultCashier !== '' ? $defaultCashier : (string) ($_SESSION['username'] ?? 'Cashier');
+
+$categoryProductCounts = [];
+$totalProductCount = 0;
+foreach ($products as $product) {
+    $categoryId = (int) ($product['category_id'] ?? 0);
+    if ($categoryId > 0) {
+        $categoryProductCounts[$categoryId] = ($categoryProductCounts[$categoryId] ?? 0) + 1;
+    }
+    $totalProductCount++;
+}
+
+function categoryIconClass(string $categoryName): string
+{
+    $normalized = strtolower(trim($categoryName));
+
+    return match (true) {
+        str_contains($normalized, 'beverage'),
+        str_contains($normalized, 'drink'),
+        str_contains($normalized, 'water'),
+        str_contains($normalized, 'juice') => 'bi-cup-straw',
+        str_contains($normalized, 'snack'),
+        str_contains($normalized, 'chips'),
+        str_contains($normalized, 'biscuit') => 'bi-emoji-smile',
+        str_contains($normalized, 'canned') => 'bi-box-seam',
+        str_contains($normalized, 'rice'),
+        str_contains($normalized, 'grain') => 'bi-flower1',
+        str_contains($normalized, 'bread'),
+        str_contains($normalized, 'bakery') => 'bi-basket3',
+        default => 'bi-grid',
+    };
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -68,50 +99,74 @@ require __DIR__ . '/../components/sidebar.php';
       <div class="time-pill" id="timePill">Loading…</div>
     </div>
 
-    <!-- Category bar -->
-    <div class="category-section">
-      <div class="category-bar-wrapper">
-        <button class="cat-arrow" id="categoryPrev">&#8592;</button>
-        <div class="category-bar" id="categoryBar">
-          <button class="cat-btn active" data-id="all">All</button>
-          <?php foreach ($categories as $c): ?>
-            <button class="cat-btn" data-id="<?= $c['category_id'] ?>">
-              <?= htmlspecialchars($c['category_name']) ?>
-            </button>
-          <?php endforeach; ?>
-        </div>
-        <button class="cat-arrow" id="categoryNext">&#8594;</button>
-      </div>
-    </div>
+    <div class="pos-browser">
+      <aside class="cat-sidebar" id="categoryBar">
+        <div class="cat-sidebar-title">Categories</div>
+        <button class="cat-sidebar-item cat-btn active" data-id="all" data-name="All Categories">
+          <span class="cat-sidebar-icon"><i class="bi bi-grid"></i></span>
+          <span class="cat-sidebar-label">All Categories</span>
+          <span class="cat-sidebar-count"><?= $totalProductCount ?></span>
+        </button>
+        <?php foreach ($categories as $c): ?>
+          <?php
+          $categoryId = (int) ($c['category_id'] ?? 0);
+          $categoryName = (string) ($c['category_name'] ?? 'Category');
+          ?>
+          <button class="cat-sidebar-item cat-btn" data-id="<?= $categoryId ?>" data-name="<?= htmlspecialchars($categoryName, ENT_QUOTES, 'UTF-8') ?>">
+            <span class="cat-sidebar-icon"><i class="bi <?= categoryIconClass($categoryName) ?>"></i></span>
+            <span class="cat-sidebar-label"><?= htmlspecialchars($categoryName) ?></span>
+            <span class="cat-sidebar-count"><?= (int) ($categoryProductCounts[$categoryId] ?? 0) ?></span>
+          </button>
+        <?php endforeach; ?>
+      </aside>
 
-    <div class="subcategory-section is-hidden" id="subcategorySection">
-      <div class="subcategory-bar-wrapper">
-        <button class="cat-arrow" id="subcategoryPrev">&#8592;</button>
-        <div class="subcategory-bar" id="subcategoryBar">
-          <button class="subcat-btn active" data-id="all">All</button>
+      <div class="cat-content">
+        <div class="pos-toprow">
+          <div class="pos-breadcrumb" id="posBrowserTitle">All Categories</div>
+          <div class="pos-product-count" id="posProductCount"><?= $totalProductCount ?> items</div>
         </div>
-        <button class="cat-arrow" id="subcategoryNext">&#8594;</button>
-      </div>
-    </div>
+
+        <div class="subcat-bar is-hidden" id="subcategorySection">
+          <div class="subcat-heading">Subcategory</div>
+          <div class="subcat-shell" id="subcategoryShell">
+            <button class="subcat-arrow" id="subcategoryPrevBtn" type="button" aria-label="Previous subcategories">
+              <i class="bi bi-chevron-left"></i>
+            </button>
+            <div class="subcat-row" id="subcategoryBar">
+              <button class="sub-pill subcat-btn active" data-id="all">All</button>
+            </div>
+            <button class="subcat-arrow" id="subcategoryNextBtn" type="button" aria-label="Next subcategories">
+              <i class="bi bi-chevron-right"></i>
+            </button>
+          </div>
+        </div>
 
     <!-- Product grid -->
-    <div class="product-area">
-      <div class="product-grid" id="product-grid">
-        <?php foreach ($products as $p):
-            $price       = $p['on_sale'] ? $p['sale_price'] : $p['price'];
-            $qty         = (int) $p['quantity'];
-            $reorder     = (int) $p['reorder_level'];
-            $stockClass  = '';
+        <div class="product-area">
+          <div class="product-grid" id="product-grid">
+            <?php foreach ($products as $p):
+                $regularPrice = (float) ($p['price'] ?? 0);
+                $salePercent = ((int) ($p['on_sale'] ?? 0) === 1 && isset($p['sale_price']))
+                    ? max(0.0, min(100.0, (float) $p['sale_price']))
+                    : 0.0;
+                $price = $salePercent > 0
+                    ? $regularPrice * (1 - ($salePercent / 100))
+                    : $regularPrice;
+                $qty         = (int) $p['quantity'];
+                $reorder     = (int) $p['reorder_level'];
+                $stockClass  = '';
             if ($qty === 0)              $stockClass = 'stock-out';
             elseif ($qty <= $reorder)    $stockClass = 'stock-low';
         ?>
           <div class="product-card <?= $stockClass ?>"
                data-id="<?= $p['product_id'] ?>"
                data-name="<?= htmlspecialchars($p['product_name']) ?>"
-               data-price="<?= $price ?>"
+               data-price="<?= $regularPrice ?>"
+               data-discount="<?= $salePercent ?>"
                data-vat="<?= $p['vatable'] ?>"
                data-category="<?= $p['category_id'] ?>"
                data-subcategory="<?= (int) ($p['subcategory_id'] ?? 0) ?>"
+               data-subcategory-name="<?= htmlspecialchars((string) ($p['subcategory_name'] ?? 'General'), ENT_QUOTES, 'UTF-8') ?>"
                data-qty="<?= $qty ?>"
                data-reorder="<?= $reorder ?>"
                data-stock="<?= $qty ?>">
@@ -128,6 +183,7 @@ require __DIR__ . '/../components/sidebar.php';
                  alt="<?= htmlspecialchars($p['product_name']) ?>">
             <div class="card-body">
               <div class="card-name"><?= htmlspecialchars($p['product_name']) ?></div>
+              <div class="card-subcat"><?= htmlspecialchars((string) ($p['subcategory_name'] ?? 'General')) ?></div>
               <div class="card-price">₱<?= number_format((float)$price, 2) ?></div>
               <div class="qty-row">
                 <button class="qty-btn decrease">−</button>
@@ -141,6 +197,8 @@ require __DIR__ . '/../components/sidebar.php';
 
       <!-- Pagination -->
       <div class="pagination-bar" id="productPagination"></div>
+    </div>
+      </div>
     </div>
 
   </div>
@@ -538,8 +596,11 @@ sidebarObserver.observe(document.body, { attributes: true, attributeFilter: ['cl
 const categoryBar = document.getElementById('categoryBar');
 const subcategoryBar = document.getElementById('subcategoryBar');
 const subcategorySection = document.getElementById('subcategorySection');
-const subcategoryPrev = document.getElementById('subcategoryPrev');
-const subcategoryNext = document.getElementById('subcategoryNext');
+const subcategoryShell = document.getElementById('subcategoryShell');
+const subcategoryPrevBtn = document.getElementById('subcategoryPrevBtn');
+const subcategoryNextBtn = document.getElementById('subcategoryNextBtn');
+const posBrowserTitle = document.getElementById('posBrowserTitle');
+const posProductCount = document.getElementById('posProductCount');
 
 function setActiveButton(container, selector, activeId) {
     container.querySelectorAll(selector).forEach((button) => {
@@ -550,9 +611,10 @@ function setActiveButton(container, selector, activeId) {
 function renderSubcategoryBar() {
     if (activeCategoryId === 'all') {
         activeSubcategoryId = 'all';
-        subcategoryBar.innerHTML = '<button class="subcat-btn active" data-id="all">All</button>';
+        subcategoryBar.innerHTML = '<button class="sub-pill subcat-btn active" data-id="all">All</button>';
         subcategoryBar.scrollLeft = 0;
         subcategorySection.classList.add('is-hidden');
+        updateSubcategoryOverflow();
         return;
     }
 
@@ -562,9 +624,10 @@ function renderSubcategoryBar() {
 
     if (scopedSubcategories.length === 0) {
         activeSubcategoryId = 'all';
-        subcategoryBar.innerHTML = '<button class="subcat-btn active" data-id="all">All</button>';
+        subcategoryBar.innerHTML = '<button class="sub-pill subcat-btn active" data-id="all">All</button>';
         subcategoryBar.scrollLeft = 0;
         subcategorySection.classList.add('is-hidden');
+        updateSubcategoryOverflow();
         return;
     }
 
@@ -573,41 +636,56 @@ function renderSubcategoryBar() {
     }
 
     subcategoryBar.innerHTML = `
-        <button class="subcat-btn ${activeSubcategoryId === 'all' ? 'active' : ''}" data-id="all">All</button>
+        <button class="sub-pill subcat-btn ${activeSubcategoryId === 'all' ? 'active' : ''}" data-id="all">All</button>
         ${scopedSubcategories.map((subcategory) => `
-            <button class="subcat-btn ${String(subcategory.subcategory_id) === activeSubcategoryId ? 'active' : ''}" data-id="${subcategory.subcategory_id}">
+            <button class="sub-pill subcat-btn ${String(subcategory.subcategory_id) === activeSubcategoryId ? 'active' : ''}" data-id="${subcategory.subcategory_id}">
                 ${escapeHtml(subcategory.subcategory_name)}
             </button>
         `).join('')}
     `;
     subcategoryBar.scrollLeft = 0;
     subcategorySection.classList.remove('is-hidden');
+    updateSubcategoryOverflow();
 }
 
-function syncCategoryArrowState() {
-    const prev = document.getElementById('categoryPrev');
-    const next = document.getElementById('categoryNext');
-    prev.disabled = categoryBar.scrollLeft <= 0;
-    next.disabled = categoryBar.scrollLeft + categoryBar.clientWidth >= categoryBar.scrollWidth - 2;
-}
-
-function syncSubcategoryArrowState() {
-    if (subcategorySection.classList.contains('is-hidden')) {
-        subcategoryPrev.disabled = true;
-        subcategoryNext.disabled = true;
+function updateSubcategoryOverflow() {
+    if (!subcategoryBar || !subcategoryShell || !subcategoryPrevBtn || !subcategoryNextBtn) {
         return;
     }
 
-    subcategoryPrev.disabled = subcategoryBar.scrollLeft <= 0;
-    subcategoryNext.disabled = subcategoryBar.scrollLeft + subcategoryBar.clientWidth >= subcategoryBar.scrollWidth - 2;
+    const canScroll = subcategoryBar.scrollWidth > subcategoryBar.clientWidth + 4;
+    const atStart = subcategoryBar.scrollLeft <= 4;
+    const atEnd = subcategoryBar.scrollLeft + subcategoryBar.clientWidth >= subcategoryBar.scrollWidth - 4;
+
+    subcategoryShell.classList.toggle('has-overflow', canScroll);
+    subcategoryShell.classList.toggle('show-left-fade', canScroll && !atStart);
+    subcategoryShell.classList.toggle('show-right-fade', canScroll && !atEnd);
+
+    subcategoryPrevBtn.disabled = !canScroll || atStart;
+    subcategoryNextBtn.disabled = !canScroll || atEnd;
 }
 
-function queueSubcategoryArrowStateSync() {
-    window.requestAnimationFrame(syncSubcategoryArrowState);
-}
+function updateBrowserHeader(matchedCount = null) {
+    const activeCategoryButton = categoryBar.querySelector(`.cat-btn[data-id="${CSS.escape(activeCategoryId)}"]`);
+    const categoryName = activeCategoryButton?.dataset.name || 'All Categories';
 
-categoryBar.addEventListener('scroll', syncCategoryArrowState);
-subcategoryBar.addEventListener('scroll', syncSubcategoryArrowState);
+    let title = categoryName;
+    if (activeSubcategoryId !== 'all') {
+        const activeSubcategoryButton = subcategoryBar.querySelector(`.subcat-btn[data-id="${CSS.escape(activeSubcategoryId)}"]`);
+        const subcategoryName = activeSubcategoryButton?.textContent?.trim();
+        if (subcategoryName) {
+            title = `${categoryName} / ${subcategoryName}`;
+        }
+    }
+
+    if (posBrowserTitle) {
+        posBrowserTitle.textContent = title;
+    }
+
+    if (posProductCount && matchedCount !== null) {
+        posProductCount.textContent = `${matchedCount} item${matchedCount === 1 ? '' : 's'}`;
+    }
+}
 
 categoryBar.addEventListener('click', (event) => {
     const button = event.target.closest('.cat-btn');
@@ -618,7 +696,6 @@ categoryBar.addEventListener('click', (event) => {
     currentPage = 1;
     setActiveButton(categoryBar, '.cat-btn', activeCategoryId);
     renderSubcategoryBar();
-    queueSubcategoryArrowStateSync();
     applyFilters();
 });
 
@@ -632,10 +709,17 @@ subcategoryBar.addEventListener('click', (event) => {
     applyFilters();
 });
 
-document.getElementById('categoryPrev').addEventListener('click', () => categoryBar.scrollBy({ left: -160, behavior: 'smooth' }));
-document.getElementById('categoryNext').addEventListener('click', () => categoryBar.scrollBy({ left:  160, behavior: 'smooth' }));
-subcategoryPrev.addEventListener('click', () => subcategoryBar.scrollBy({ left: -160, behavior: 'smooth' }));
-subcategoryNext.addEventListener('click', () => subcategoryBar.scrollBy({ left:  160, behavior: 'smooth' }));
+subcategoryBar.addEventListener('scroll', updateSubcategoryOverflow);
+
+subcategoryPrevBtn?.addEventListener('click', () => {
+    subcategoryBar.scrollBy({ left: -220, behavior: 'smooth' });
+});
+
+subcategoryNextBtn?.addEventListener('click', () => {
+    subcategoryBar.scrollBy({ left: 220, behavior: 'smooth' });
+});
+
+window.addEventListener('resize', updateSubcategoryOverflow);
 
 // ================================================================
 //  SEARCH
@@ -658,6 +742,8 @@ function applyFilters() {
         const searchMatch   = searchTerm === '' || card.dataset.name.toLowerCase().includes(searchTerm);
         return categoryMatch && subcategoryMatch && searchMatch;
     });
+
+    updateBrowserHeader(matched.length);
 
     productCards.forEach(c => c.style.display = 'none');
 
@@ -697,8 +783,6 @@ function buildPagination(active, total) {
 }
 
 renderSubcategoryBar();
-syncCategoryArrowState();
-queueSubcategoryArrowStateSync();
 applyFilters();
 
 // ================================================================
