@@ -403,6 +403,18 @@ try {
         'error'   => 'Invalid action.'
     ], 400);
 
+} catch (InvalidArgumentException $e) {
+    jsonResponse([
+        'success' => false,
+        'error'   => $e->getMessage()
+    ], 422);
+
+} catch (RuntimeException $e) {
+    jsonResponse([
+        'success' => false,
+        'error'   => $e->getMessage()
+    ], 400);
+
 } catch (Throwable $e) {
     error_log('[product_actions] ' . $e->getMessage());
 

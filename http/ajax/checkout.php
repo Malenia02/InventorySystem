@@ -215,25 +215,6 @@ try {
         ]);
     }
 
-    $deductStockStmt = $conn->prepare("
-        UPDATE {$table_products}
-        SET quantity = quantity - :deduct_quantity
-        WHERE product_id = :product_id
-          AND quantity >= :available_quantity
-    ");
-
-    foreach ($saleItems as $saleItem) {
-        $deductStockStmt->execute([
-            ':product_id'         => $saleItem['product_id'],
-            ':deduct_quantity'    => $saleItem['quantity'],
-            ':available_quantity' => $saleItem['quantity'],
-        ]);
-
-        if ($deductStockStmt->rowCount() !== 1) {
-            throw new RuntimeException('Stock changed during checkout. Please refresh and try again.');
-        }
-    }
-
     $conn->commit();
 
     AuthController::logActivity(

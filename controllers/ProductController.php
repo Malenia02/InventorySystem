@@ -13,6 +13,7 @@ final class ProductController
         'image/jpeg' => 'jpg',
         'image/png'  => 'png',
         'image/webp' => 'webp',
+        'image/avif' => 'avif',
     ];
     private const ALLOWED_PRODUCT_STATUSES = ['active', 'inactive'];
 
@@ -155,10 +156,10 @@ final class ProductController
 
         $mimeType = mime_content_type($tmpFile);
         if (!is_string($mimeType) || !array_key_exists($mimeType, self::ALLOWED_MIME_TYPES)) {
-            throw new RuntimeException('Invalid file type. Only JPG, PNG, and WEBP are allowed.');
+            throw new RuntimeException('Invalid file type. Only JPG, PNG, WEBP, and AVIF are allowed.');
         }
 
-        if (getimagesize($tmpFile) === false) {
+        if ($mimeType !== 'image/avif' && getimagesize($tmpFile) === false) {
             throw new RuntimeException('Uploaded file is not a valid image.');
         }
 

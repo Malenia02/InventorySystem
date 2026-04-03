@@ -91,7 +91,8 @@ function renderNotificationItems(array $items, string $emptyTitle, string $empty
     <div class="d-flex align-items-center justify-content-between">
         <a href="/inventory_system/index.php" class="logo d-flex align-items-center">
             <img src="<?= HOSTURL ?>/assets/img/logo.png" alt="">
-            <span class="d-none d-lg-block">POS</span>
+            <span class="d-none d-lg-block">StockWise
+</span>
         </a>
         <i class="bi bi-list toggle-sidebar-btn"></i>
     </div>

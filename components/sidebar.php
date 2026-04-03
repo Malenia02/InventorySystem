@@ -4,7 +4,10 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 $current_page = basename($_SERVER['PHP_SELF']);
-$isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
+$userRole = (string) ($_SESSION['role'] ?? '');
+$isAdmin = $userRole === 'admin';
+$isCashier = $userRole === 'cashier';
+$isStaff = $userRole === 'staff';
 
 $productPages = [
     'pos.php',
@@ -25,6 +28,50 @@ $reportPages = [
     'sales_report.php',
     'inventory_report.php'
 ];
+
+$inventoryLinks = [];
+
+if ($isAdmin || $isCashier) {
+    $inventoryLinks[] = [
+        'page' => 'pos.php',
+        'href' => '/inventory_system/product_management/pos.php',
+        'label' => 'POS / Sales',
+    ];
+}
+
+if ($isAdmin) {
+    $inventoryLinks[] = [
+        'page' => 'manage_product.php',
+        'href' => '/inventory_system/product_management/manage_product.php',
+        'label' => 'Manage Products',
+    ];
+
+    $inventoryLinks[] = [
+        'page' => 'bulk_upload_products.php',
+        'href' => '/inventory_system/product_management/bulk_upload_products.php',
+        'label' => 'Bulk Create Products',
+    ];
+
+    $inventoryLinks[] = [
+        'page' => 'manage_category.php',
+        'href' => '/inventory_system/product_management/manage_category.php',
+        'label' => 'Manage Categories',
+    ];
+
+    $inventoryLinks[] = [
+        'page' => 'manage_subcategory.php',
+        'href' => '/inventory_system/product_management/manage_subcategory.php',
+        'label' => 'Manage Subcategories',
+    ];
+
+    $inventoryLinks[] = [
+        'page' => 'manage_supplier.php',
+        'href' => '/inventory_system/supplier_management/manage_supplier.php',
+        'label' => 'Manage Suppliers',
+    ];
+}
+
+$showInventoryMenu = $inventoryLinks !== [];
 ?>
 
 <aside id="sidebar" class="sidebar">
@@ -79,66 +126,35 @@ $reportPages = [
             </li>
         <?php endif; ?>
 
-        <li class="nav-item">
-            <a
-                class="nav-link <?= in_array($current_page, $productPages, true) ? '' : 'collapsed' ?>"
-                data-bs-target="#product-nav"
-                data-bs-toggle="collapse"
-                href="#"
-            >
-                <i class="bi bi-box-seam"></i>
-                <span>Inventory Management</span>
-                <i class="bi bi-chevron-down ms-auto"></i>
-            </a>
+        <?php if ($showInventoryMenu): ?>
+            <li class="nav-item">
+                <a
+                    class="nav-link <?= in_array($current_page, $productPages, true) ? '' : 'collapsed' ?>"
+                    data-bs-target="#product-nav"
+                    data-bs-toggle="collapse"
+                    href="#"
+                >
+                    <i class="bi bi-box-seam"></i>
+                    <span>Inventory Management</span>
+                    <i class="bi bi-chevron-down ms-auto"></i>
+                </a>
 
-            <ul
-                id="product-nav"
-                class="nav-content collapse <?= in_array($current_page, $productPages, true) ? 'show' : '' ?>"
-                data-bs-parent="#sidebar-nav"
-            >
-                <li>
-                    <a href="/inventory_system/product_management/pos.php" class="<?= $current_page === 'pos.php' ? 'active' : '' ?>">
-                        <i class="bi bi-circle"></i>
-                        <span>POS / Sales</span>
-                    </a>
-                </li>
-
-                <li>
-                    <a href="/inventory_system/product_management/manage_product.php" class="<?= $current_page === 'manage_product.php' ? 'active' : '' ?>">
-                        <i class="bi bi-circle"></i>
-                        <span>Manage Products</span>
-                    </a>
-                </li>
-
-                <li>
-                    <a href="/inventory_system/product_management/bulk_upload_products.php" class="<?= $current_page === 'bulk_upload_products.php' ? 'active' : '' ?>">
-                        <i class="bi bi-circle"></i>
-                        <span>Bulk Create Products</span>
-                    </a>
-                </li>
-
-                <li>
-                    <a href="/inventory_system/product_management/manage_category.php" class="<?= $current_page === 'manage_category.php' ? 'active' : '' ?>">
-                        <i class="bi bi-circle"></i>
-                        <span>Manage Categories</span>
-                    </a>
-                </li>
-
-                <li>
-                    <a href="/inventory_system/product_management/manage_subcategory.php" class="<?= $current_page === 'manage_subcategory.php' ? 'active' : '' ?>">
-                        <i class="bi bi-circle"></i>
-                        <span>Manage Subcategories</span>
-                    </a>
-                </li>
-
-                <li>
-                    <a href="/inventory_system/supplier_management/manage_supplier.php" class="<?= $current_page === 'manage_supplier.php' ? 'active' : '' ?>">
-                        <i class="bi bi-circle"></i>
-                        <span>Manage Suppliers</span>
-                    </a>
-                </li>
-            </ul>
-        </li>
+                <ul
+                    id="product-nav"
+                    class="nav-content collapse <?= in_array($current_page, $productPages, true) ? 'show' : '' ?>"
+                    data-bs-parent="#sidebar-nav"
+                >
+                    <?php foreach ($inventoryLinks as $link): ?>
+                        <li>
+                            <a href="<?= htmlspecialchars($link['href'], ENT_QUOTES, 'UTF-8') ?>" class="<?= $current_page === $link['page'] ? 'active' : '' ?>">
+                                <i class="bi bi-circle"></i>
+                                <span><?= htmlspecialchars($link['label'], ENT_QUOTES, 'UTF-8') ?></span>
+                            </a>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </li>
+        <?php endif; ?>
 
         <?php if ($isAdmin): ?>
             <li class="nav-item">
@@ -172,6 +188,13 @@ $reportPages = [
             <a class="nav-link <?= $current_page === 'profile.php' ? '' : 'collapsed' ?>" href="/inventory_system/profile.php">
                 <i class="bi bi-person"></i>
                 <span>My Profile</span>
+            </a>
+        </li>
+
+        <li class="nav-item">
+            <a class="nav-link <?= $current_page === 'settings.php' ? '' : 'collapsed' ?>" href="/inventory_system/settings.php">
+                <i class="bi bi-gear"></i>
+                <span>Account Settings</span>
             </a>
         </li>
 

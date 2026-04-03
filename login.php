@@ -52,22 +52,111 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
 <?php require __DIR__ . '/components/head.php'; ?>
 
 <body>
+<style>
+    body {
+        min-height: 100vh;
+        background:
+            linear-gradient(rgba(28, 26, 23, 0.48), rgba(28, 26, 23, 0.48)),
+            linear-gradient(135deg, rgba(184, 130, 42, 0.18), rgba(245, 244, 240, 0.12)),
+            url('/inventory_system/assets/img/supermarket-unsplash.jpg') center center / cover no-repeat fixed;
+    }
+
+    .login-shell {
+        width: min(100%, 1180px);
+        margin: 0 auto;
+    }
+
+    .login-panel {
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 24px;
+        box-shadow: 0 24px 70px rgba(17, 24, 39, 0.18);
+        backdrop-filter: blur(8px);
+    }
+
+    .login-panel .card {
+        background: transparent;
+        border: 0;
+        box-shadow: none !important;
+    }
+
+    .login-brand-copy {
+        color: #fffdf8;
+        text-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .login-brand-copy .eyebrow {
+        display: inline-block;
+        margin-bottom: 14px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .login-brand-copy h1 {
+        font-size: clamp(2rem, 4vw, 3.4rem);
+        font-weight: 700;
+        line-height: 1.05;
+        margin-bottom: 12px;
+    }
+
+    .login-brand-copy p {
+        max-width: 32rem;
+        margin: 0;
+        font-size: 1rem;
+        color: rgba(255, 253, 248, 0.86);
+    }
+
+    .login-logo span {
+        color: #ffffff;
+        font-weight: 700;
+        letter-spacing: 0.01em;
+    }
+
+    @media (max-width: 991.98px) {
+        body {
+            background-attachment: scroll;
+        }
+
+        .login-brand-copy {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .login-brand-copy p {
+            margin: 0 auto;
+        }
+    }
+</style>
 <main>
-    <div class="container">
+    <div class="container login-shell">
         <section class="section register min-vh-100 d-flex flex-column align-items-center justify-content-center py-4">
             <div class="container">
-                <div class="row justify-content-center">
-                    <div class="col-lg-4 col-md-6 d-flex flex-column align-items-center justify-content-center">
+                <div class="row justify-content-center align-items-center g-4">
+                    <div class="col-lg-6 d-flex align-items-center">
+                        <div class="login-brand-copy">
+                            <span class="eyebrow">Store Access</span>
+                            <h1>Run your store from one clean dashboard.</h1>
+                            <p>Secure login for inventory, sales, and reporting in a light storefront-inspired experience.</p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-5 col-md-7 d-flex flex-column align-items-center justify-content-center">
 
                         <div class="d-flex justify-content-center py-4">
-                            <a href="/inventory_system/index.php" class="logo d-flex align-items-center w-auto">
+                            <a href="/inventory_system/index.php" class="logo login-logo d-flex align-items-center w-auto">
                                 <img src="/inventory_system/assets/img/logo.png" alt="Logo">
-                                <span class="d-none d-lg-block">NiceAdmin</span>
+                                <span class="d-none d-lg-block">StockWise</span>
                             </a>
                         </div>
 
-                        <div class="card mb-3 shadow-sm">
-                            <div class="card-body">
+                        <div class="card mb-3 shadow-sm login-panel">
+                            <div class="card-body p-4 p-lg-4">
                                 <div class="pt-4 pb-2">
                                     <h5 class="card-title text-center pb-0 fs-4">Login to Your Account</h5>
                                     <p class="text-center small">Enter your username and password to log in</p>

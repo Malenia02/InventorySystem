@@ -14,6 +14,69 @@ require __DIR__ . '/../components/head.php';
 ?>
 <!DOCTYPE html>
 <html lang="en">
+<head>
+    <style>
+        .modal-message-center {
+            text-align: center;
+            font-weight: 500;
+            margin-bottom: 12px;
+        }
+
+        .modal-modern .modal-content {
+            border: 0;
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 1rem 3rem rgba(0,0,0,.18);
+        }
+
+        .modal-modern .modal-header {
+            border-bottom: 0;
+            padding: 1rem 1.5rem;
+        }
+
+        .modal-modern .modal-body {
+            padding: 1.5rem;
+        }
+
+        .modal-modern .modal-footer {
+            border-top: 0;
+            padding: 1rem 1.5rem 1.5rem;
+        }
+
+        .modal-modern .form-label {
+            font-weight: 600;
+            margin-bottom: .45rem;
+            color: #495057;
+        }
+
+        .modal-modern .form-control,
+        .modal-modern .form-select,
+        .modal-modern .input-group-text {
+            border-radius: .75rem;
+        }
+
+        .modal-modern .modal-section-title {
+            font-size: .95rem;
+            font-weight: 700;
+            color: #6c757d;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: .5rem;
+            margin-bottom: .75rem;
+        }
+
+        .modal-modern .modal-side-card {
+            border: 1px solid #e9ecef;
+            background: #f8f9fa;
+            border-radius: 1rem;
+            padding: 1rem;
+            height: 100%;
+        }
+
+        .modal-modern .btn {
+            border-radius: .75rem;
+        }
+    </style>
+</head>
 <body>
 
 <?php
@@ -146,32 +209,36 @@ require __DIR__ . '/../components/sidebar.php';
                                 </div>
 
                                 <div class="modal-body">
-                                    <div id="supplierMessage" class="mb-3"></div>
+                                    <div id="supplierMessage" class="modal-message-center"></div>
 
-                                    <div class="row g-3">
-                                        <div class="col-12">
-                                            <label class="form-label">Supplier Name</label>
-                                            <input type="text" class="form-control" name="supplier_name" id="supplier_name" required>
-                                        </div>
+                                    <div class="modal-side-card">
+                                        <div class="modal-section-title">Supplier Details</div>
 
-                                        <div class="col-md-6">
-                                            <label class="form-label">Contact Person</label>
-                                            <input type="text" class="form-control" name="contact_person">
-                                        </div>
+                                        <div class="row g-3">
+                                            <div class="col-12">
+                                                <label class="form-label">Supplier Name</label>
+                                                <input type="text" class="form-control" name="supplier_name" id="supplier_name" required>
+                                            </div>
 
-                                        <div class="col-md-6">
-                                            <label class="form-label">Phone</label>
-                                            <input type="text" class="form-control" name="phone">
-                                        </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Contact Person</label>
+                                                <input type="text" class="form-control" name="contact_person">
+                                            </div>
 
-                                        <div class="col-12">
-                                            <label class="form-label">Email</label>
-                                            <input type="email" class="form-control" name="email">
-                                        </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Phone</label>
+                                                <input type="text" class="form-control" name="phone">
+                                            </div>
 
-                                        <div class="col-12">
-                                            <label class="form-label">Address</label>
-                                            <textarea class="form-control" name="address" rows="3"></textarea>
+                                            <div class="col-12">
+                                                <label class="form-label">Email</label>
+                                                <input type="email" class="form-control" name="email">
+                                            </div>
+
+                                            <div class="col-12">
+                                                <label class="form-label">Address</label>
+                                                <textarea class="form-control" name="address" rows="3"></textarea>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -206,32 +273,36 @@ require __DIR__ . '/../components/sidebar.php';
                                 </div>
 
                                 <div class="modal-body">
-                                    <div id="editSupplierMessage" class="mb-3"></div>
+                                    <div id="editSupplierMessage" class="modal-message-center"></div>
 
-                                    <div class="row g-3">
-                                        <div class="col-12">
-                                            <label class="form-label">Supplier Name</label>
-                                            <input type="text" class="form-control" name="supplier_name" id="editSupplierName" required>
-                                        </div>
+                                    <div class="modal-side-card">
+                                        <div class="modal-section-title">Supplier Details</div>
 
-                                        <div class="col-md-6">
-                                            <label class="form-label">Contact Person</label>
-                                            <input type="text" class="form-control" name="contact_person" id="editSupplierContact">
-                                        </div>
+                                        <div class="row g-3">
+                                            <div class="col-12">
+                                                <label class="form-label">Supplier Name</label>
+                                                <input type="text" class="form-control" name="supplier_name" id="editSupplierName" required>
+                                            </div>
 
-                                        <div class="col-md-6">
-                                            <label class="form-label">Phone</label>
-                                            <input type="text" class="form-control" name="phone" id="editSupplierPhone">
-                                        </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Contact Person</label>
+                                                <input type="text" class="form-control" name="contact_person" id="editSupplierContact">
+                                            </div>
 
-                                        <div class="col-12">
-                                            <label class="form-label">Email</label>
-                                            <input type="email" class="form-control" name="email" id="editSupplierEmail">
-                                        </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Phone</label>
+                                                <input type="text" class="form-control" name="phone" id="editSupplierPhone">
+                                            </div>
 
-                                        <div class="col-12">
-                                            <label class="form-label">Address</label>
-                                            <textarea class="form-control" name="address" id="editSupplierAddress" rows="3"></textarea>
+                                            <div class="col-12">
+                                                <label class="form-label">Email</label>
+                                                <input type="email" class="form-control" name="email" id="editSupplierEmail">
+                                            </div>
+
+                                            <div class="col-12">
+                                                <label class="form-label">Address</label>
+                                                <textarea class="form-control" name="address" id="editSupplierAddress" rows="3"></textarea>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
