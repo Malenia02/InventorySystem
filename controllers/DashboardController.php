@@ -123,7 +123,7 @@ final class DashboardController
                 p.product_name,
                 p.photo,
                 p.price,
-                SUM(si.quantity) AS total_sold,
+                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_sold,
                 SUM(si.quantity * si.unit_price) AS total_revenue
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.sale_id

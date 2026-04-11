@@ -9,13 +9,21 @@ Middleware::auth()->role(['admin']);
 
 $csrf_token = Middleware::generateCsrfToken();
 $suppliers  = SupplierController::all($conn);
-
-require __DIR__ . '/../components/head.php';
+$pageTitle = 'Supplier Management';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <?php require __DIR__ . '/../components/head.php'; ?>
     <style>
+        .modal {
+            z-index: 2000;
+        }
+
+        .modal-backdrop {
+            z-index: 1990;
+        }
+
         .modal-message-center {
             text-align: center;
             font-weight: 500;
@@ -116,77 +124,37 @@ require __DIR__ . '/../components/sidebar.php';
     </button>
 </div>
 
-                        <div class="table-responsive mt-3">
-                            <table class="table table-striped table-hover align-middle" id="suppliersTable">
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Supplier Name</th>
-                                        <th>Contact Person</th>
-                                        <th>Phone</th>
-                                        <th>Email</th>
-                                        <th>Address</th>
-                                        <th>Status</th>
-                                        <th style="min-width: 140px;">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (!empty($suppliers)): ?>
-                                        <?php foreach ($suppliers as $index => $supplier): ?>
-                                            <?php
-                                            $supplierId = (int)($supplier['supplier_id'] ?? 0);
-                                            $status = $supplier['status'] ?? 'active';
-                                            ?>
-                                            <tr id="supplierRow<?= $supplierId ?>">
-                                                <td><?= $index + 1 ?></td>
-                                                <td class="supplier-name"><?= htmlspecialchars($supplier['supplier_name'] ?? '') ?></td>
-                                                <td><?= htmlspecialchars($supplier['contact_person'] ?? '—') ?></td>
-                                                <td><?= htmlspecialchars($supplier['phone'] ?? '—') ?></td>
-                                                <td><?= htmlspecialchars($supplier['email'] ?? '—') ?></td>
-                                                <td><?= htmlspecialchars($supplier['address'] ?? '—') ?></td>
-                                                <td>
-                                                    <span class="badge supplier-status-badge <?= $status === 'active' ? 'bg-success' : 'bg-secondary' ?>">
-                                                        <?= ucfirst($status) ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                     <div class="d-flex gap-2 justify-content-center">
-                                                    <button
-                                                        type="button"
-                                                        class="btn btn-sm btn-warning editSupplierBtn"
-                                                        data-id="<?= $supplierId ?>"
-                                                        data-name="<?= htmlspecialchars($supplier['supplier_name'] ?? '') ?>"
-                                                        data-contact="<?= htmlspecialchars($supplier['contact_person'] ?? '') ?>"
-                                                        data-phone="<?= htmlspecialchars($supplier['phone'] ?? '') ?>"
-                                                        data-email="<?= htmlspecialchars($supplier['email'] ?? '') ?>"
-                                                        data-address="<?= htmlspecialchars($supplier['address'] ?? '') ?>"
-                                                        data-status="<?= htmlspecialchars($status) ?>"
-                                                        title="Edit Supplier"
-                                                    >
-                                                        <i class="bi bi-pencil-square"></i>
-                                                    </button>
-
-                                                    <button
-                                                        type="button"
-                                                        class="btn btn-sm <?= $status === 'active' ? 'btn-danger' : 'btn-success' ?> toggleSupplierStatusBtn"
-                                                        data-id="<?= $supplierId ?>"
-                                                        data-name="<?= htmlspecialchars($supplier['supplier_name'] ?? '') ?>"
-                                                        data-status="<?= htmlspecialchars($status) ?>"
-                                                        title="<?= $status === 'active' ? 'Deactivate Supplier' : 'Activate Supplier' ?>"
-                                                    >
-                                                        <i class="bi <?= $status === 'active' ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i>
-                                                    </button>
-                                                </td>
-                                            </div>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    <?php else: ?>
+                        <div class="table-responsive mt-3" style="max-height:500px; overflow-y:auto;">
+                            <div id="suppliersTableShell">
+                                <table class="table table-striped table-bordered" id="suppliersTable">
+                                    <thead>
                                         <tr>
-                                            <td colspan="8" class="text-center text-muted py-4">No suppliers found.</td>
+                                            <th>#</th>
+                                            <th>Supplier Name</th>
+                                            <th>Contact Person</th>
+                                            <th>Phone</th>
+                                            <th>Email</th>
+                                            <th>Address</th>
+                                            <th>Status</th>
+                                            <th style="min-width: 140px;">Actions</th>
                                         </tr>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        <?php if (!empty($suppliers)): ?>
+                                            <?php foreach ($suppliers as $index => $supplier): ?>
+                                                <?php
+                                                $rowNumber = $index + 1;
+                                                require __DIR__ . '/../templates/supplier_row.php';
+                                                ?>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <tr>
+                                                <td colspan="8" class="text-center text-muted py-4">No suppliers found.</td>
+                                            </tr>
+                                        <?php endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -195,8 +163,9 @@ require __DIR__ . '/../components/sidebar.php';
                 <div class="modal fade modal-modern" id="supplierModal" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered">
                         <div class="modal-content">
-                            <form id="supplierForm">
+                            <form id="supplierForm" method="post" action="">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+                                <input type="hidden" name="action" value="add_supplier">
 
                                 <div class="modal-header bg-info-subtle">
                                     <div>
@@ -258,8 +227,9 @@ require __DIR__ . '/../components/sidebar.php';
                 <div class="modal fade modal-modern" id="editSupplierModal" tabindex="-1" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered">
                         <div class="modal-content">
-                            <form id="editSupplierForm">
+                            <form id="editSupplierForm" method="post" action="">
                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
+                                <input type="hidden" name="action" value="edit_supplier">
                                 <input type="hidden" name="supplier_id" id="editSupplierId">
 
                                 <div class="modal-header bg-warning-subtle">
@@ -328,9 +298,11 @@ require __DIR__ . '/../components/sidebar.php';
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-    const table = document.getElementById("suppliersTable");
+    const tableShell = document.getElementById("suppliersTableShell");
+    let table = document.getElementById("suppliersTable");
     const supplierForm = document.getElementById("supplierForm");
     const editSupplierForm = document.getElementById("editSupplierForm");
+    let dataTable = null;
 
     const supplierMessage = document.getElementById("supplierMessage");
     const editSupplierMessage = document.getElementById("editSupplierMessage");
@@ -338,12 +310,42 @@ document.addEventListener("DOMContentLoaded", () => {
     const saveSupplierBtn = document.getElementById("saveSupplierBtn");
     const updateSupplierBtn = document.getElementById("updateSupplierBtn");
 
-    if (window.simpleDatatables && simpleDatatables.DataTable && table) {
-        new simpleDatatables.DataTable(table, {
+    function initializeDataTable() {
+        table = document.getElementById("suppliersTable");
+
+        if (!window.simpleDatatables || !simpleDatatables.DataTable || !table) {
+            return;
+        }
+
+        if (dataTable) {
+            try {
+                dataTable.destroy();
+            } catch (error) {
+                console.warn("Failed to destroy existing supplier DataTable instance.", error);
+            }
+        }
+
+        dataTable = new simpleDatatables.DataTable(table, {
             searchable: true,
-            fixedHeight: true,
+            fixedHeight: false,
             perPage: 10
         });
+    }
+
+    initializeDataTable();
+
+    function destroyDataTable() {
+        if (!dataTable) {
+            return;
+        }
+
+        try {
+            dataTable.destroy();
+        } catch (error) {
+            console.warn("Failed to destroy existing supplier DataTable instance.", error);
+        }
+
+        dataTable = null;
     }
 
     const Toast = Swal.mixin({
@@ -434,7 +436,91 @@ document.addEventListener("DOMContentLoaded", () => {
         return icon;
     }
 
+    function updateRowNumbers() {
+        const tbody = table?.querySelector("tbody");
+        if (!tbody) return;
+
+        tbody.querySelectorAll("tr").forEach((row, index) => {
+            const firstCell = row.querySelector("td:first-child");
+            if (firstCell) {
+                firstCell.textContent = String(index + 1);
+            }
+        });
+    }
+
+    function refreshTableUi() {
+        updateRowNumbers();
+        setTimeout(() => {
+            initializeDataTable();
+        }, 0);
+    }
+
+    function replaceTableBody(tableBodyHtml) {
+        destroyDataTable();
+
+        table = document.getElementById("suppliersTable");
+
+        const tbody = table?.querySelector("tbody");
+        if (!tbody) return false;
+
+        tbody.innerHTML = String(tableBodyHtml || "").trim();
+        refreshTableUi();
+        return true;
+    }
+
+    function replaceTableMarkup(tableHtml) {
+        destroyDataTable();
+
+        if (!tableShell) return false;
+
+        tableShell.innerHTML = String(tableHtml || "").trim();
+        table = document.getElementById("suppliersTable");
+        initializeDataTable();
+        return true;
+    }
+
+    function createRowFromHtml(rowHtml) {
+        const temp = document.createElement("tbody");
+        temp.innerHTML = String(rowHtml || "").trim();
+        return temp.firstElementChild;
+    }
+
+    function prependRow(rowHtml) {
+        destroyDataTable();
+
+        const tbody = table?.querySelector("tbody");
+        const row = createRowFromHtml(rowHtml);
+        if (!tbody || !row) return false;
+
+        const emptyRow = Array.from(tbody.querySelectorAll("tr")).find((existingRow) => {
+            const onlyCell = existingRow.children.length === 1 ? existingRow.children[0] : null;
+            return onlyCell && /No suppliers found/i.test(onlyCell.textContent || "");
+        });
+
+        if (emptyRow) {
+            emptyRow.remove();
+        }
+
+        tbody.prepend(row);
+        refreshTableUi();
+        return true;
+    }
+
+    function replaceRow(rowId, rowHtml) {
+        destroyDataTable();
+
+        const existingRow = document.getElementById(rowId);
+        const newRow = createRowFromHtml(rowHtml);
+        if (!existingRow || !newRow) return false;
+
+        existingRow.replaceWith(newRow);
+        refreshTableUi();
+        return true;
+    }
+
     function addSupplierRow(supplier) {
+        destroyDataTable();
+
         const tbody = table?.querySelector("tbody");
         if (!tbody) return;
 
@@ -506,6 +592,7 @@ document.addEventListener("DOMContentLoaded", () => {
         tr.append(indexCell, nameCell, contactCell, phoneCell, emailCell, addressCell, statusCell, actionsCell);
 
         tbody.prepend(tr);
+        refreshTableUi();
     }
 
     if (supplierForm) {
@@ -532,15 +619,23 @@ document.addEventListener("DOMContentLoaded", () => {
                     const email = formData.get("email") || "Not provided";
                     const address = formData.get("address") || "Not provided";
 
-                    addSupplierRow({
-                        supplier_id: res.supplier_id,
-                        supplier_name: res.supplier_name,
-                        contact_person: formData.get("contact_person"),
-                        phone: formData.get("phone"),
-                        email: formData.get("email"),
-                        address: formData.get("address"),
-                        status: "active"
-                    });
+                    if (res.tableHtml) {
+                        replaceTableMarkup(res.tableHtml);
+                    } else if (res.tableBodyHtml) {
+                        replaceTableBody(res.tableBodyHtml);
+                    } else if (res.newRowHtml) {
+                        prependRow(res.newRowHtml);
+                    } else {
+                        addSupplierRow({
+                            supplier_id: res.supplier_id,
+                            supplier_name: res.supplier_name,
+                            contact_person: formData.get("contact_person"),
+                            phone: formData.get("phone"),
+                            email: formData.get("email"),
+                            address: formData.get("address"),
+                            status: "active"
+                        });
+                    }
 
                     showToast(res.message || "Supplier added successfully.", "success");
                     supplierForm.reset();
@@ -575,8 +670,11 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    if (table) {
-        table.addEventListener("click", (e) => {
+    document.addEventListener("click", (e) => {
+            if (!e.target.closest("#suppliersTable")) {
+                return;
+            }
+
             const editBtn = e.target.closest(".editSupplierBtn");
             const toggleBtn = e.target.closest(".toggleSupplierStatusBtn");
 
@@ -627,25 +725,12 @@ document.addEventListener("DOMContentLoaded", () => {
                                 return;
                             }
 
-                            const row = document.getElementById(`supplierRow${supplierId}`);
-                            if (!row) return;
-
-                            const badge = row.querySelector(".supplier-status-badge");
-                            const button = row.querySelector(".toggleSupplierStatusBtn");
-
-                            if (badge) {
-                                badge.textContent = res.new_status.charAt(0).toUpperCase() + res.new_status.slice(1);
-                                badge.classList.remove("bg-success", "bg-secondary");
-                                badge.classList.add(res.new_status === "active" ? "bg-success" : "bg-secondary");
-                            }
-
-                            if (button) {
-                                button.dataset.status = res.new_status;
-                                button.dataset.name = res.supplier_name || supplierName;
-                                button.classList.remove("btn-danger", "btn-success");
-                                button.classList.add(res.new_status === "active" ? "btn-danger" : "btn-success");
-                                button.title = res.new_status === "active" ? "Deactivate Supplier" : "Activate Supplier";
-                                button.innerHTML = `<i class="bi ${res.new_status === "active" ? "bi-slash-circle" : "bi-check-circle"}"></i>`;
+                            if (res.tableHtml) {
+                                replaceTableMarkup(res.tableHtml);
+                            } else if (res.tableBodyHtml) {
+                                replaceTableBody(res.tableBodyHtml);
+                            } else if (res.newRowHtml) {
+                                replaceRow(`supplierRow${supplierId}`, res.newRowHtml);
                             }
 
                             showDetailedToast(
@@ -668,7 +753,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 return;
             }
         });
-    }
 
     if (editSupplierForm) {
         editSupplierForm.addEventListener("submit", (e) => {
@@ -690,33 +774,18 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
 
                     const supplierId = formData.get("supplier_id");
-                    const row = document.getElementById(`supplierRow${supplierId}`);
                     const supplierName = formData.get("supplier_name") || "";
                     const contactPerson = formData.get("contact_person") || "Not provided";
                     const phone = formData.get("phone") || "Not provided";
                     const email = formData.get("email") || "Not provided";
                     const address = formData.get("address") || "Not provided";
 
-                    if (row) {
-                        row.children[1].textContent = supplierName;
-                        row.children[2].textContent = formData.get("contact_person") || "-";
-                        row.children[3].textContent = formData.get("phone") || "-";
-                        row.children[4].textContent = formData.get("email") || "-";
-                        row.children[5].textContent = formData.get("address") || "-";
-
-                        const editBtn = row.querySelector(".editSupplierBtn");
-                        if (editBtn) {
-                            editBtn.dataset.name = formData.get("supplier_name") || "";
-                            editBtn.dataset.contact = formData.get("contact_person") || "";
-                            editBtn.dataset.phone = formData.get("phone") || "";
-                            editBtn.dataset.email = formData.get("email") || "";
-                            editBtn.dataset.address = formData.get("address") || "";
-                        }
-
-                        const toggleBtn = row.querySelector(".toggleSupplierStatusBtn");
-                        if (toggleBtn) {
-                            toggleBtn.dataset.name = supplierName;
-                        }
+                    if (res.tableHtml) {
+                        replaceTableMarkup(res.tableHtml);
+                    } else if (res.tableBodyHtml) {
+                        replaceTableBody(res.tableBodyHtml);
+                    } else if (res.newRowHtml) {
+                        replaceRow(`supplierRow${supplierId}`, res.newRowHtml);
                     }
 
                     showToast(res.message || "Supplier updated successfully.", "success");

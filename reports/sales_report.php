@@ -138,7 +138,7 @@ try {
             COUNT(DISTINCT s.sale_id) AS sale_count,
             IFNULL(SUM(s.total_amount), 0) AS total_revenue,
             IFNULL(AVG(s.total_amount), 0) AS average_sale,
-            IFNULL(SUM(si.quantity), 0) AS items_sold
+            IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS items_sold
         FROM sales s
         LEFT JOIN sale_items si ON s.sale_id = si.sale_id
         {$whereSql}
@@ -179,7 +179,7 @@ try {
             u.last_name,
             u.username,
             COUNT(si.sale_item_id) AS item_lines,
-            IFNULL(SUM(si.quantity), 0) AS total_items
+            IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
         FROM sales s
         LEFT JOIN users u ON s.user_id = u.user_id
         LEFT JOIN sale_items si ON s.sale_id = si.sale_id
@@ -222,7 +222,7 @@ try {
             p.product_name,
             p.photo,
             p.price,
-            IFNULL(SUM(si.quantity), 0) AS total_sold,
+            IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_sold,
             IFNULL(SUM(si.quantity * si.unit_price), 0) AS total_revenue
         FROM sales s
         INNER JOIN sale_items si ON s.sale_id = si.sale_id
@@ -273,7 +273,7 @@ try {
                 u.last_name,
                 u.username,
                 COUNT(si.sale_item_id) AS item_lines,
-                IFNULL(SUM(si.quantity), 0) AS total_items
+                IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
             FROM sales s
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id

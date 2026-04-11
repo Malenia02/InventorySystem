@@ -1,18 +1,18 @@
 <!-- Vendor JS Files -->
-<script src="<?= HOSTURL ?>/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/apexcharts/apexcharts.min.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/chart.js/chart.umd.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/echarts/echarts.min.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/quill/quill.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/tinymce/tinymce.min.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/php-email-form/validate.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js"></script>
-<script src="<?= HOSTURL ?>/assets/vendor/sweet-alert/sweetalert2.all.min.js"></script>
+<script src="/inventory_system/assets/vendor/bootstrap/js/bootstrap.bundle.min.js"></script>
+<script src="/inventory_system/assets/vendor/simple-datatables/simple-datatables.js"></script>
+<script src="/inventory_system/assets/vendor/apexcharts/apexcharts.min.js"></script>
+<script src="/inventory_system/assets/vendor/chart.js/chart.umd.js"></script>
+<script src="/inventory_system/assets/vendor/echarts/echarts.min.js"></script>
+<script src="/inventory_system/assets/vendor/quill/quill.js"></script>
+<script src="/inventory_system/assets/vendor/tinymce/tinymce.min.js"></script>
+<script src="/inventory_system/assets/vendor/php-email-form/validate.js"></script>
+<script src="/inventory_system/assets/vendor/simple-datatables/simple-datatables.js"></script>
+<script src="/inventory_system/assets/vendor/sweet-alert/sweetalert2.all.min.js"></script>
 
 
 <!-- Template Main JS File -->
-<script src="<?= HOSTURL ?>/assets/js/main.js"></script>
+<script src="/inventory_system/assets/js/main.js"></script>
 
 <!-- Simple-DataTables Init for Staff Table -->
 <script>

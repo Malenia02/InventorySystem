@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/install.php';
 
 use Dotenv\Dotenv;
 
@@ -53,6 +54,67 @@ if (!function_exists('safe_redirect')) {
     {
         header('Location: ' . $location, true, $statusCode);
         exit;
+    }
+}
+
+if (!function_exists('app_runtime_base_url')) {
+    function app_runtime_base_url(string $fallbackUrl): string
+    {
+        $host = (string) ($_SERVER['HTTP_HOST'] ?? '');
+
+        if ($host === '') {
+            return rtrim($fallbackUrl, '/');
+        }
+
+        $isLocalHost = preg_match('/^(localhost|127\.0\.0\.1)(:\d+)?$/i', $host) === 1;
+        if (!$isLocalHost) {
+            return rtrim($fallbackUrl, '/');
+        }
+
+        $fallbackPath = (string) parse_url($fallbackUrl, PHP_URL_PATH);
+        $baseDir = rtrim($fallbackPath, '/');
+        $scheme = app_is_https() ? 'https' : 'http';
+
+        return $scheme . '://' . $host . $baseDir;
+    }
+}
+
+if (!function_exists('app_host_without_port')) {
+    function app_host_without_port(): string
+    {
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        if ($host === '') {
+            return '';
+        }
+
+        if (str_contains($host, ':')) {
+            $parsed = parse_url('http://' . $host, PHP_URL_HOST);
+            if (is_string($parsed) && $parsed !== '') {
+                return $parsed;
+            }
+        }
+
+        return $host;
+    }
+}
+
+if (!function_exists('app_should_force_https')) {
+    function app_should_force_https(): bool
+    {
+        if (app_is_https() || php_sapi_name() === 'cli') {
+            return false;
+        }
+
+        $host = strtolower(app_host_without_port());
+        if ($host === '' || $host === 'localhost' || $host === '127.0.0.1' || $host === '::1') {
+            return false;
+        }
+
+        if (filter_var($host, FILTER_VALIDATE_IP) && app_is_private_or_local_ip($host)) {
+            return false;
+        }
+
+        return true;
     }
 }
 
@@ -120,6 +182,19 @@ if (!headers_sent()) {
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+    header(
+        "Content-Security-Policy: "
+        . "default-src 'self'; "
+        . "base-uri 'self'; "
+        . "form-action 'self'; "
+        . "frame-ancestors 'self'; "
+        . "object-src 'none'; "
+        . "img-src 'self' data: blob: https:; "
+        . "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https:; "
+        . "font-src 'self' data: https://fonts.gstatic.com https:; "
+        . "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; "
+        . "connect-src 'self' ws: wss: http: https:;"
+    );
 
     if (app_is_https()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
@@ -129,7 +204,7 @@ if (!headers_sent()) {
 // ==========================
 // FORCE HTTPS IN PRODUCTION
 // ==========================
-if ($appEnv === 'production' && !app_is_https() && php_sapi_name() !== 'cli') {
+if ($appEnv === 'production' && app_should_force_https()) {
     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $uri  = $_SERVER['REQUEST_URI'] ?? '/inventory_system/';
     safe_redirect('https://' . $host . $uri, 301);
@@ -214,7 +289,7 @@ if (php_sapi_name() !== 'cli' && isset($_SESSION['user_id'])) {
 // CONSTANTS
 // ==========================
 if (!defined('HOSTURL')) {
-    define('HOSTURL', $appUrl);
+    define('HOSTURL', app_runtime_base_url($appUrl));
 }
 
 // ==========================
@@ -227,9 +302,16 @@ $dbpassword   = (string) env_value('DB_PASS', '');
 $dbname       = (string) env_value('DB_NAME', '');
 
 if ($dbusername === '' || $dbname === '') {
-    error_log('[config.php] Missing DB_USER or DB_NAME in .env');
-    http_response_code(500);
-    exit('Application configuration error.');
+    if (!app_is_install_context() && !app_is_install_route()) {
+        error_log('[config.php] Missing DB_USER or DB_NAME in .env');
+
+        if (php_sapi_name() !== 'cli' && !headers_sent()) {
+            safe_redirect(app_install_url());
+        }
+
+        http_response_code(500);
+        exit('Application configuration error.');
+    }
 }
 
 // ==========================

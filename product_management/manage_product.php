@@ -162,7 +162,7 @@ function renderSubcategoryOptions(array $subcategories): string
                                             <th>SKU</th>
                                             <th>Quantity</th>
                                             <th>Price</th>
-                                            <th>Sale %</th>
+                                            <th>Discounts</th>
                                             <th>Vatable</th>
                                             <th>Reorder Level</th>
                                             <th>Status</th>
@@ -174,6 +174,10 @@ function renderSubcategoryOptions(array $subcategories): string
                                             $photo    = !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/img/card.jpg';
                                             $status   = $p['status'] ?? 'inactive';
                                             $isActive = $status === 'active';
+                                            $discountParts = [];
+                                            if (!empty($p['sale_price'])) $discountParts[] = 'Piece: ' . rtrim(rtrim(number_format((float)$p['sale_price'], 2), '0'), '.') . '%';
+                                            if (!empty($p['box_sale_price'])) $discountParts[] = 'Box: ' . rtrim(rtrim(number_format((float)$p['box_sale_price'], 2), '0'), '.') . '%';
+                                            if (!empty($p['case_sale_price'])) $discountParts[] = 'Case: ' . rtrim(rtrim(number_format((float)$p['case_sale_price'], 2), '0'), '.') . '%';
                                         ?>
                                             <tr id="productRow<?= (int)$p['product_id'] ?>">
                                                 <td><?= $index + 1 ?></td>
@@ -188,7 +192,7 @@ function renderSubcategoryOptions(array $subcategories): string
                                                 <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
                                                 <td class="product-quantity"><?= (int)($p['quantity'] ?? 0) ?></td>
                                                 <td>₱<?= number_format((float)($p['price'] ?? 0), 2) ?></td>
-                                                <td><?= !empty($p['sale_price']) ? rtrim(rtrim(number_format((float)$p['sale_price'], 2), '0'), '.') . '%' : '-' ?></td>
+                                                <td><?= $discountParts !== [] ? htmlspecialchars(implode(' | ', $discountParts)) : '-' ?></td>
                                                 <td><?= !empty($p['vatable']) ? 'Yes' : 'No' ?></td>
                                                 <td><?= (int)($p['reorder_level'] ?? 5) ?></td>
                                                 <td>
@@ -207,8 +211,14 @@ function renderSubcategoryOptions(array $subcategories): string
                                                             data-supplier="<?= (int)($p['supplier_id'] ?? 0) ?>"
                                                             data-sku="<?= htmlspecialchars($p['sku'] ?? '') ?>"
                                                             data-price="<?= (float)($p['price'] ?? 0) ?>"
+                                                            data-box_price="<?= htmlspecialchars((string)($p['box_price'] ?? '')) ?>"
+                                                            data-case_price="<?= htmlspecialchars((string)($p['case_price'] ?? '')) ?>"
                                                             data-sale_price="<?= htmlspecialchars((string)($p['sale_price'] ?? '')) ?>"
+                                                            data-box_sale_price="<?= htmlspecialchars((string)($p['box_sale_price'] ?? '')) ?>"
+                                                            data-case_sale_price="<?= htmlspecialchars((string)($p['case_sale_price'] ?? '')) ?>"
                                                             data-vatable="<?= (int)($p['vatable'] ?? 0) ?>"
+                                                            data-pieces_per_box="<?= (int)($p['pieces_per_box'] ?? 1) ?>"
+                                                            data-boxes_per_case="<?= (int)($p['boxes_per_case'] ?? 1) ?>"
                                                             data-reorder="<?= (int)($p['reorder_level'] ?? 5) ?>"
                                                             data-photo="<?= $photo ?>"
                                                             data-bs-toggle="modal"
@@ -330,29 +340,76 @@ function renderSubcategoryOptions(array $subcategories): string
                                                                 </button>
                                                             </div>
                                                         </div>
-
                                                         <div class="col-12 mt-2">
                                                             <div class="modal-section-title">Pricing & Stock</div>
                                                         </div>
 
-                                                        <div class="col-md-4">
-                                                            <label class="form-label">Price</label>
-                                                            <div class="input-group">
-                                                                <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="price" step="0.01" required>
+                                                        <div class="col-12 product-unit-note d-none" data-unit-note="beverage">
+                                                            <div class="alert alert-warning border small mb-0">
+                                                                Beverage items use <strong>Piece</strong> and <strong>Case</strong> in POS. Box selling fields are disabled for this category.
                                                             </div>
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Sale %</label>
+                                                            <label class="form-label">Piece Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="price" step="0.01" min="0" required>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Pieces per Box</label>
+                                                            <input type="number" class="form-control" name="pieces_per_box" value="1" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="box_price" step="0.01" min="0" placeholder="Optional">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Boxes per Case</label>
+                                                            <input type="number" class="form-control" name="boxes_per_case" value="1" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="case_price" step="0.01" min="0" placeholder="Optional">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Piece Discount %</label>
                                                             <div class="input-group">
                                                                 <span class="input-group-text">%</span>
                                                                 <input type="number" class="form-control" name="sale_price" step="0.01" min="0" max="100">
                                                             </div>
                                                         </div>
 
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="box_sale_price" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Initial Quantity</label>
+                                                            <label class="form-label">Case Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="case_sale_price" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Initial Quantity (Pieces)</label>
                                                             <input type="number" class="form-control" name="initial_quantity" value="0" min="0" required>
                                                         </div>
 
@@ -360,6 +417,7 @@ function renderSubcategoryOptions(array $subcategories): string
                                                             <label class="form-label">Reorder Level</label>
                                                             <input type="number" class="form-control" name="reorder_level" value="5" min="0">
                                                         </div>
+
 
                                                         <div class="col-md-6">
                                                             <label class="form-label">Vatable?</label>
@@ -475,19 +533,67 @@ function renderSubcategoryOptions(array $subcategories): string
                                                             <div class="modal-section-title">Pricing & Stock Settings</div>
                                                         </div>
 
-                                                        <div class="col-md-4">
-                                                            <label class="form-label">Price</label>
-                                                            <div class="input-group">
-                                                                <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="price" id="editProductPrice" step="0.01" required>
+                                                        <div class="col-12 product-unit-note d-none" data-unit-note="beverage">
+                                                            <div class="alert alert-warning border small mb-0">
+                                                                Beverage items use <strong>Piece</strong> and <strong>Case</strong> in POS. Box selling fields are disabled for this category.
                                                             </div>
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Sale %</label>
+                                                            <label class="form-label">Piece Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="price" id="editProductPrice" step="0.01" min="0" required>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Pieces per Box</label>
+                                                            <input type="number" class="form-control" name="pieces_per_box" id="editProductPiecesPerBox" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="box_price" id="editProductBoxPrice" step="0.01" min="0">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Boxes per Case</label>
+                                                            <input type="number" class="form-control" name="boxes_per_case" id="editProductBoxesPerCase" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="case_price" id="editProductCasePrice" step="0.01" min="0">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Piece Discount %</label>
                                                             <div class="input-group">
                                                                 <span class="input-group-text">%</span>
                                                                 <input type="number" class="form-control" name="sale_price" id="editProductSalePrice" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="box_sale_price" id="editProductBoxSalePrice" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="case_sale_price" id="editProductCaseSalePrice" step="0.01" min="0" max="100">
                                                             </div>
                                                         </div>
 
@@ -692,7 +798,7 @@ function renderSubcategoryOptions(array $subcategories): string
     </main>
 
     <?php require __DIR__ . '/../components/js_script.php'; ?>
-    <script src="<?= HOSTURL ?>/assets/js/manage_product.js"></script>
+    <script src="/inventory_system/assets/js/manage_product.js"></script>
 
 </body>
 </html>

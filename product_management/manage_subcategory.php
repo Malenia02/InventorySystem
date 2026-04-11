@@ -210,6 +210,6 @@ require __DIR__ . '/../components/breadcrumb.php';
 </section>
 
 <?php require __DIR__ . '/../components/js_script.php'; ?>
-<script src="<?= HOSTURL ?>/assets/js/manage_subcategory.js"></script>
+<script src="/inventory_system/assets/js/manage_subcategory.js"></script>
 </body>
 </html>

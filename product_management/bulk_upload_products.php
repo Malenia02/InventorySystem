@@ -7,7 +7,7 @@ require_once __DIR__ . '/../controllers/CategoryController.php';
 require_once __DIR__ . '/../controllers/SubcategoryController.php';
 require_once __DIR__ . '/../controllers/SupplierController.php';
 
-Middleware::auth()->role(['admin', 'cashier']);
+Middleware::auth()->role(['admin']);
 
 $csrfToken = Middleware::generateCsrfToken();
 $categories = CategoryController::all($conn);
@@ -259,6 +259,15 @@ $subcategoryOptions = trim((string) ob_get_clean());
                                     <p class="text-muted mb-2">Leave sale price blank if the product is not on sale.</p>
                                     <p class="text-muted mb-0">Status defaults to inactive, or choose active before saving.</p>
                                 </div>
+
+                                <div class="bulk-side-note">
+                                    <h6>Piece, Box, and Case Guide</h6>
+                                    <p class="text-muted mb-2"><strong>Piece</strong> is the smallest selling unit, like one bottle, one sachet, or one pack.</p>
+                                    <p class="text-muted mb-2"><strong>Box</strong> is a grouped pack of pieces. Example: if 1 box contains 12 bottles, set <strong>Pieces per Box</strong> to <strong>12</strong>.</p>
+                                    <p class="text-muted mb-2"><strong>Case</strong> is a larger grouped pack. Example: if 1 case contains 24 pieces, set the case quantity using your product's packaging values and add the <strong>Case Price</strong>.</p>
+                                    <p class="text-muted mb-2 mb-lg-2">Example setup: Piece = 1 bottle, Box = 12 bottles, Case = 24 bottles.</p>
+                                    <p class="text-muted mb-0">If a product does not use boxes, leave <strong>Box Price</strong> blank. For beverage categories, the system uses <strong>Piece</strong> and <strong>Case</strong> in POS.</p>
+                                </div>
                             </div>
                         </div>
                     </form>
@@ -318,22 +327,63 @@ $subcategoryOptions = trim((string) ob_get_clean());
                                     <?= $supplierOptions ?>
                                 </select>
                             </div>
+                            <div class="col-12 bulk-unit-note d-none" data-unit-note="beverage">
+                                <div class="alert alert-warning border small mb-0">
+                                    Beverage items use <strong>Piece</strong> and <strong>Case</strong> in POS. Box selling fields are disabled for this category.
+                                </div>
+                            </div>
                             <div class="col-md-4">
-                                <label class="form-label fw-semibold">Price</label>
+                                <label class="form-label fw-semibold">Piece Price</label>
                                 <div class="input-group">
                                     <span class="input-group-text">₱</span>
                                     <input type="number" class="form-control" name="products[__INDEX__][price]" step="0.01" min="0" required>
                                 </div>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label fw-semibold">Sale %</label>
+                                <label class="form-label fw-semibold">Pieces per Box</label>
+                                <input type="number" class="form-control" name="products[__INDEX__][pieces_per_box]" value="1" min="1" required>
+                            </div>
+                            <div class="col-md-4 bulk-box-field">
+                                <label class="form-label fw-semibold">Box Price</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">₱</span>
+                                    <input type="number" class="form-control" name="products[__INDEX__][box_price]" step="0.01" min="0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">Boxes per Case</label>
+                                <input type="number" class="form-control" name="products[__INDEX__][boxes_per_case]" value="1" min="1" required>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">Case Price</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">₱</span>
+                                    <input type="number" class="form-control" name="products[__INDEX__][case_price]" step="0.01" min="0">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">Piece Discount %</label>
                                 <div class="input-group">
                                     <span class="input-group-text">%</span>
                                     <input type="number" class="form-control" name="products[__INDEX__][sale_price]" step="0.01" min="0" max="100">
                                 </div>
                             </div>
+                            <div class="col-md-4 bulk-box-field">
+                                <label class="form-label fw-semibold">Box Discount %</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">%</span>
+                                    <input type="number" class="form-control" name="products[__INDEX__][box_sale_price]" step="0.01" min="0" max="100">
+                                </div>
+                            </div>
                             <div class="col-md-4">
-                                <label class="form-label fw-semibold">Initial Quantity</label>
+                                <label class="form-label fw-semibold">Case Discount %</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">%</span>
+                                    <input type="number" class="form-control" name="products[__INDEX__][case_sale_price]" step="0.01" min="0" max="100">
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold">Initial Quantity (Pieces)</label>
                                 <input type="number" class="form-control" name="products[__INDEX__][initial_quantity]" value="0" min="0" required>
                             </div>
                             <div class="col-md-4">
@@ -362,6 +412,6 @@ $subcategoryOptions = trim((string) ob_get_clean());
     </template>
 
     <?php require __DIR__ . '/../components/js_script.php'; ?>
-    <script src="<?= HOSTURL ?>/assets/js/bulk_upload_products.js"></script>
+    <script src="/inventory_system/assets/js/bulk_upload_products.js"></script>
 </body>
 </html>

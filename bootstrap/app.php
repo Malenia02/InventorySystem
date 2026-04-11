@@ -3,10 +3,18 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../config/config.php';
 
+if (php_sapi_name() !== 'cli' && !app_is_install_route() && !app_has_database_env()) {
+    safe_redirect(app_install_url());
+}
+
 try {
     require_once DATABASE_PATH . '/database.php';
 } catch (Throwable $e) {
     error_log('[bootstrap] ' . $e->getMessage());
+
+    if (php_sapi_name() !== 'cli' && !app_is_install_route()) {
+        safe_redirect(app_install_url());
+    }
 
     if (php_sapi_name() === 'cli') {
         fwrite(STDERR, "Application startup failed.\n");
@@ -133,3 +141,17 @@ register_shutdown_function(function () {
         exit;
     }
 });
+
+if (php_sapi_name() !== 'cli') {
+    if (app_is_install_route() && app_is_install_locked()) {
+        app_redirect_install_blocked('Installer access is disabled because setup has already been completed for this system.');
+    }
+
+    if (app_is_install_route() && isset($conn) && app_is_fully_installed($conn)) {
+        app_redirect_install_blocked('Installer access is disabled because the application is already installed.');
+    }
+
+    if (!app_is_install_route() && isset($conn) && !app_is_fully_installed($conn)) {
+        safe_redirect(app_install_url());
+    }
+}

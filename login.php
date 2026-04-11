@@ -28,8 +28,14 @@ if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] > 0) {
 // Generate CSRF token for form
 $csrf_token = AuthController::generateCsrfToken();
 $error_message = '';
+$success_message = '';
 $submittedUsername = (string) ($_POST['username'] ?? '');
 $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername);
+
+if (!empty($_SESSION['setup_success'])) {
+    $success_message = (string) $_SESSION['setup_success'];
+    unset($_SESSION['setup_success']);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $result = AuthController::login($conn, $_POST, $logConfig);
@@ -169,6 +175,14 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                                         <div class="col-12">
                                             <div class="alert alert-danger text-center small mb-0">
                                                 <?= htmlspecialchars($error_message, ENT_QUOTES, 'UTF-8') ?>
+                                            </div>
+                                        </div>
+                                    <?php endif; ?>
+
+                                    <?php if ($success_message !== ''): ?>
+                                        <div class="col-12">
+                                            <div class="alert alert-success text-center small mb-0">
+                                                <?= htmlspecialchars($success_message, ENT_QUOTES, 'UTF-8') ?>
                                             </div>
                                         </div>
                                     <?php endif; ?>

@@ -22,6 +22,60 @@ function jsonResponse(array $payload, int $statusCode = 200): never
     exit;
 }
 
+function renderSupplierRow(array $supplier, int $rowNumber = 1): string
+{
+    ob_start();
+    require __DIR__ . '/../../templates/supplier_row.php';
+    return (string) ob_get_clean();
+}
+
+function renderSupplierTableBody(PDO $conn): string
+{
+    $suppliers = SupplierController::all($conn);
+
+    ob_start();
+    if ($suppliers !== []) {
+        foreach ($suppliers as $index => $supplier) {
+            $rowNumber = $index + 1;
+            require __DIR__ . '/../../templates/supplier_row.php';
+        }
+    } else {
+        ?>
+        <tr>
+            <td colspan="8" class="text-center text-muted py-4">No suppliers found.</td>
+        </tr>
+        <?php
+    }
+
+    return (string) ob_get_clean();
+}
+
+function renderSupplierTable(PDO $conn): string
+{
+    ob_start();
+    ?>
+    <table class="table table-striped table-bordered" id="suppliersTable">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Supplier Name</th>
+                <th>Contact Person</th>
+                <th>Phone</th>
+                <th>Email</th>
+                <th>Address</th>
+                <th>Status</th>
+                <th style="min-width: 140px;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?= renderSupplierTableBody($conn) ?>
+        </tbody>
+    </table>
+    <?php
+
+    return (string) ob_get_clean();
+}
+
 function safeCreateNotification(
     PDO $conn,
     ?int $userId,
@@ -110,6 +164,7 @@ try {
         $newStatus = (string)($result['new_status'] ?? ($updatedSupplier['status'] ?? 'inactive'));
         $supplierName = (string)($updatedSupplier['supplier_name'] ?? $supplier['supplier_name'] ?? 'Supplier');
         $statusLabel = ucfirst($newStatus);
+        $newRowHtml = $updatedSupplier ? renderSupplierRow($updatedSupplier) : null;
 
         $conn->commit();
 
@@ -140,7 +195,10 @@ try {
             'message'       => $supplierName . ' is now ' . strtolower($statusLabel) . '.',
             'new_status'    => $newStatus,
             'supplier_id'   => $supplierId,
-            'supplier_name' => $supplierName
+            'supplier_name' => $supplierName,
+            'newRowHtml'    => $newRowHtml,
+            'tableBodyHtml' => renderSupplierTableBody($conn),
+            'tableHtml'     => renderSupplierTable($conn)
         ]);
     }
 
@@ -149,6 +207,14 @@ try {
     $phone         = normalizeInput($_POST['phone'] ?? null, 50);
     $email         = normalizeInput($_POST['email'] ?? null, 150);
     $address       = normalizeInput($_POST['address'] ?? null, 500);
+
+    if ($action === '') {
+        if ($supplierId > 0 && $supplierName !== null) {
+            $action = 'edit_supplier';
+        } elseif ($supplierName !== null) {
+            $action = 'add_supplier';
+        }
+    }
 
     if ($supplierName === null) {
         jsonResponse([
@@ -193,6 +259,8 @@ try {
 
         $newSupplierId   = (int)($result['supplier_id'] ?? 0);
         $newSupplierName = (string)($result['supplier_name'] ?? $supplierName);
+        $newSupplier = SupplierController::getById($conn, $newSupplierId);
+        $newRowHtml = $newSupplier ? renderSupplierRow($newSupplier) : null;
 
         $conn->commit();
 
@@ -223,6 +291,9 @@ try {
             'message'       => $newSupplierName . ' was added successfully.',
             'supplier_id'   => $newSupplierId,
             'supplier_name' => $newSupplierName,
+            'newRowHtml'    => $newRowHtml,
+            'tableBodyHtml' => renderSupplierTableBody($conn),
+            'tableHtml'     => renderSupplierTable($conn),
             'event'         => 'notification_update',
             'type'          => 'supplier'
         ], 201);
@@ -258,6 +329,8 @@ try {
         }
 
         $conn->commit();
+        $updatedSupplier = SupplierController::getById($conn, $supplierId);
+        $newRowHtml = $updatedSupplier ? renderSupplierRow($updatedSupplier) : null;
 
         AuthController::logActivity(
             $conn,
@@ -285,7 +358,10 @@ try {
             'success'       => true,
             'message'       => $supplierName . ' was updated successfully.',
             'supplier_id'   => $supplierId,
-            'supplier_name' => $supplierName
+            'supplier_name' => $supplierName,
+            'newRowHtml'    => $newRowHtml,
+            'tableBodyHtml' => renderSupplierTableBody($conn),
+            'tableHtml'     => renderSupplierTable($conn)
         ]);
     }
 

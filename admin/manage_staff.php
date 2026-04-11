@@ -424,7 +424,7 @@ require __DIR__ . '/../components/sidebar.php';
 <?php require __DIR__ . '/../components/footer.php'; ?>
 <?php require __DIR__ . '/../components/js_script.php'; ?>
 
-<script src="<?= HOSTURL ?>/assets/js/manage_staff.js"></script>
+<script src="/inventory_system/assets/js/manage_staff.js"></script>
 
 </body>
 </html>

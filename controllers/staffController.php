@@ -56,17 +56,22 @@ final class StaffController
                 (:first_name, :last_name, :email, :username, :password, :role, 'active', :photo)
         ");
 
-        $stmt->execute([
-            ':first_name' => $payload['first_name'],
-            ':last_name'  => $payload['last_name'],
-            ':email'      => $payload['email'],
-            ':username'   => $payload['username'],
-            ':password'   => password_hash((string) $payload['password'], PASSWORD_DEFAULT),
-            ':role'       => $payload['role'],
-            ':photo'      => $payload['photo'] ?? self::DEFAULT_PHOTO,
-        ]);
+        try {
+            $stmt->execute([
+                ':first_name' => $payload['first_name'],
+                ':last_name'  => $payload['last_name'],
+                ':email'      => $payload['email'],
+                ':username'   => $payload['username'],
+                ':password'   => password_hash((string) $payload['password'], PASSWORD_DEFAULT),
+                ':role'       => $payload['role'],
+                ':photo'      => $payload['photo'] ?? self::DEFAULT_PHOTO,
+            ]);
 
-        return (int) $conn->lastInsertId();
+            return (int) $conn->lastInsertId();
+        } catch (Throwable $e) {
+            self::deleteStoredPhoto($payload['photo'] ?? null);
+            throw $e;
+        }
     }
 
     public static function updateStaff(PDO $conn, int $id, array $data): void
@@ -112,7 +117,21 @@ final class StaffController
 
         $sql = "UPDATE " . self::TABLE . " SET " . implode(', ', $fields) . " WHERE user_id = :id";
         $stmt = $conn->prepare($sql);
-        $stmt->execute($params);
+
+        try {
+            $stmt->execute($params);
+
+            if (
+                $payload['photo'] !== null
+                && !empty($existing['photo'])
+                && $existing['photo'] !== $payload['photo']
+            ) {
+                self::deleteStoredPhoto((string) $existing['photo']);
+            }
+        } catch (Throwable $e) {
+            self::deleteStoredPhoto($payload['photo'] ?? null);
+            throw $e;
+        }
     }
 
     public static function toggleStatus(PDO $conn, int $id, int $sessionUserId): string
@@ -218,6 +237,41 @@ final class StaffController
             'status_label' => ucfirst($status),
             'photo'        => $photo,
         ];
+    }
+
+    private static function deleteStoredPhoto(?string $photoPath): void
+    {
+        $absolutePath = self::resolveStoredPhotoPath($photoPath);
+        if ($absolutePath === null || !is_file($absolutePath)) {
+            return;
+        }
+
+        @unlink($absolutePath);
+    }
+
+    private static function resolveStoredPhotoPath(?string $photoPath): ?string
+    {
+        $photoPath = trim((string) $photoPath);
+        if ($photoPath === '' || $photoPath === self::DEFAULT_PHOTO || !str_starts_with($photoPath, '/inventory_system/uploads/staff/')) {
+            return null;
+        }
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        $relativePath = substr($photoPath, strlen('/inventory_system'));
+        $absolutePath = $basePath . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+        $realBasePath = realpath($basePath);
+        $realDirectory = realpath(dirname($absolutePath));
+
+        if ($realBasePath === false || $realDirectory === false) {
+            return null;
+        }
+
+        $uploadsBase = $realBasePath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'staff';
+        if (!str_starts_with($realDirectory, $uploadsBase)) {
+            return null;
+        }
+
+        return $absolutePath;
     }
 
     private static function validatePayload(array $data, bool $isUpdate): array

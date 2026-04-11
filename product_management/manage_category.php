@@ -212,7 +212,7 @@ require __DIR__ . '/../components/breadcrumb.php';
 
 <?php require __DIR__ . '/../components/js_script.php'; ?>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
-<script src="<?= HOSTURL ?>/assets/vendor/simple-datatables/simple-datatables.js"></script>
-<script src="<?= HOSTURL ?>/assets/js/manage_category.js"></script>
+<script src="/inventory_system/assets/vendor/simple-datatables/simple-datatables.js"></script>
+<script src="/inventory_system/assets/js/manage_category.js"></script>
 </body>
 </html>

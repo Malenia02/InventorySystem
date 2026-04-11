@@ -182,6 +182,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  function isBeverageCategory(select) {
+    const label = select?.options?.[select.selectedIndex]?.textContent || "";
+    return label.toLowerCase().includes("beverage");
+  }
+
+  function applyProductUnitRules(form, categorySelect) {
+    if (!form || !categorySelect) return;
+
+    const beverageMode = isBeverageCategory(categorySelect);
+    form.querySelectorAll(".product-box-field").forEach((fieldWrap) => {
+      fieldWrap.classList.toggle("d-none", beverageMode);
+
+      fieldWrap.querySelectorAll("input, select, textarea").forEach((field) => {
+        field.disabled = beverageMode;
+        if (beverageMode) {
+          field.value = "";
+        }
+      });
+    });
+
+    form.querySelectorAll('.product-unit-note[data-unit-note="beverage"]').forEach((note) => {
+      note.classList.toggle("d-none", !beverageMode);
+    });
+  }
+
   if (table && window.simpleDatatables && simpleDatatables.DataTable) {
     new simpleDatatables.DataTable(table, {
       searchable: true,
@@ -247,6 +272,7 @@ document.addEventListener("DOMContentLoaded", () => {
       addCategorySelect.value,
       ""
     );
+    applyProductUnitRules(addForm, addCategorySelect);
   });
 
   editCategorySelect?.addEventListener("change", () => {
@@ -256,7 +282,11 @@ document.addEventListener("DOMContentLoaded", () => {
       editCategorySelect.value,
       editSubcategorySelect?.value || ""
     );
+    applyProductUnitRules(editForm, editCategorySelect);
   });
+
+  applyProductUnitRules(addForm, addCategorySelect);
+  applyProductUnitRules(editForm, editCategorySelect);
 
   if (supplierModalEl) {
     supplierModalEl.addEventListener("shown.bs.modal", () => {
@@ -386,25 +416,40 @@ document.addEventListener("DOMContentLoaded", () => {
       // EDIT PRODUCT
       if (editBtn) {
         const d = editBtn.dataset;
+        const editModalForm = document.getElementById("editProductForm");
+        const setEditValue = (selector, value) => {
+          const field = editModalForm?.querySelector(selector);
+          if (field) field.value = value;
+        };
+        const setEditSrc = (selector, value) => {
+          const field = editModalForm?.querySelector(selector);
+          if (field) field.src = value;
+        };
 
-        document.getElementById("editProductId").value = d.id || "";
-        document.getElementById("editProductName").value = d.name || "";
-        document.getElementById("editProductSku").value = d.sku || "";
-        document.getElementById("editProductCategory").value = d.category || "";
+        setEditValue('#editProductId', d.id || "");
+        setEditValue('#editProductName', d.name || "");
+        setEditValue('#editProductSku', d.sku || "");
+        setEditValue('#editProductCategory', d.category || "");
         populateSubcategorySelect(
           editSubcategorySelect,
           editSubcategoryOptions,
           d.category || "",
           d.subcategory || ""
         );
-        document.getElementById("editProductSubcategory").value = d.subcategory || "";
-        document.getElementById("editProductSupplierSelect").value = d.supplier || "";
-        document.getElementById("editProductPrice").value = d.price || 0;
-        document.getElementById("editProductSalePrice").value = d.sale_price || "";
-        document.getElementById("editProductVatable").value = d.vatable || 0;
-        document.getElementById("editProductReorderLevel").value = d.reorder || 5;
-        document.getElementById("editProductPhotoPreview").src =
-          d.photo || "/inventory_system/assets/img/card.jpg";
+        setEditValue('#editProductSubcategory', d.subcategory || "");
+        setEditValue('#editProductSupplierSelect', d.supplier || "");
+        setEditValue('#editProductPrice', d.price || 0);
+        setEditValue('#editProductPiecesPerBox', d.pieces_per_box || 1);
+        setEditValue('#editProductBoxPrice', d.box_price || "");
+        setEditValue('#editProductBoxesPerCase', d.boxes_per_case || 1);
+        setEditValue('#editProductCasePrice', d.case_price || "");
+        setEditValue('#editProductSalePrice', d.sale_price || "");
+        setEditValue('#editProductBoxSalePrice', d.box_sale_price || "");
+        setEditValue('#editProductCaseSalePrice', d.case_sale_price || "");
+        setEditValue('#editProductVatable', d.vatable || 0);
+        setEditValue('#editProductReorderLevel', d.reorder || 5);
+        setEditSrc('#editProductPhotoPreview', d.photo || "/inventory_system/assets/img/card.jpg");
+        applyProductUnitRules(editForm, editCategorySelect);
 
         new bootstrap.Modal(document.getElementById("editProductModal")).show();
         return;

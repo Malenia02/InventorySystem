@@ -103,6 +103,34 @@ function populateBulkSubcategorySelect(select, options, categoryId, selectedValu
   }
 }
 
+function isBulkBeverageCategory(select) {
+  const label = select?.options?.[select.selectedIndex]?.textContent || "";
+  return label.toLowerCase().includes("beverage");
+}
+
+function applyBulkUnitRules(card, categorySelect) {
+  if (!card || !categorySelect) {
+    return;
+  }
+
+  const beverageMode = isBulkBeverageCategory(categorySelect);
+
+  card.querySelectorAll(".bulk-box-field").forEach((fieldWrap) => {
+    fieldWrap.classList.toggle("d-none", beverageMode);
+
+    fieldWrap.querySelectorAll("input, select, textarea").forEach((field) => {
+      field.disabled = beverageMode;
+      if (beverageMode) {
+        field.value = "";
+      }
+    });
+  });
+
+  card.querySelectorAll('.bulk-unit-note[data-unit-note="beverage"]').forEach((note) => {
+    note.classList.toggle("d-none", !beverageMode);
+  });
+}
+
 function addBulkCard() {
   if (!bulkProductCards || !bulkCardTemplate) {
     return;
@@ -149,6 +177,7 @@ function addBulkCard() {
       categorySelect.value,
       subcategorySelect.value
     );
+    applyBulkUnitRules(card, categorySelect);
 
     categorySelect.addEventListener("change", () => {
       populateBulkSubcategorySelect(
@@ -157,6 +186,7 @@ function addBulkCard() {
         categorySelect.value,
         ""
       );
+      applyBulkUnitRules(card, categorySelect);
     });
   }
 

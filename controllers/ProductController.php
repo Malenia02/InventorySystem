@@ -29,10 +29,16 @@ final class ProductController
                 p.supplier_id,
                 p.sku,
                 p.price,
+                p.box_price,
+                p.case_price,
                 p.sale_price,
+                p.box_sale_price,
+                p.case_sale_price,
                 p.on_sale,
                 p.vatable,
                 p.quantity,
+                p.pieces_per_box,
+                p.boxes_per_case,
                 p.photo,
                 p.reorder_level,
                 p.status,
@@ -67,10 +73,16 @@ final class ProductController
                 p.supplier_id,
                 p.sku,
                 p.price,
+                p.box_price,
+                p.case_price,
                 p.sale_price,
+                p.box_sale_price,
+                p.case_sale_price,
                 p.on_sale,
                 p.vatable,
                 p.quantity,
+                p.pieces_per_box,
+                p.boxes_per_case,
                 p.photo,
                 p.reorder_level,
                 p.status,
@@ -104,10 +116,16 @@ final class ProductController
                 p.supplier_id,
                 p.sku,
                 p.price,
+                p.box_price,
+                p.case_price,
                 p.sale_price,
+                p.box_sale_price,
+                p.case_sale_price,
                 p.on_sale,
                 p.vatable,
                 p.quantity,
+                p.pieces_per_box,
+                p.boxes_per_case,
                 p.photo,
                 p.reorder_level,
                 p.status,
@@ -210,10 +228,16 @@ final class ProductController
                     supplier_id,
                     sku,
                     price,
+                    box_price,
+                    case_price,
                     vatable,
                     on_sale,
                     sale_price,
+                    box_sale_price,
+                    case_sale_price,
                     quantity,
+                    pieces_per_box,
+                    boxes_per_case,
                     photo,
                     reorder_level,
                     status
@@ -224,10 +248,16 @@ final class ProductController
                     :supplier_id,
                     :sku,
                     :price,
+                    :box_price,
+                    :case_price,
                     :vatable,
                     :on_sale,
                     :sale_price,
+                    :box_sale_price,
+                    :case_sale_price,
                     0,
+                    :pieces_per_box,
+                    :boxes_per_case,
                     :photo,
                     :reorder_level,
                     :status
@@ -241,9 +271,15 @@ final class ProductController
                 ':supplier_id'   => $payload['supplier_id'],
                 ':sku'           => $payload['sku'],
                 ':price'         => $payload['price'],
+                ':box_price'     => $payload['box_price'],
+                ':case_price'    => $payload['case_price'],
                 ':vatable'       => $payload['vatable'],
-                ':on_sale'       => $payload['sale_price'] !== null ? 1 : 0,
+                ':on_sale'       => self::hasAnyDiscount($payload) ? 1 : 0,
                 ':sale_price'    => $payload['sale_price'],
+                ':box_sale_price'=> $payload['box_sale_price'],
+                ':case_sale_price'=> $payload['case_sale_price'],
+                ':pieces_per_box'=> $payload['pieces_per_box'],
+                ':boxes_per_case'=> $payload['boxes_per_case'],
                 ':photo'         => $payload['photo'],
                 ':reorder_level' => $payload['reorder_level'],
                 ':status'        => $payload['status'],
@@ -269,6 +305,7 @@ final class ProductController
             if ($conn->inTransaction()) {
                 $conn->rollBack();
             }
+            self::deleteStoredPhoto($payload['photo'] ?? null);
             throw $e;
         }
     }
@@ -306,9 +343,15 @@ final class ProductController
                 supplier_id   = :supplier_id,
                 sku           = :sku,
                 price         = :price,
+                box_price     = :box_price,
+                case_price    = :case_price,
                 sale_price    = :sale_price,
+                box_sale_price = :box_sale_price,
+                case_sale_price = :case_sale_price,
                 on_sale       = :on_sale,
                 vatable       = :vatable,
+                pieces_per_box = :pieces_per_box,
+                boxes_per_case = :boxes_per_case,
                 reorder_level = :reorder_level
         ";
 
@@ -319,9 +362,15 @@ final class ProductController
             ':supplier_id'   => $payload['supplier_id'],
             ':sku'           => $payload['sku'],
             ':price'         => $payload['price'],
+            ':box_price'     => $payload['box_price'],
+            ':case_price'    => $payload['case_price'],
             ':sale_price'    => $payload['sale_price'],
-            ':on_sale'       => $payload['sale_price'] !== null ? 1 : 0,
+            ':box_sale_price'=> $payload['box_sale_price'],
+            ':case_sale_price'=> $payload['case_sale_price'],
+            ':on_sale'       => self::hasAnyDiscount($payload) ? 1 : 0,
             ':vatable'       => $payload['vatable'],
+            ':pieces_per_box'=> $payload['pieces_per_box'],
+            ':boxes_per_case'=> $payload['boxes_per_case'],
             ':reorder_level' => $payload['reorder_level'],
             ':id'            => $id,
         ];
@@ -334,7 +383,28 @@ final class ProductController
         $sql .= " WHERE product_id = :id";
 
         $stmt = $conn->prepare($sql);
-        return $stmt->execute($params);
+
+        try {
+            $updated = $stmt->execute($params);
+
+            if (!$updated) {
+                self::deleteStoredPhoto($payload['photo'] ?? null);
+                return false;
+            }
+
+            if (
+                $payload['photo'] !== null
+                && !empty($existing['photo'])
+                && $existing['photo'] !== $payload['photo']
+            ) {
+                self::deleteStoredPhoto((string) $existing['photo']);
+            }
+
+            return true;
+        } catch (Throwable $e) {
+            self::deleteStoredPhoto($payload['photo'] ?? null);
+            throw $e;
+        }
     }
 
     public static function restockProduct(PDO $conn, int $productId, int $quantity, ?int $userId = null): bool
@@ -551,11 +621,22 @@ final class ProductController
                 $productId = self::addProduct($conn, [
                     'name'             => trim((string) ($rowData['product_name'] ?? $rowData['name'] ?? '')),
                     'category_id'      => self::resolveCategoryReference($conn, (string) self::firstFilledValue($rowData, ['category_id', 'category', 'category_name'])),
+                    'subcategory_id'   => self::resolveOptionalSubcategoryReference(
+                        $conn,
+                        (string) self::firstFilledValue($rowData, ['subcategory_id', 'subcategory', 'subcategory_name']),
+                        self::resolveCategoryReference($conn, (string) self::firstFilledValue($rowData, ['category_id', 'category', 'category_name']))
+                    ),
                     'supplier_id'      => self::resolveSupplierReference($conn, (string) self::firstFilledValue($rowData, ['supplier_id', 'supplier', 'supplier_name'])),
                     'sku'              => trim((string) ($rowData['sku'] ?? '')),
                     'price'            => self::requiredNumericCsvValue($rowData['price'] ?? '', 'Price is required.'),
+                    'box_price'        => self::nullableNumericCsvValue($rowData['box_price'] ?? ''),
+                    'case_price'       => self::nullableNumericCsvValue($rowData['case_price'] ?? ''),
                     'sale_price'       => self::nullableNumericCsvValue($rowData['sale_price'] ?? ''),
+                    'box_sale_price'   => self::nullableNumericCsvValue($rowData['box_sale_price'] ?? $rowData['box_discount'] ?? ''),
+                    'case_sale_price'  => self::nullableNumericCsvValue($rowData['case_sale_price'] ?? $rowData['case_discount'] ?? ''),
                     'vatable'          => self::parseBooleanCsvValue($rowData['vatable'] ?? ''),
+                    'pieces_per_box'   => (int) (self::nullableNumericCsvValue($rowData['pieces_per_box'] ?? '') ?? 1),
+                    'boxes_per_case'   => (int) (self::nullableNumericCsvValue($rowData['boxes_per_case'] ?? '') ?? 1),
                     'initial_quantity' => (int) self::normalizeNumericCsvValue($rowData['initial_quantity'] ?? $rowData['quantity'] ?? 0),
                     'reorder_level'    => (int) (self::nullableNumericCsvValue($rowData['reorder_level'] ?? '') ?? self::DEFAULT_REORDER_LEVEL),
                     'status'           => self::parseProductStatus($rowData['status'] ?? ''),
@@ -588,13 +669,27 @@ final class ProductController
         $subcategoryId = !empty($data['subcategory_id']) ? (int) $data['subcategory_id'] : null;
         $supplierId = !empty($data['supplier_id']) ? (int) $data['supplier_id'] : null;
         $price = (float) ($data['price'] ?? 0);
+        $boxPrice = ($data['box_price'] !== '' && $data['box_price'] !== null)
+            ? (float) $data['box_price']
+            : null;
+        $casePrice = ($data['case_price'] !== '' && $data['case_price'] !== null)
+            ? (float) $data['case_price']
+            : null;
         $salePrice = ($data['sale_price'] !== '' && $data['sale_price'] !== null)
             ? (float) $data['sale_price']
+            : null;
+        $boxSalePrice = ($data['box_sale_price'] !== '' && $data['box_sale_price'] !== null)
+            ? (float) $data['box_sale_price']
+            : null;
+        $caseSalePrice = ($data['case_sale_price'] !== '' && $data['case_sale_price'] !== null)
+            ? (float) $data['case_sale_price']
             : null;
         $vatable = !empty($data['vatable']) ? 1 : 0;
         $photo = isset($data['photo']) ? trim((string) $data['photo']) : null;
         $sku = trim((string) ($data['sku'] ?? ''));
         $reorderLevel = isset($data['reorder_level']) ? (int) $data['reorder_level'] : self::DEFAULT_REORDER_LEVEL;
+        $piecesPerBox = max(1, (int) ($data['pieces_per_box'] ?? 1));
+        $boxesPerCase = max(1, (int) ($data['boxes_per_case'] ?? 1));
         $initialQty = !$isUpdate ? max(0, (int) ($data['initial_quantity'] ?? 0)) : 0;
         $userId = isset($data['user_id']) && $data['user_id'] !== '' ? (int) $data['user_id'] : null;
         $status = strtolower(trim((string) ($data['status'] ?? 'inactive')));
@@ -611,6 +706,22 @@ final class ProductController
             throw new InvalidArgumentException('Price cannot be negative.');
         }
 
+        if ($boxPrice !== null && $boxPrice < 0) {
+            throw new InvalidArgumentException('Box price cannot be negative.');
+        }
+
+        if ($casePrice !== null && $casePrice < 0) {
+            throw new InvalidArgumentException('Case price cannot be negative.');
+        }
+
+        if ($boxSalePrice !== null && $boxPrice === null) {
+            throw new InvalidArgumentException('Box discount requires a box price.');
+        }
+
+        if ($caseSalePrice !== null && $casePrice === null) {
+            throw new InvalidArgumentException('Case discount requires a case price.');
+        }
+
         if ($salePrice !== null && $salePrice < 0) {
             throw new InvalidArgumentException('Sale percentage cannot be negative.');
         }
@@ -619,8 +730,32 @@ final class ProductController
             throw new InvalidArgumentException('Sale percentage cannot be greater than 100.');
         }
 
+        if ($boxSalePrice !== null && $boxSalePrice < 0) {
+            throw new InvalidArgumentException('Box discount percentage cannot be negative.');
+        }
+
+        if ($boxSalePrice !== null && $boxSalePrice > 100) {
+            throw new InvalidArgumentException('Box discount percentage cannot be greater than 100.');
+        }
+
+        if ($caseSalePrice !== null && $caseSalePrice < 0) {
+            throw new InvalidArgumentException('Case discount percentage cannot be negative.');
+        }
+
+        if ($caseSalePrice !== null && $caseSalePrice > 100) {
+            throw new InvalidArgumentException('Case discount percentage cannot be greater than 100.');
+        }
+
         if ($reorderLevel < 0) {
             throw new InvalidArgumentException('Reorder level cannot be negative.');
+        }
+
+        if ($piecesPerBox < 1) {
+            throw new InvalidArgumentException('Pieces per box must be at least 1.');
+        }
+
+        if ($boxesPerCase < 1) {
+            throw new InvalidArgumentException('Boxes per case must be at least 1.');
         }
 
         if ($sku === '') {
@@ -641,10 +776,16 @@ final class ProductController
             'subcategory_id'   => $subcategoryId,
             'supplier_id'      => $supplierId,
             'price'            => $price,
+            'box_price'        => $boxPrice,
+            'case_price'       => $casePrice,
             'sale_price'       => $salePrice,
+            'box_sale_price'   => $boxSalePrice,
+            'case_sale_price'  => $caseSalePrice,
             'vatable'          => $vatable,
             'photo'            => $photo,
             'sku'              => $sku,
+            'pieces_per_box'   => $piecesPerBox,
+            'boxes_per_case'   => $boxesPerCase,
             'reorder_level'    => $reorderLevel,
             'initial_quantity' => $initialQty,
             'user_id'          => $userId,
@@ -658,6 +799,48 @@ final class ProductController
         $header = strtolower(trim($header));
         $header = preg_replace('/[^a-z0-9]+/', '_', $header) ?? '';
         return trim($header, '_');
+    }
+
+    private static function deleteStoredPhoto(?string $photoPath): void
+    {
+        $absolutePath = self::resolveStoredPhotoPath($photoPath);
+        if ($absolutePath === null || !is_file($absolutePath)) {
+            return;
+        }
+
+        @unlink($absolutePath);
+    }
+
+    private static function resolveStoredPhotoPath(?string $photoPath): ?string
+    {
+        $photoPath = trim((string) $photoPath);
+        if ($photoPath === '' || !str_starts_with($photoPath, '/inventory_system/uploads/products/')) {
+            return null;
+        }
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        $relativePath = substr($photoPath, strlen('/inventory_system'));
+        $absolutePath = $basePath . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+        $realBasePath = realpath($basePath);
+        $realDirectory = realpath(dirname($absolutePath));
+
+        if ($realBasePath === false || $realDirectory === false) {
+            return null;
+        }
+
+        $uploadsBase = $realBasePath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'products';
+        if (!str_starts_with($realDirectory, $uploadsBase)) {
+            return null;
+        }
+
+        return $absolutePath;
+    }
+
+    private static function hasAnyDiscount(array $payload): bool
+    {
+        return ($payload['sale_price'] ?? null) !== null
+            || ($payload['box_sale_price'] ?? null) !== null
+            || ($payload['case_sale_price'] ?? null) !== null;
     }
 
     private static function isBlankCsvRow(array $row): bool
@@ -793,6 +976,37 @@ final class ProductController
         }
 
         return $supplierId;
+    }
+
+    private static function resolveOptionalSubcategoryReference(PDO $conn, string $value, int $categoryId): ?int
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+
+        if (ctype_digit($value)) {
+            return (int) $value;
+        }
+
+        $stmt = $conn->prepare('
+            SELECT subcategory_id
+            FROM subcategories
+            WHERE category_id = :category_id
+              AND LOWER(subcategory_name) = LOWER(:name)
+            LIMIT 1
+        ');
+        $stmt->execute([
+            ':category_id' => $categoryId,
+            ':name' => $value,
+        ]);
+        $subcategoryId = (int) $stmt->fetchColumn();
+
+        if ($subcategoryId <= 0) {
+            throw new RuntimeException("Subcategory \"{$value}\" was not found for the selected category.");
+        }
+
+        return $subcategoryId;
     }
 
     private static function assertUniqueSku(PDO $conn, string $sku, ?int $excludeId = null): void
