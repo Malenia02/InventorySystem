@@ -71,7 +71,9 @@ final class WebSocketSecurity
         }
 
         if ($secret === '') {
-            $secret = 'inventory-system-local-websocket-secret';
+            $basePath = defined('BASE_PATH') ? (string) BASE_PATH : dirname(__DIR__, 2);
+            $appUrl = function_exists('env_value') ? (string) env_value('APP_URL', '') : '';
+            $secret = hash('sha256', $basePath . '|' . $appUrl . '|websocket-secret');
         }
 
         return $secret;

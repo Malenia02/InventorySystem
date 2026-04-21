@@ -3,6 +3,7 @@
 
 <?php
 require_once __DIR__ . '/bootstrap/app.php';
+require_once __DIR__ . '/middleware/Middleware.php';
 require_once __DIR__ . '/controllers/DashboardController.php';
 
 $pageTitle = 'Dashboard';
@@ -14,9 +15,10 @@ if (!isset($_SESSION['user_id'])) {
 
 $currentRole = strtolower(trim((string) ($_SESSION['role'] ?? '')));
 $isAdmin = $currentRole === 'admin';
+$isCashier = $currentRole === 'cashier';
 
-// ── Allowed periods ───────────────────────────────────────────
-$allowedPeriods = ['today', 'month', 'year'];
+
+$allowedPeriods = ['today', 'week', 'month', 'year'];
 
 function sanitizePeriod(string $key, string $default = 'today'): string {
     global $allowedPeriods;
@@ -27,6 +29,7 @@ function sanitizePeriod(string $key, string $default = 'today'): string {
 function periodLabel(string $period): string {
     return match($period) {
         'today' => 'Today',
+        'week' => 'This Week',
         'month' => 'This Month',
         'year'  => 'This Year',
         default => 'Today',
@@ -39,27 +42,131 @@ function filterUrl(string $key, string $period): string {
     return '?' . http_build_query($params);
 }
 
-// ── Per-card filter periods ───────────────────────────────────
+function formatTransactionNumber(int $saleId, string $saleDate): string {
+    return 'SALE-' . date('Ymd', strtotime($saleDate)) . '-' . str_pad((string) $saleId, 6, '0', STR_PAD_LEFT);
+}
+
+function dashboardEscape(?string $value): string
+{
+    return htmlspecialchars((string) ($value ?? ''), ENT_QUOTES, 'UTF-8');
+}
+
+function dashboardMoneyKpiClass(string $formattedAmount): string
+{
+    $length = strlen($formattedAmount) + 1;
+
+    if ($length >= 17) {
+        return ' dashboard-kpi-value--money-compact';
+    }
+
+    if ($length >= 13) {
+        return ' dashboard-kpi-value--money-tight';
+    }
+
+    return '';
+}
+
+// Ã¢â€â‚¬Ã¢â€â‚¬ Per-card filter periods Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 $salesPeriod   = sanitizePeriod('sales_period',   'today');
 $revPeriod     = sanitizePeriod('rev_period',     'month');
 $reportPeriod  = sanitizePeriod('report_period',  'month');
-$topPeriod     = sanitizePeriod('top_period',     'month');
 $recentPeriod  = sanitizePeriod('recent_period',  'month');
 $payPeriod     = sanitizePeriod('pay_period',     'month');
 $sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
+$chatbotCsrfToken = Middleware::generateCsrfToken();
 
-// ── Fetch all dashboard data ──────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ Fetch all dashboard data Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 $salesData    = DashboardController::salesChange($conn, $salesPeriod);
 $revenueData  = DashboardController::revenueChange($conn, $revPeriod);
-$totalProds   = DashboardController::totalProducts($conn);
+$revenueSalesCount = DashboardController::salesCount($conn, $revPeriod);
+$lowStockCount = DashboardController::lowStockCount($conn);
 $outOfStock   = DashboardController::outOfStockCount($conn);
-$lowStock     = DashboardController::lowStockProducts($conn, 5);
-$topSelling   = DashboardController::topSellingProducts($conn, $topPeriod, 5);
-$recentSales  = DashboardController::recentSales($conn, 10, $recentPeriod);
 $chartData    = DashboardController::salesChartData($conn, $reportPeriod);
 $activityLimit = min(20, max(6, (int)($_GET['activity_limit'] ?? 6)));
 $recentStock  = DashboardController::recentStockActivity($conn, $activityLimit, $isAdmin ? null : $sessionUserId);
 $payBreakdown = DashboardController::paymentBreakdown($conn, $payPeriod);
+$paymentLeader = DashboardController::topPaymentMethodSummary($conn, $payPeriod);
+$reorderWatchlist = DashboardController::chatbotReorderSuggestions($conn, 5);
+$slowMovingWatchlist = DashboardController::chatbotSlowMovingProducts($conn, 5);
+$dormantProducts = DashboardController::noRecentSalesProducts($conn, 30, 5);
+$dormantProductCount = DashboardController::noRecentSalesCount($conn, 30);
+$cashierHighlights = DashboardController::cashierPerformance($conn, $salesPeriod, 5);
+$cashierSalesCount = $isCashier ? DashboardController::userSalesCount($conn, $sessionUserId, $salesPeriod) : 0;
+$cashierRevenue = $isCashier ? DashboardController::userRevenue($conn, $sessionUserId, $revPeriod) : 0.0;
+$cashierItemsSold = $isCashier ? DashboardController::userItemsSold($conn, $sessionUserId, $salesPeriod) : 0;
+$cashierRecentSales = $isCashier ? DashboardController::userRecentSales($conn, $sessionUserId, 10, $recentPeriod) : [];
+$cashierChartData = $isCashier ? DashboardController::userSalesChartData($conn, $sessionUserId, $reportPeriod) : [];
+$cashierPaymentBreakdown = $isCashier ? DashboardController::userPaymentBreakdown($conn, $sessionUserId, $payPeriod) : [];
+$cashierPaymentLeader = $isCashier ? ($cashierPaymentBreakdown[0] ?? null) : null;
+$cashierTodaySalesCount = $isCashier ? DashboardController::userSalesCount($conn, $sessionUserId, 'today') : 0;
+$cashierTodayRevenue = $isCashier ? DashboardController::userRevenue($conn, $sessionUserId, 'today') : 0.0;
+$cashierTodayItemsSold = $isCashier ? DashboardController::userItemsSold($conn, $sessionUserId, 'today') : 0;
+$cashierLastSale = $isCashier ? ($cashierRecentSales[0] ?? null) : null;
+$cashierAverageSale = $cashierTodaySalesCount > 0 ? round($cashierTodayRevenue / $cashierTodaySalesCount, 2) : 0.0;
+$inventoryRiskCount = $lowStockCount + $outOfStock;
+$averageSaleValue = $revenueSalesCount > 0 ? ((float) ($revenueData['current'] ?? 0) / $revenueSalesCount) : null;
+$adminRevenueAmount = (float) ($revenueData['current'] ?? 0);
+$cashierRevenueAmount = (float) $cashierRevenue;
+$averageSaleAmount = (float) ($averageSaleValue ?? 0);
+$adminRevenueKpiDisplay = number_format($adminRevenueAmount, 2);
+$cashierRevenueKpiDisplay = number_format($cashierRevenueAmount, 2);
+$averageSaleKpiDisplay = number_format($averageSaleAmount, 2);
+$adminRevenueKpiClass = dashboardMoneyKpiClass($adminRevenueKpiDisplay);
+$cashierRevenueKpiClass = dashboardMoneyKpiClass($cashierRevenueKpiDisplay);
+$averageSaleKpiClass = dashboardMoneyKpiClass($averageSaleKpiDisplay);
+$stockCoverageDays = null;
+$stockCoverageLowCount = 0;
+
+foreach ($reorderWatchlist as $item) {
+    $qty = (int) ($item['quantity'] ?? 0);
+    $cover = $item['cover_days'] ?? null;
+
+    if ($qty === 0) {
+        $stockCoverageLowCount++;
+        $stockCoverageDays = $stockCoverageDays === null ? 0.0 : min($stockCoverageDays, 0.0);
+    }
+
+    if ($cover !== null) {
+        $cover = (float) $cover;
+        $stockCoverageDays = $stockCoverageDays === null ? $cover : min($stockCoverageDays, $cover);
+    }
+}
+
+$stockCoverageValue = $stockCoverageDays === null ? 'N/A' : number_format($stockCoverageDays, 1) . 'd';
+$stockCoverageNote = $stockCoverageDays === null
+    ? (empty($reorderWatchlist) ? 'No items need replenishment right now' : 'No recent sales history in the watchlist')
+    : ($stockCoverageLowCount > 0
+        ? number_format($stockCoverageLowCount) . ' out-of-stock item(s) in watchlist'
+        : 'Soonest depletion in the watchlist');
+$chatbotRole = $isAdmin ? 'admin' : ($isCashier ? 'cashier' : 'staff');
+$chatbotGreetingText = $isCashier
+    ? 'Hello. Store Assistant is ready to help with your sales, shift summary, and recent transactions.'
+    : 'Hello. Store Assistant is ready to help with your inventory and sales.';
+$chatbotQuickQuestions = $isCashier ? [
+    'My sales today' => 'My sales today',
+    'My revenue today' => 'My revenue today',
+    'My items sold today' => 'My items sold today',
+    'My recent transactions' => 'My recent transactions',
+    'My payment methods' => 'My payment methods',
+    'My shift summary' => 'My shift summary',
+    'My last receipt' => 'My last receipt',
+    'What was my last transaction?' => 'What was my last transaction?',
+] : [
+    'Low stock' => 'What products are low in stock?',
+    'Best sellers today' => 'What sold best today?',
+    'Best sellers week' => 'What sold best this week?',
+    'Revenue today' => 'What is the total revenue today?',
+    'Revenue month' => 'What is the total revenue this month?',
+    'Top revenue products' => 'What products earn the most revenue?',
+    'No sales this month' => 'Which products have no sales this month?',
+    'Reorder advice' => 'Which items should I reorder?',
+    'Slow-moving' => 'Show me slow-moving products.',
+    'Payments' => 'What payment method is used most this month?',
+    'Top category' => 'What category sold best this month?',
+    'Out of stock' => 'How many out-of-stock products are there?',
+    'Last system error' => 'What was the last system error?',
+    'Chatbot errors' => 'Show recent chatbot errors.',
+];
 
 // Chart arrays for JS
 $chartDates   = json_encode(array_column($chartData, 'day'));
@@ -67,9 +174,59 @@ $chartSales   = json_encode(array_map('intval',   array_column($chartData, 'sale
 $chartRevenue = json_encode(array_map('floatval', array_column($chartData, 'revenue')));
 $payLabels    = json_encode(array_map('ucfirst',  array_column($payBreakdown, 'payment_method')));
 $payTotals    = json_encode(array_map('floatval', array_column($payBreakdown, 'total')));
+$cashierChartDates = json_encode(array_column($cashierChartData, 'day'));
+$cashierChartSales = json_encode(array_map('intval', array_column($cashierChartData, 'sales_count')));
+$cashierChartRevenue = json_encode(array_map('floatval', array_column($cashierChartData, 'revenue')));
+$cashierPayLabels = json_encode(array_map('ucfirst', array_column($cashierPaymentBreakdown, 'payment_method')));
+$cashierPayTotals = json_encode(array_map('floatval', array_column($cashierPaymentBreakdown, 'total')));
+
+$dashboardState = [
+    'isAdmin' => $isAdmin,
+    'isCashier' => $isCashier,
+    'salesPeriod' => $salesPeriod,
+    'revPeriod' => $revPeriod,
+    'reportPeriod' => $reportPeriod,
+    'recentPeriod' => $recentPeriod,
+    'payPeriod' => $payPeriod,
+    'activityLimit' => $activityLimit,
+    'salesData' => $salesData,
+    'revenueData' => $revenueData,
+    'lowStockCount' => $lowStockCount,
+    'outOfStock' => $outOfStock,
+    'chartDates' => array_column($chartData, 'day'),
+    'chartSales' => array_map('intval', array_column($chartData, 'sales_count')),
+    'chartRevenue' => array_map('floatval', array_column($chartData, 'revenue')),
+    'payLabels' => array_map('ucfirst', array_column($payBreakdown, 'payment_method')),
+    'payTotals' => array_map('floatval', array_column($payBreakdown, 'total')),
+    'reorderWatchlist' => $reorderWatchlist,
+    'slowMovingWatchlist' => $slowMovingWatchlist,
+    'dormantProducts' => $dormantProducts,
+    'dormantProductCount' => $dormantProductCount,
+    'cashierHighlights' => $cashierHighlights,
+    'cashierSalesCount' => $cashierSalesCount,
+    'cashierRevenue' => $cashierRevenue,
+    'cashierItemsSold' => $cashierItemsSold,
+    'cashierRecentSales' => $cashierRecentSales,
+    'cashierChartDates' => array_column($cashierChartData, 'day'),
+    'cashierChartSales' => array_map('intval', array_column($cashierChartData, 'sales_count')),
+    'cashierChartRevenue' => array_map('floatval', array_column($cashierChartData, 'revenue')),
+    'cashierPayLabels' => array_map('ucfirst', array_column($cashierPaymentBreakdown, 'payment_method')),
+    'cashierPayTotals' => array_map('floatval', array_column($cashierPaymentBreakdown, 'total')),
+    'cashierPaymentLeader' => $cashierPaymentLeader,
+    'cashierTodaySalesCount' => $cashierTodaySalesCount,
+    'cashierTodayRevenue' => $cashierTodayRevenue,
+    'cashierTodayItemsSold' => $cashierTodayItemsSold,
+    'cashierLastSale' => $cashierLastSale,
+    'cashierAverageSale' => $cashierAverageSale,
+    'paymentLeader' => $paymentLeader,
+];
 
 require __DIR__ . '/components/head.php';
 ?>
+<link rel="stylesheet" href="/inventory_system/assets/css/dashboard-chat.css">
+<link rel="stylesheet" href="/inventory_system/assets/css/owner-command-center.css">
+<link rel="stylesheet" href="/inventory_system/assets/css/dashboard-modern.css">
+<script type="application/json" id="dashboardState"><?= htmlspecialchars(json_encode($dashboardState, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), ENT_NOQUOTES, 'UTF-8') ?></script>
 
 <body>
 
@@ -79,38 +236,32 @@ require __DIR__ . '/components/head.php';
     require __DIR__ . '/components/breadcrumb.php';
   ?>
 
-    <section class="section dashboard">
+    <section class="section dashboard dashboard-modern">
       <div class="row">
 
         <!-- Left side columns -->
-        <div class="col-lg-8">
-          <div class="row">
+        <div class="col-lg-8 dashboard-main-column">
+          <div class="row dashboard-kpi-row">
 
             <!-- Sales Card -->
-            <div class="col-xxl-4 col-md-6">
-              <div class="card info-card sales-card">
-                <div class="filter">
-                  <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
-                  <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
-                    <li class="dropdown-header text-start"><h6>Filter</h6></li>
-                    <li><a class="dropdown-item <?= $salesPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('sales_period', 'today') ?>">Today</a></li>
-                    <li><a class="dropdown-item <?= $salesPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('sales_period', 'month') ?>">This Month</a></li>
-                    <li><a class="dropdown-item <?= $salesPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('sales_period', 'year') ?>">This Year</a></li>
-                  </ul>
-                </div>
+            <div class="col-xxl-4 col-md-6 dashboard-kpi-col">
+              <div class="card info-card sales-card dashboard-kpi-card dashboard-panel">
                 <div class="card-body">
-                  <h5 class="card-title">Sales <span>| <?= periodLabel($salesPeriod) ?></span></h5>
-                  <div class="d-flex align-items-center">
+                  <h5 class="card-title dashboard-kpi-title">
+                    <?= $isCashier ? 'My Sales' : 'Critical Items' ?>
+                    <span>| <?= $isCashier ? periodLabel($salesPeriod) : 'Critical' ?></span>
+                  </h5>
+                  <div class="dashboard-kpi-content d-flex align-items-center">
                     <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
-                      <i class="bi bi-cart"></i>
+                      <i class="bi <?= $isCashier ? 'bi-cart' : 'bi-exclamation-triangle' ?>"></i>
                     </div>
-                    <div class="ps-3">
-                      <h6><?= number_format((float)($salesData['current'] ?? 0)) ?></h6>
-                      <?php if ($salesData['change'] > 0): ?>
-                        <span class="<?= $salesData['direction'] === 'up' ? 'text-success' : 'text-danger' ?> small pt-1 fw-bold"><?= $salesData['change'] ?>%</span>
-                        <span class="text-muted small pt-2 ps-1"><?= $salesData['direction'] === 'up' ? 'increase' : 'decrease' ?></span>
+                    <div class="ps-3 dashboard-kpi-copy">
+                      <?php if ($isCashier): ?>
+                        <h6 class="dashboard-kpi-value" title="<?= dashboardEscape(number_format((int) $cashierSalesCount)) ?>"><?= number_format((int) $cashierSalesCount) ?></h6>
+                        <span class="dashboard-kpi-note">Your completed transactions for <?= strtolower(periodLabel($salesPeriod)) ?></span>
                       <?php else: ?>
-                        <span class="text-muted small pt-2">No previous data</span>
+                        <h6 class="dashboard-kpi-value" title="<?= dashboardEscape(number_format((int) $inventoryRiskCount)) ?>"><?= number_format((int) $inventoryRiskCount) ?></h6>
+                        <span class="dashboard-kpi-note">Low stock + out of stock items</span>
                       <?php endif; ?>
                     </div>
                   </div>
@@ -120,49 +271,79 @@ require __DIR__ . '/components/head.php';
 
             <?php if ($isAdmin): ?>
             <!-- Revenue Card -->
-            <div class="col-xxl-4 col-md-6">
-              <div class="card info-card revenue-card">
+            <div class="col-xxl-4 col-md-6 dashboard-kpi-col">
+              <div class="card info-card revenue-card dashboard-kpi-card dashboard-kpi-card--money dashboard-panel">
                 <div class="filter">
                   <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
                   <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
                     <li class="dropdown-header text-start"><h6>Filter</h6></li>
                     <li><a class="dropdown-item <?= $revPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'today') ?>">Today</a></li>
+                    <li><a class="dropdown-item <?= $revPeriod === 'week' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'week') ?>">This Week</a></li>
                     <li><a class="dropdown-item <?= $revPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'month') ?>">This Month</a></li>
                     <li><a class="dropdown-item <?= $revPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'year') ?>">This Year</a></li>
                   </ul>
                 </div>
                 <div class="card-body">
-                  <h5 class="card-title">Revenue <span>| <?= periodLabel($revPeriod) ?></span></h5>
-                  <div class="d-flex align-items-center">
+                  <h5 class="card-title dashboard-kpi-title">Revenue <span>| <?= periodLabel($revPeriod) ?></span></h5>
+                  <div class="dashboard-kpi-content d-flex align-items-center">
                     <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
                       <i class="bi bi-currency-dollar"></i>
                     </div>
-                    <div class="ps-3">
-                      <h6>₱<?= number_format((float)($revenueData['current'] ?? 0), 2) ?></h6>
+                    <div class="ps-3 dashboard-kpi-copy">
+                      <h6 class="dashboard-kpi-value dashboard-kpi-value--money<?= $adminRevenueKpiClass ?>" title="&#8369;<?= dashboardEscape($adminRevenueKpiDisplay) ?>">&#8369;<?= dashboardEscape($adminRevenueKpiDisplay) ?></h6>
                       <?php if ($revenueData['change'] > 0): ?>
-                        <span class="<?= $revenueData['direction'] === 'up' ? 'text-success' : 'text-danger' ?> small pt-1 fw-bold"><?= $revenueData['change'] ?>%</span>
-                        <span class="text-muted small pt-2 ps-1"><?= $revenueData['direction'] === 'up' ? 'increase' : 'decrease' ?></span>
+                        <div class="dashboard-kpi-trend">
+                          <span class="dashboard-kpi-trend-value <?= $revenueData['direction'] === 'up' ? 'text-success' : 'text-danger' ?>"><?= $revenueData['change'] ?>%</span>
+                          <span class="dashboard-kpi-trend-label"><?= $revenueData['direction'] === 'up' ? 'increase' : 'decrease' ?></span>
+                        </div>
                       <?php else: ?>
-                        <span class="text-muted small pt-2">No previous data</span>
+                        <span class="dashboard-kpi-note">No previous data</span>
                       <?php endif; ?>
                     </div>
                   </div>
                 </div>
               </div>
             </div><!-- End Revenue Card -->
+            <?php elseif ($isCashier): ?>
+            <div class="col-xxl-4 col-md-6 dashboard-kpi-col">
+              <div class="card info-card revenue-card dashboard-kpi-card dashboard-kpi-card--money dashboard-panel">
+                <div class="filter">
+                  <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
+                  <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
+                    <li class="dropdown-header text-start"><h6>Filter</h6></li>
+                    <li><a class="dropdown-item <?= $revPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'today') ?>">Today</a></li>
+                    <li><a class="dropdown-item <?= $revPeriod === 'week' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'week') ?>">This Week</a></li>
+                    <li><a class="dropdown-item <?= $revPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'month') ?>">This Month</a></li>
+                    <li><a class="dropdown-item <?= $revPeriod === 'year' ? 'active' : '' ?>" href="<?= filterUrl('rev_period', 'year') ?>">This Year</a></li>
+                  </ul>
+                </div>
+                <div class="card-body">
+                  <h5 class="card-title dashboard-kpi-title">My Revenue <span>| <?= periodLabel($revPeriod) ?></span></h5>
+                  <div class="dashboard-kpi-content d-flex align-items-center">
+                    <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                      <i class="bi bi-currency-dollar"></i>
+                    </div>
+                    <div class="ps-3 dashboard-kpi-copy">
+                      <h6 class="dashboard-kpi-value dashboard-kpi-value--money<?= $cashierRevenueKpiClass ?>" title="&#8369;<?= dashboardEscape($cashierRevenueKpiDisplay) ?>">&#8369;<?= dashboardEscape($cashierRevenueKpiDisplay) ?></h6>
+                      <span class="dashboard-kpi-note">Processed by your account</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
             <?php else: ?>
             <!-- Out of Stock Card -->
-            <div class="col-xxl-4 col-md-6">
-              <div class="card info-card revenue-card">
+            <div class="col-xxl-4 col-md-6 dashboard-kpi-col">
+              <div class="card info-card revenue-card dashboard-kpi-card dashboard-panel">
                 <div class="card-body">
-                  <h5 class="card-title">Out of Stock <span>| Current</span></h5>
-                  <div class="d-flex align-items-center">
+                  <h5 class="card-title dashboard-kpi-title">Out of Stock <span>| Current</span></h5>
+                  <div class="dashboard-kpi-content d-flex align-items-center">
                     <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
                       <i class="bi bi-exclamation-octagon"></i>
                     </div>
-                    <div class="ps-3">
-                      <h6><?= number_format((int) $outOfStock) ?></h6>
-                      <span class="text-muted small pt-2">Items needing replenishment</span>
+                    <div class="ps-3 dashboard-kpi-copy">
+                      <h6 class="dashboard-kpi-value" title="<?= dashboardEscape(number_format((int) $outOfStock)) ?>"><?= number_format((int) $outOfStock) ?></h6>
+                      <span class="dashboard-kpi-note">Items needing replenishment</span>
                     </div>
                   </div>
                 </div>
@@ -170,98 +351,75 @@ require __DIR__ . '/components/head.php';
             </div><!-- End Out of Stock Card -->
             <?php endif; ?>
 
-            <!-- Products Card -->
-            <div class="col-xxl-4 col-xl-12">
-              <div class="card info-card customers-card">
+            <!-- Quick Insight Card -->
+            <div class="col-xxl-4 col-xl-12 dashboard-kpi-col">
+              <div class="card info-card customers-card dashboard-kpi-card <?= $isCashier ? '' : 'dashboard-kpi-card--money' ?> dashboard-panel">
                 <div class="card-body">
-                  <h5 class="card-title">Products <span>| Active</span></h5>
-                  <div class="d-flex align-items-center">
+                  <h5 class="card-title dashboard-kpi-title">
+                    <?= $isCashier ? 'Items Sold' : 'Average Sale' ?>
+                    <span>| <?= $isCashier ? periodLabel($salesPeriod) : periodLabel($revPeriod) ?></span>
+                  </h5>
+                  <div class="dashboard-kpi-content d-flex align-items-center">
                     <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
-                      <i class="bi bi-box-seam"></i>
+                      <i class="bi <?= $isCashier ? 'bi-bag-check' : 'bi-receipt-cutoff' ?>"></i>
                     </div>
-                    <div class="ps-3">
-                      <h6><?= number_format((float)$totalProds) ?></h6>
-                      <?php if ($outOfStock > 0): ?>
-                        <span class="text-danger small pt-1 fw-bold"><?= $outOfStock ?></span>
-                        <span class="text-muted small pt-2 ps-1">out of stock</span>
+                    <div class="ps-3 dashboard-kpi-copy">
+                      <?php if ($isCashier): ?>
+                        <h6 class="dashboard-kpi-value" title="<?= dashboardEscape(number_format((int) $cashierItemsSold)) ?>"><?= number_format((int) $cashierItemsSold) ?></h6>
+                        <span class="dashboard-kpi-note">Piece-equivalent items sold by you</span>
                       <?php else: ?>
-                        <span class="text-success small pt-2">All in stock</span>
+                        <h6 class="dashboard-kpi-value dashboard-kpi-value--money<?= $averageSaleKpiClass ?>" title="&#8369;<?= dashboardEscape($averageSaleKpiDisplay) ?>">&#8369;<?= dashboardEscape($averageSaleKpiDisplay) ?></h6>
+                        <span class="dashboard-kpi-note">
+                          <?= number_format((int) $revenueSalesCount) ?> sales in <?= strtolower(periodLabel($revPeriod)) ?>
+                        </span>
                       <?php endif; ?>
                     </div>
                   </div>
                 </div>
               </div>
-            </div><!-- End Products Card -->
+            </div><!-- End Quick Insight Card -->
 
-            <?php if ($isAdmin): ?>
-            <!-- Reports Chart -->
+            <?php if ($isAdmin) include __DIR__ . '/components/owner_command_center_v2.php'; ?>
+            <?php if ($isAdmin || $isCashier): ?>
+            <!-- Trend Snapshot -->
             <div class="col-12">
-              <div class="card">
+              <div class="card dashboard-panel dashboard-chart-panel">
                 <div class="filter">
                   <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
                   <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
                     <li class="dropdown-header text-start"><h6>Filter</h6></li>
                     <li><a class="dropdown-item <?= $reportPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('report_period', 'today') ?>">Today</a></li>
+                    <li><a class="dropdown-item <?= $reportPeriod === 'week' ? 'active' : '' ?>" href="<?= filterUrl('report_period', 'week') ?>">This Week</a></li>
                     <li><a class="dropdown-item <?= $reportPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('report_period', 'month') ?>">This Month</a></li>
                     <li><a class="dropdown-item <?= $reportPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('report_period', 'year') ?>">This Year</a></li>
                   </ul>
                 </div>
                 <div class="card-body">
-                  <h5 class="card-title">Reports <span>| <?= periodLabel($reportPeriod) ?></span></h5>
+                  <h5 class="card-title dashboard-panel-title"><?= $isCashier ? 'My Sales Trend' : 'Quick Trend' ?> <span>| <?= periodLabel($reportPeriod) ?></span></h5>
 
-                  <!-- Line Chart -->
                   <div id="reportsChart"></div>
-
-                  <script>
-                    document.addEventListener("DOMContentLoaded", () => {
-                      new ApexCharts(document.querySelector("#reportsChart"), {
-                        series: [
-                          { name: 'Sales',   data: <?= $chartSales ?> },
-                          { name: 'Revenue', data: <?= $chartRevenue ?> },
-                        ],
-                        chart: {
-                          height: 350,
-                          type: 'area',
-                          toolbar: { show: false },
-                        },
-                        markers: { size: 4 },
-                        colors: ['#4154f1', '#2eca6a'],
-                        fill: {
-                          type: "gradient",
-                          gradient: { shadeIntensity: 1, opacityFrom: 0.3, opacityTo: 0.4, stops: [0, 90, 100] }
-                        },
-                        dataLabels: { enabled: false },
-                        stroke: { curve: 'smooth', width: 2 },
-                        xaxis: {
-                          type: 'datetime',
-                          categories: <?= $chartDates ?>,
-                        },
-                        tooltip: { x: { format: 'MMM dd, yyyy' } },
-                      }).render();
-                    });
-                  </script>
-                  <!-- End Line Chart -->
 
                 </div>
               </div>
             </div><!-- End Reports -->
             <?php endif; ?>
 
-            <?php if ($isAdmin): ?>
-            <!-- Recent Sales -->
+            <?php if ($isCashier): ?>
+            <!-- My Recent Sales -->
             <div class="col-12">
-              <div class="card recent-sales overflow-auto">
+              <div class="card recent-sales overflow-auto dashboard-panel">
                 <div class="filter">
                   <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
                   <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
                     <li class="dropdown-header text-start"><h6>Filter</h6></li>
                     <li><a class="dropdown-item <?= $recentPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('recent_period', 'today') ?>">Today</a></li>
+                    <li><a class="dropdown-item <?= $recentPeriod === 'week' ? 'active' : '' ?>" href="<?= filterUrl('recent_period', 'week') ?>">This Week</a></li>
                     <li><a class="dropdown-item <?= $recentPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('recent_period', 'month') ?>">This Month</a></li>
                     <li><a class="dropdown-item <?= $recentPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('recent_period', 'year') ?>">This Year</a></li>
                   </ul>
                 </div>
                 <div class="card-body">
-                  <h5 class="card-title">Recent Sales <span>| <?= periodLabel($recentPeriod) ?></span></h5>
+                  <h5 class="card-title dashboard-panel-title">My Recent Sales <span>| <?= periodLabel($recentPeriod) ?></span></h5>
 
                   <table class="table table-borderless datatable">
                     <thead>
@@ -275,19 +433,22 @@ require __DIR__ . '/components/head.php';
                       </tr>
                     </thead>
                     <tbody>
-                      <?php if (empty($recentSales)): ?>
+                      <?php $visibleRecentSales = $cashierRecentSales; ?>
+                      <?php if (empty($visibleRecentSales)): ?>
                         <tr><td colspan="6" class="text-center text-muted py-3">No sales yet</td></tr>
                       <?php else: ?>
-                        <?php foreach ($recentSales as $sale):
-                          $cashier = trim(($sale['first_name'] ?? '') . ' ' . ($sale['last_name'] ?? '')) ?: '—';
+                        <?php foreach ($visibleRecentSales as $sale):
+                          $cashier = $isCashier
+                            ? 'You'
+                            : (trim(($sale['first_name'] ?? '') . ' ' . ($sale['last_name'] ?? '')) ?: '-');
                           $badges  = ['cash' => 'bg-success', 'card' => 'bg-primary', 'gcash' => 'bg-info', 'other' => 'bg-secondary'];
                           $badge   = $badges[$sale['payment_method']] ?? 'bg-secondary';
                         ?>
                           <tr>
-                            <th scope="row"><a href="#">#<?= $sale['sale_id'] ?></a></th>
+                            <th scope="row"><a href="#"><?= htmlspecialchars(formatTransactionNumber((int) $sale['sale_id'], (string) $sale['sale_date'])) ?></a></th>
                             <td><?= htmlspecialchars($cashier) ?></td>
                             <td><?= $sale['item_count'] ?> item<?= $sale['item_count'] != 1 ? 's' : '' ?></td>
-                            <td>₱<?= number_format((float)($sale['total_amount'] ?? 0), 2) ?></td>
+                            <td>&#8369;<?= number_format((float)($sale['total_amount'] ?? 0), 2) ?></td>
                             <td><span class="badge <?= $badge ?>"><?= ucfirst($sale['payment_method']) ?></span></td>
                             <td class="text-muted small"><?= date('M d, Y h:i A', strtotime($sale['sale_date'])) ?></td>
                           </tr>
@@ -301,67 +462,44 @@ require __DIR__ . '/components/head.php';
             </div><!-- End Recent Sales -->
             <?php endif; ?>
 
-            <?php if ($isAdmin): ?>
-            <!-- Top Selling -->
-            <div class="col-12">
-              <div class="card top-selling overflow-auto">
-                <div class="filter">
-                  <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
-                  <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
-                    <li class="dropdown-header text-start"><h6>Filter</h6></li>
-                    <li><a class="dropdown-item <?= $topPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('top_period', 'today') ?>">Today</a></li>
-                    <li><a class="dropdown-item <?= $topPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('top_period', 'month') ?>">This Month</a></li>
-                    <li><a class="dropdown-item <?= $topPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('top_period', 'year') ?>">This Year</a></li>
-                  </ul>
-                </div>
-                <div class="card-body pb-0">
-                  <h5 class="card-title">Top Selling <span>| <?= periodLabel($topPeriod) ?></span></h5>
-
-                  <table class="table table-borderless">
-                    <thead>
-                      <tr>
-                        <th scope="col">Preview</th>
-                        <th scope="col">Product</th>
-                        <th scope="col">Price</th>
-                        <th scope="col">Sold</th>
-                        <th scope="col">Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <?php if (empty($topSelling)): ?>
-                        <tr><td colspan="5" class="text-center text-muted py-3">No sales this month</td></tr>
-                      <?php else: ?>
-                        <?php foreach ($topSelling as $p): ?>
-                          <tr>
-                            <th scope="row">
-                              <a href="#">
-                                <img src="<?= htmlspecialchars($p['photo'] ?: '/inventory_system/assets/uploads/products/images.jpeg') ?>"
-                                     alt="" style="width:50px; height:50px; object-fit:cover; border-radius:6px;">
-                              </a>
-                            </th>
-                            <td><a href="#" class="text-primary fw-bold"><?= htmlspecialchars($p['product_name']) ?></a></td>
-                            <td>₱<?= number_format((float)($p['price'] ?? 0), 2) ?></td>
-                            <td class="fw-bold"><?= number_format((float)($p['total_sold'] ?? 0)) ?></td>
-                            <td>₱<?= number_format((float)($p['total_revenue'] ?? 0), 2) ?></td>
-                          </tr>
-                        <?php endforeach; ?>
-                      <?php endif; ?>
-                    </tbody>
-                  </table>
-
-                </div>
-              </div>
-            </div><!-- End Top Selling -->
-            <?php endif; ?>
-
           </div>
         </div><!-- End Left side columns -->
 
         <!-- Right side columns -->
-        <div class="col-lg-4">
+        <div class="col-lg-4 dashboard-side-column">
 
-          <!-- Recent Activity -->
-          <div class="card">
+          <?php if ($isCashier): ?>
+          <div class="card dashboard-panel dashboard-shift-panel">
+            <div class="card-body">
+              <h5 class="card-title dashboard-panel-title">Shift Snapshot <span>| Today</span></h5>
+              <div class="d-flex flex-column gap-3">
+                <div class="border rounded-4 p-3">
+                  <small class="text-muted d-block mb-1">Transactions completed</small>
+                  <div class="fw-semibold fs-5"><?= number_format((int) $cashierTodaySalesCount) ?></div>
+                </div>
+                <div class="border rounded-4 p-3">
+                  <small class="text-muted d-block mb-1">Revenue processed</small>
+                  <div class="fw-semibold fs-5">&#8369;<?= number_format((float) $cashierTodayRevenue, 2) ?></div>
+                </div>
+                <div class="border rounded-4 p-3">
+                  <small class="text-muted d-block mb-1">Average ticket</small>
+                  <div class="fw-semibold fs-5">&#8369;<?= number_format((float) $cashierAverageSale, 2) ?></div>
+                </div>
+                <div class="border rounded-4 p-3">
+                  <small class="text-muted d-block mb-1">Last transaction</small>
+                  <div class="fw-semibold"><?= $cashierLastSale ? htmlspecialchars(formatTransactionNumber((int) $cashierLastSale['sale_id'], (string) $cashierLastSale['sale_date'])) : 'No sale yet' ?></div>
+                  <small class="text-muted"><?= $cashierLastSale ? htmlspecialchars(date('M d, Y h:i A', strtotime((string) $cashierLastSale['sale_date']))) : 'Start selling to generate activity' ?></small>
+                </div>
+                <div class="d-grid gap-2">
+                  <a href="/inventory_system/product_management/pos.php" class="btn btn-primary btn-sm">Open POS</a>
+                  <a href="/inventory_system/profile.php" class="btn btn-outline-secondary btn-sm">My Profile</a>
+                </div>
+              </div>
+            </div>
+          </div>
+          <?php else: ?>
+          <!-- Alert Stream -->
+          <div class="card dashboard-panel dashboard-alert-card">
             <div class="filter">
               <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
               <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
@@ -372,135 +510,87 @@ require __DIR__ . '/components/head.php';
               </ul>
             </div>
             <div class="card-body">
-              <h5 class="card-title">Recent Activity <span>| Stock</span></h5>
+              <h5 class="card-title dashboard-panel-title">Alert Stream <span>| Alerts</span></h5>
 
-              <div class="activity">
+              <div class="dashboard-alert-stream">
                 <?php if (empty($recentStock)): ?>
-                  <p class="text-muted text-center">No recent activity</p>
+                  <p class="dashboard-alert-empty">No recent activity</p>
                 <?php else: ?>
                   <?php
-                  $actionColors = ['sale' => 'text-primary', 'stock_in' => 'text-success', 'stock_out' => 'text-danger', 'manual_adjust' => 'text-warning'];
+                  $actionMetaMap = [
+                    'sale' => ['item' => 'is-sale', 'qty' => 'text-primary', 'label' => 'Sale'],
+                    'stock_in' => ['item' => 'is-stock-in', 'qty' => 'text-success', 'label' => 'Stock In'],
+                    'stock_out' => ['item' => 'is-stock-out', 'qty' => 'text-danger', 'label' => 'Stock Out'],
+                    'manual_adjust' => ['item' => 'is-adjustment', 'qty' => 'text-warning', 'label' => 'Adjustment'],
+                  ];
                   foreach ($recentStock as $log):
-                    $color = $actionColors[$log['action']] ?? 'text-muted';
-                    $qty   = $log['change_qty'] > 0 ? '+' . $log['change_qty'] : $log['change_qty'];
-                    $time  = date('M d, h:i A', strtotime($log['timestamp']));
-                    $by    = trim(($log['first_name'] ?? '') . ' ' . ($log['last_name'] ?? '')) ?: 'System';
+                    $meta = $actionMetaMap[$log['action']] ?? ['item' => 'is-neutral', 'qty' => 'text-muted', 'label' => ucwords(str_replace('_', ' ', (string) $log['action']))];
+                    $qty = (int) ($log['change_qty'] ?? 0);
+                    $qtyText = $qty > 0 ? '+' . $qty : (string) $qty;
+                    $time = strtotime((string) $log['timestamp']);
+                    $by = trim(((string) ($log['first_name'] ?? '')) . ' ' . ((string) ($log['last_name'] ?? '')));
+                    if ($by === '') {
+                      $by = 'System';
+                    }
                   ?>
-                    <div class="activity-item d-flex">
-                      <div class="activite-label"><?= $time ?></div>
-                      <i class="bi bi-circle-fill activity-badge <?= $color ?> align-self-start"></i>
-                      <div class="activity-content">
-                        <span class="fw-bold"><?= htmlspecialchars($log['product_name']) ?></span>
-                        <span class="<?= $color ?>"><?= $qty ?></span>
-                        <span class="text-muted">(<?= str_replace('_', ' ', $log['action']) ?>)</span><br>
-                        <small class="text-muted">by <?= htmlspecialchars($by) ?></small>
+                    <article class="dashboard-alert-item <?= $meta['item'] ?>">
+                      <div class="dashboard-alert-time">
+                        <span><?= date('M d', $time) ?></span>
+                        <strong><?= date('h:i A', $time) ?></strong>
                       </div>
-                    </div>
+                      <div class="dashboard-alert-body">
+                        <div class="dashboard-alert-top">
+                          <p class="dashboard-alert-product" title="<?= dashboardEscape((string) ($log['product_name'] ?? '')) ?>">
+                            <?= dashboardEscape((string) ($log['product_name'] ?? '')) ?>
+                          </p>
+                          <span class="dashboard-alert-qty <?= $meta['qty'] ?>"><?= dashboardEscape($qtyText) ?></span>
+                        </div>
+                        <div class="dashboard-alert-meta">
+                          <span class="dashboard-alert-chip"><?= dashboardEscape($meta['label']) ?></span>
+                          <span>Current stock <?= number_format((int) ($log['current_qty'] ?? 0)) ?></span>
+                          <span>by <?= dashboardEscape($by) ?></span>
+                        </div>
+                      </div>
+                    </article>
                   <?php endforeach; ?>
                 <?php endif; ?>
               </div>
 
             </div>
           </div><!-- End Recent Activity -->
+          <?php endif; ?>
 
-          <?php if ($isAdmin): ?>
-          <!-- Payment Breakdown (replaces Budget Report) -->
-          <div class="card">
+          <?php if ($isAdmin || $isCashier): ?>
+          <!-- Payment Snapshot -->
+          <div class="card dashboard-panel dashboard-payment-panel">
             <div class="filter">
               <a class="icon" href="#" data-bs-toggle="dropdown"><i class="bi bi-three-dots"></i></a>
               <ul class="dropdown-menu dropdown-menu-end dropdown-menu-arrow">
                 <li class="dropdown-header text-start"><h6>Filter</h6></li>
-                <li><a class="dropdown-item <?= $payPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'today') ?>">Today</a></li>
-                <li><a class="dropdown-item <?= $payPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'month') ?>">This Month</a></li>
-                <li><a class="dropdown-item <?= $payPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'year') ?>">This Year</a></li>
+                    <li><a class="dropdown-item <?= $payPeriod === 'today' ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'today') ?>">Today</a></li>
+                    <li><a class="dropdown-item <?= $payPeriod === 'week' ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'week') ?>">This Week</a></li>
+                    <li><a class="dropdown-item <?= $payPeriod === 'month' ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'month') ?>">This Month</a></li>
+                    <li><a class="dropdown-item <?= $payPeriod === 'year'  ? 'active' : '' ?>" href="<?= filterUrl('pay_period', 'year') ?>">This Year</a></li>
               </ul>
             </div>
             <div class="card-body pb-0">
-              <h5 class="card-title">Payment Methods <span>| <?= periodLabel($payPeriod) ?></span></h5>
+              <h5 class="card-title dashboard-panel-title"><?= $isCashier ? 'My Payment Snapshot' : 'Payment Snapshot' ?> <span>| <?= periodLabel($payPeriod) ?></span></h5>
 
               <div id="paymentChart" style="min-height: 400px;" class="echart"></div>
 
-              <script>
-                document.addEventListener("DOMContentLoaded", () => {
-                  const labels = <?= $payLabels ?>;
-                  const values = <?= $payTotals ?>;
-
-                  if (!labels.length) {
-                    document.getElementById('paymentChart').innerHTML =
-                      '<p class="text-center text-muted py-5">No sales this month</p>';
-                    return;
-                  }
-
-                  echarts.init(document.querySelector("#paymentChart")).setOption({
-                    tooltip: { trigger: 'item', formatter: '{b}: ₱{c} ({d}%)' },
-                    legend: { top: '5%', left: 'center' },
-                    series: [{
-                      name: 'Payment',
-                      type: 'pie',
-                      radius: ['40%', '70%'],
-                      avoidLabelOverlap: false,
-                      label: { show: false, position: 'center' },
-                      emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold' } },
-                      labelLine: { show: false },
-                      data: labels.map((l, i) => ({ name: l, value: values[i] }))
-                    }]
-                  });
-                });
-              </script>
+              <?php if ($isCashier && $cashierPaymentLeader !== null): ?>
+                <div class="pt-3 border-top mt-3">
+                  <small class="text-muted d-block mb-1">Most used payment method</small>
+                  <div class="fw-semibold">
+                    <?= htmlspecialchars(ucfirst((string) ($cashierPaymentLeader['payment_method'] ?? 'Unknown'))) ?>
+                    <span class="text-muted fw-normal">&middot; &#8369;<?= number_format((float) ($cashierPaymentLeader['total'] ?? 0), 2) ?></span>
+                  </div>
+                </div>
+              <?php endif; ?>
 
             </div>
           </div><!-- End Payment Chart -->
           <?php endif; ?>
-
-          <!-- Low Stock Alert (replaces Website Traffic) -->
-          <div class="card">
-            <div class="card-body pb-0">
-              <h5 class="card-title">
-                Low Stock Alert
-                <?php if ($outOfStock > 0): ?>
-                  <span class="badge bg-danger ms-1"><?= $outOfStock ?> out</span>
-                <?php endif; ?>
-              </h5>
-
-              <?php if (empty($lowStock)): ?>
-                <p class="text-center text-muted py-3">
-                  <i class="bi bi-check-circle text-success fs-4 d-block mb-2"></i>
-                  All products are well stocked!
-                </p>
-              <?php else: ?>
-                <table class="table table-sm table-borderless">
-                  <thead>
-                    <tr>
-                      <th>Product</th>
-                      <th class="text-center">Stock</th>
-                      <th class="text-center">Min</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <?php foreach ($lowStock as $p): ?>
-                      <tr>
-                        <td>
-                          <small class="fw-bold d-block"><?= htmlspecialchars($p['product_name']) ?></small>
-                          <small class="text-muted"><?= htmlspecialchars($p['category_name'] ?? '—') ?></small>
-                        </td>
-                        <td class="text-center">
-                          <?php if ($p['quantity'] == 0): ?>
-                            <span class="badge bg-danger">Out</span>
-                          <?php else: ?>
-                            <span class="badge bg-warning text-dark"><?= $p['quantity'] ?></span>
-                          <?php endif; ?>
-                        </td>
-                        <td class="text-center text-muted small"><?= $p['reorder_level'] ?></td>
-                      </tr>
-                    <?php endforeach; ?>
-                  </tbody>
-                </table>
-                <a href="/inventory_system/products.php" class="btn btn-sm btn-outline-primary w-100 mb-3">
-                  View All Products
-                </a>
-              <?php endif; ?>
-            </div>
-          </div><!-- End Low Stock Alert -->
 
         </div><!-- End Right side columns -->
 
@@ -515,7 +605,119 @@ require __DIR__ . '/components/head.php';
     <i class="bi bi-arrow-up-short"></i>
   </a>
 
+  <?php if ($isAdmin || $isCashier): ?>
+ 
+  <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Chatbot launcher Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+  <button
+    type="button"
+    class="dashboard-chatbot-launcher"
+    id="dashboardChatbotLauncher"
+    aria-label="Open store assistant"
+    aria-expanded="false"
+  >
+    <i class="bi bi-robot"></i>
+    <span class="dashboard-chatbot-launcher-dot" aria-hidden="true"></span>
+  </button>
+ 
+  <!-- Ã¢â€â‚¬Ã¢â€â‚¬ Chatbot popup Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ -->
+  <div
+    class="dashboard-chatbot-popup"
+    id="dashboardChatbot"
+    role="dialog"
+    aria-label="Store assistant"
+    aria-hidden="true"
+    data-user-role="<?= htmlspecialchars($chatbotRole, ENT_QUOTES, 'UTF-8') ?>"
+    data-csrf-token="<?= htmlspecialchars($chatbotCsrfToken, ENT_QUOTES, 'UTF-8') ?>"
+  >
+ 
+    <!-- Header -->
+    <div class="dashboard-chatbot-topbar">
+      <div class="dashboard-chatbot-title">
+        <div class="dashboard-chatbot-title-icon">
+          <i class="bi bi-robot"></i>
+        </div>
+        <div class="dashboard-chatbot-title-text">
+          <div class="dashboard-chatbot-title-line">
+            <strong>StockWise AI</strong>
+            <div class="dashboard-chatbot-speaking" id="dashboardChatbotSpeaking" aria-live="polite" hidden>
+              <span class="dashboard-chatbot-speaking-dot" aria-hidden="true"></span>
+              <span class="dashboard-chatbot-speaking-text">Speaking</span>
+            </div>
+          </div>
+          <span>Inventory & Sales Intelligence</span>
+        </div>
+      </div>
+      <div class="dashboard-chatbot-topbar-actions">
+        <button type="button" id="dashboardChatbotVoice" aria-label="Toggle voice replies" title="Toggle voice replies">
+          <i class="bi bi-volume-up-fill"></i>
+        </button>
+        <button type="button" id="dashboardChatbotMinimize" aria-label="Minimize">
+          <i class="bi bi-dash-lg"></i>
+        </button>
+        <button type="button" id="dashboardChatbotClose" aria-label="Close">
+          <i class="bi bi-x-lg"></i>
+        </button>
+      </div>
+    </div>
+ 
+    <!-- Shell -->
+    <div class="dashboard-chatbot-shell">
+ 
+      <!-- Quick-action pills -->
+      <div class="dashboard-chatbot-quick" role="toolbar" aria-label="Quick questions">
+        <?php foreach ($chatbotQuickQuestions as $label => $question): ?>
+          <button type="button" data-chat-question="<?= htmlspecialchars($question, ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></button>
+        <?php endforeach; ?>
+      </div>
+ 
+      <!-- Messages -->
+      <div
+        class="dashboard-chatbot-messages"
+        id="dashboardChatbotMessages"
+        role="log"
+        aria-live="polite"
+        aria-label="Conversation"
+      >
+        <div class="chatbot-message bot">
+          <div class="chatbot-bubble chatbot-bubble-muted" id="dashboardChatbotGreeting">
+            <?= htmlspecialchars($chatbotGreetingText, ENT_QUOTES, 'UTF-8') ?>
+          </div>
+        </div>
+      </div>
+ 
+      <!-- Input -->
+      <div class="dashboard-chatbot-input-area">
+        <form class="dashboard-chatbot-form" id="dashboardChatbotForm" autocomplete="off">
+          <input
+            type="text"
+            class="form-control"
+            id="dashboardChatbotInput"
+            placeholder="Ask anything about your inventory..."
+            aria-label="Ask the store assistant"
+          >
+          <button type="submit" class="btn btn-primary" aria-label="Send">
+            <i class="bi bi-send-fill" style="font-size:.8rem;"></i>
+            Send
+          </button>
+        </form>
+      </div>
+ 
+    </div><!-- /.dashboard-chatbot-shell -->
+ 
+    <!-- Footer -->
+    <div class="dashboard-chatbot-footer">
+      Powered by <a href="#" tabindex="-1">StockWise AI</a>
+    </div>
+ 
+  </div><!-- /#dashboardChatbot -->
+ 
+  <?php endif; ?>
+ 
   <?php require __DIR__ . '/components/js_script.php'; ?>
+  <script src="/inventory_system/assets/js/dashboard-dynamic.js"></script>
+  <?php if ($isAdmin || $isCashier): ?>
+  <script src="/inventory_system/assets/js/dashboard-chatbot.js"></script>
+  <?php endif; ?>
 
 </body>
 

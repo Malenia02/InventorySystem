@@ -253,6 +253,7 @@ require __DIR__ . '/../components/sidebar.php';
         <div class="dot"></div>
         <span id="cartCountLabel">No items in cart</span>
       </div>
+      <div id="cartRecoveryNote" class="small text-muted mt-2" hidden></div>
     </div>
 
     <div class="cart-list" id="cart-items">
@@ -468,6 +469,8 @@ window.POS_CONFIG = {
     phone: <?= json_encode((string) ($posConfig['store_phone'] ?? '')) ?>,
     cashier: <?= json_encode($defaultCashier) ?>,
     vatRate: <?= json_encode($vatRate) ?>,
+    logo: <?= json_encode(PosConfigController::logoUrl($posConfig['logo'] ?? null)) ?>,
+    userId: <?= json_encode((int) ($_SESSION['user_id'] ?? 0)) ?>,
 };
 window.POS_SUBCATEGORIES = <?= json_encode(array_values(array_map(static function (array $subcategory): array {
     return [

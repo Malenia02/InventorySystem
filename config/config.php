@@ -10,9 +10,10 @@ use Dotenv\Dotenv;
 // LOAD ENV
 // ==========================
 $projectRoot = dirname(__DIR__);
+$externalEnvPath = app_external_env_path();
 
-if (file_exists($projectRoot . '/.env')) {
-    $dotenv = Dotenv::createImmutable($projectRoot);
+if (is_file($externalEnvPath)) {
+    $dotenv = Dotenv::createImmutable(dirname($externalEnvPath), basename($externalEnvPath));
     $dotenv->load();
 }
 
@@ -110,10 +111,6 @@ if (!function_exists('app_should_force_https')) {
             return false;
         }
 
-        if (filter_var($host, FILTER_VALIDATE_IP) && app_is_private_or_local_ip($host)) {
-            return false;
-        }
-
         return true;
     }
 }
@@ -192,8 +189,8 @@ if (!headers_sent()) {
         . "img-src 'self' data: blob: https:; "
         . "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https:; "
         . "font-src 'self' data: https://fonts.gstatic.com https:; "
-        . "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; "
-        . "connect-src 'self' ws: wss: http: https:;"
+        . "script-src 'self' 'unsafe-inline' https:; "
+        . "connect-src 'self' ws: wss: https:;"
     );
 
     if (app_is_https()) {

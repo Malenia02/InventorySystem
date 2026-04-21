@@ -24,9 +24,12 @@ class NotificationWebSocket implements MessageComponentInterface
     protected \SplObjectStorage $clients;
 
     private array $allowedOrigins;
+    private array $messageBuckets = [];
 
     private int $maxPayloadBytes = 4096;
     private int $maxClients = 100;
+    private int $maxMessagesPerWindow = 12;
+    private int $messageWindowSeconds = 5;
 
     public function __construct()
     {
@@ -74,6 +77,7 @@ class NotificationWebSocket implements MessageComponentInterface
             'role' => strtolower($role),
             'origin' => WebSocketSecurity::normalizedOrigin($origin),
         ]);
+        $this->messageBuckets[spl_object_id($conn)] = [];
         echo "New connection: " . spl_object_id($conn) . " | Origin: " . $origin . "\n";
     }
 
@@ -89,6 +93,10 @@ class NotificationWebSocket implements MessageComponentInterface
         }
 
         if (!$this->clients->contains($from)) {
+            return;
+        }
+
+        if ($this->isRateLimited($from)) {
             return;
         }
 
@@ -118,6 +126,8 @@ class NotificationWebSocket implements MessageComponentInterface
             $this->clients->detach($conn);
         }
 
+        unset($this->messageBuckets[spl_object_id($conn)]);
+
         echo "Connection " . spl_object_id($conn) . " disconnected.\n";
     }
 
@@ -128,6 +138,8 @@ class NotificationWebSocket implements MessageComponentInterface
         if ($this->clients->contains($conn)) {
             $this->clients->detach($conn);
         }
+
+        unset($this->messageBuckets[spl_object_id($conn)]);
 
         $conn->close();
     }
@@ -146,6 +158,8 @@ class NotificationWebSocket implements MessageComponentInterface
         $origins = [
             'http://127.0.0.1',
             'http://localhost',
+            'https://127.0.0.1',
+            'https://localhost',
         ];
 
         if (function_exists('env_value')) {
@@ -164,5 +178,27 @@ class NotificationWebSocket implements MessageComponentInterface
             static fn (string $origin): string => WebSocketSecurity::normalizedOrigin($origin),
             $origins
         )));
+    }
+
+    private function isRateLimited(ConnectionInterface $conn): bool
+    {
+        $connectionId = spl_object_id($conn);
+        $now = time();
+        $cutoff = $now - $this->messageWindowSeconds;
+        $bucket = $this->messageBuckets[$connectionId] ?? [];
+        $bucket = array_values(array_filter(
+            $bucket,
+            static fn (int $timestamp): bool => $timestamp >= $cutoff
+        ));
+
+        if (count($bucket) >= $this->maxMessagesPerWindow) {
+            $this->messageBuckets[$connectionId] = $bucket;
+            return true;
+        }
+
+        $bucket[] = $now;
+        $this->messageBuckets[$connectionId] = $bucket;
+
+        return false;
     }
 }

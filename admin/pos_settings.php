@@ -18,7 +18,7 @@ try {
             throw new RuntimeException('Security token mismatch. Please refresh and try again.');
         }
 
-        $config = PosConfigController::save($conn, $_POST);
+        $config = PosConfigController::save($conn, $_POST, $_FILES);
         $successMessage = 'POS configuration saved successfully.';
     } else {
         $config = PosConfigController::get($conn);
@@ -35,6 +35,8 @@ function e(?string $value): string
 {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
+
+$logoPreviewUrl = PosConfigController::logoUrl($config['logo'] ?? null);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -74,8 +76,9 @@ require __DIR__ . '/../components/sidebar.php';
                             <div class="alert alert-danger"><?= e($errorMessage) ?></div>
                         <?php endif; ?>
 
-                        <form method="POST" class="row g-3">
+                        <form method="POST" enctype="multipart/form-data" class="row g-3">
                             <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+                            <input type="hidden" name="logo_current" value="<?= e($config['logo'] ?? '') ?>">
 
                             <div class="col-md-6">
                                 <label class="form-label">Store Name</label>
@@ -113,8 +116,23 @@ require __DIR__ . '/../components/sidebar.php';
                             </div>
 
                             <div class="col-md-6">
-                                <label class="form-label">Logo Path</label>
-                                <input type="text" name="logo" class="form-control" value="<?= e($config['logo'] ?? '') ?>" placeholder="/inventory_system/assets/img/logo.png">
+                                <label class="form-label">Store Logo</label>
+                                <input type="file" name="logo_upload" class="form-control" accept="image/jpeg,image/png,image/webp">
+                                <div class="form-text">Upload a JPG, PNG, or WEBP logo. It will be stored securely outside the web root.</div>
+                            </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label">Current Logo</label>
+                                <div class="border rounded-3 p-3 bg-light h-100 d-flex align-items-center gap-3">
+                                    <?php if ($logoPreviewUrl !== null): ?>
+                                        <img src="<?= e($logoPreviewUrl) ?>" alt="Current POS logo" style="width:72px;height:72px;object-fit:contain;background:#fff;" class="border rounded">
+                                        <div class="small text-muted">
+                                            This is the logo currently used for POS receipts.
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="small text-muted mb-0">No POS logo uploaded yet.</div>
+                                    <?php endif; ?>
+                                </div>
                             </div>
 
                             <div class="col-12">

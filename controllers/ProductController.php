@@ -9,13 +9,21 @@ final class ProductController
     private const DEFAULT_REORDER_LEVEL = 5;
     private const MAX_FILE_SIZE = 2097152; // 2MB
     private const MAX_BULK_FILE_SIZE = 5242880; // 5MB
+    private const MAX_MOVEMENT_NOTE_LENGTH = 500;
     private const ALLOWED_MIME_TYPES = [
         'image/jpeg' => 'jpg',
         'image/png'  => 'png',
         'image/webp' => 'webp',
-        'image/avif' => 'avif',
     ];
     private const ALLOWED_PRODUCT_STATUSES = ['active', 'inactive'];
+
+    public static function ensureStockMovementSchema(PDO $conn): void
+    {
+        self::ensureColumn($conn, 'stock_in', 'notes', 'ALTER TABLE stock_in ADD COLUMN notes text DEFAULT NULL AFTER user_id');
+        self::ensureColumn($conn, 'stock_audit_log', 'reference_type', 'ALTER TABLE stock_audit_log ADD COLUMN reference_type varchar(50) DEFAULT NULL AFTER action');
+        self::ensureColumn($conn, 'stock_audit_log', 'reference_id', 'ALTER TABLE stock_audit_log ADD COLUMN reference_id int(11) DEFAULT NULL AFTER reference_type');
+        self::ensureColumn($conn, 'stock_audit_log', 'notes', 'ALTER TABLE stock_audit_log ADD COLUMN notes text DEFAULT NULL AFTER reference_id');
+    }
 
     public static function allProducts(PDO $conn): array
     {
@@ -174,18 +182,16 @@ final class ProductController
 
         $mimeType = mime_content_type($tmpFile);
         if (!is_string($mimeType) || !array_key_exists($mimeType, self::ALLOWED_MIME_TYPES)) {
-            throw new RuntimeException('Invalid file type. Only JPG, PNG, WEBP, and AVIF are allowed.');
+            throw new RuntimeException('Invalid file type. Only JPG, PNG, and WEBP are allowed.');
         }
 
-        if ($mimeType !== 'image/avif' && getimagesize($tmpFile) === false) {
+        if (getimagesize($tmpFile) === false) {
             throw new RuntimeException('Uploaded file is not a valid image.');
         }
 
         $safeName = preg_replace('/[^a-z0-9_-]/', '_', strtolower(trim($productName))) ?: 'unknown';
         $extension = self::ALLOWED_MIME_TYPES[$mimeType];
-
-        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
-        $uploadDir = $basePath . '/uploads/products/' . $safeName . '/';
+        $uploadDir = self::secureUploadDirectory($safeName);
 
         if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
             throw new RuntimeException('Failed to create upload directory.');
@@ -198,12 +204,13 @@ final class ProductController
             throw new RuntimeException('Failed to save uploaded file.');
         }
 
-        return '/inventory_system/uploads/products/' . $safeName . '/' . $photoName;
+        return self::buildMediaUrl('products/' . $safeName . '/' . $photoName);
     }
 
     public static function addProduct(PDO $conn, array $data): int
     {
         SubcategoryController::ensureSchema($conn);
+        self::ensureStockMovementSchema($conn);
         $payload = self::validatePayload($data, false);
 
         self::assertCategoryExists($conn, $payload['category_id']);
@@ -289,14 +296,25 @@ final class ProductController
 
             if ($payload['initial_quantity'] > 0) {
                 $stockStmt = $conn->prepare("
-                    INSERT INTO stock_in (product_id, quantity, stockin_date, user_id)
-                    VALUES (:product_id, :quantity, NOW(), :user_id)
+                    INSERT INTO stock_in (product_id, quantity, stockin_date, user_id, notes)
+                    VALUES (:product_id, :quantity, NOW(), :user_id, :notes)
                 ");
                 $stockStmt->execute([
                     ':product_id' => $productId,
                     ':quantity'   => $payload['initial_quantity'],
                     ':user_id'    => $payload['user_id'],
+                    ':notes'      => 'Initial stock added during product creation.',
                 ]);
+
+                self::attachStockAuditContext(
+                    $conn,
+                    $productId,
+                    'stock_in',
+                    $payload['user_id'],
+                    'stock_in',
+                    (int) $conn->lastInsertId(),
+                    'Initial stock added during product creation.'
+                );
             }
 
             $conn->commit();
@@ -407,8 +425,10 @@ final class ProductController
         }
     }
 
-    public static function restockProduct(PDO $conn, int $productId, int $quantity, ?int $userId = null): bool
+    public static function restockProduct(PDO $conn, int $productId, int $quantity, ?int $userId = null, ?string $notes = null): bool
     {
+        self::ensureStockMovementSchema($conn);
+
         if ($productId <= 0) {
             throw new InvalidArgumentException('Invalid product ID.');
         }
@@ -418,19 +438,31 @@ final class ProductController
         }
 
         self::assertProductExists($conn, $productId);
+        $notes = self::normalizeMovementNote($notes);
 
         try {
             $conn->beginTransaction();
 
             $stmt = $conn->prepare("
-                INSERT INTO stock_in (product_id, quantity, stockin_date, user_id)
-                VALUES (:product_id, :quantity, NOW(), :user_id)
+                INSERT INTO stock_in (product_id, quantity, stockin_date, user_id, notes)
+                VALUES (:product_id, :quantity, NOW(), :user_id, :notes)
             ");
             $stmt->execute([
                 ':product_id' => $productId,
                 ':quantity'   => $quantity,
                 ':user_id'    => $userId,
+                ':notes'      => $notes,
             ]);
+
+            self::attachStockAuditContext(
+                $conn,
+                $productId,
+                'stock_in',
+                $userId,
+                'stock_in',
+                (int) $conn->lastInsertId(),
+                $notes
+            );
 
             $conn->commit();
             return true;
@@ -444,6 +476,8 @@ final class ProductController
 
     public static function stockOutProduct(PDO $conn, int $productId, int $quantity, string $reason = '', ?int $userId = null): bool
     {
+        self::ensureStockMovementSchema($conn);
+
         if ($productId <= 0) {
             throw new InvalidArgumentException('Invalid product ID.');
         }
@@ -467,6 +501,8 @@ final class ProductController
             $reason = 'No reason provided';
         }
 
+        $reason = self::normalizeMovementNote($reason) ?? 'No reason provided';
+
         try {
             $conn->beginTransaction();
 
@@ -480,6 +516,16 @@ final class ProductController
                 ':reason'     => $reason,
                 ':user_id'    => $userId,
             ]);
+
+            self::attachStockAuditContext(
+                $conn,
+                $productId,
+                'stock_out',
+                $userId,
+                'stock_out',
+                (int) $conn->lastInsertId(),
+                $reason
+            );
 
             $conn->commit();
             return true;
@@ -801,6 +847,69 @@ final class ProductController
         return trim($header, '_');
     }
 
+    private static function attachStockAuditContext(
+        PDO $conn,
+        int $productId,
+        string $action,
+        ?int $userId,
+        string $referenceType,
+        int $referenceId,
+        ?string $notes = null
+    ): void {
+        if ($productId <= 0 || $referenceId <= 0) {
+            return;
+        }
+
+        $sql = "
+            SELECT log_id
+            FROM stock_audit_log
+            WHERE product_id = :product_id
+              AND action = :action
+        ";
+
+        $params = [
+            ':product_id' => $productId,
+            ':action' => $action,
+        ];
+
+        if ($userId !== null && $userId > 0) {
+            $sql .= " AND user_id = :user_id";
+            $params[':user_id'] = $userId;
+        } else {
+            $sql .= " AND user_id IS NULL";
+        }
+
+        $sql .= " ORDER BY log_id DESC LIMIT 1";
+
+        $logStmt = $conn->prepare($sql);
+        $logStmt->execute($params);
+        $logId = (int) ($logStmt->fetchColumn() ?: 0);
+
+        if ($logId <= 0) {
+            return;
+        }
+
+        $updateStmt = $conn->prepare("
+            UPDATE stock_audit_log
+            SET
+                reference_type = :reference_type,
+                reference_id = :reference_id,
+                notes = :notes
+            WHERE log_id = :log_id
+        ");
+        $updateStmt->execute([
+            ':reference_type' => $referenceType,
+            ':reference_id' => $referenceId,
+            ':notes' => $notes,
+            ':log_id' => $logId,
+        ]);
+    }
+
+    public static function cleanupUploadedPhoto(?string $photoPath): void
+    {
+        self::deleteStoredPhoto($photoPath);
+    }
+
     private static function deleteStoredPhoto(?string $photoPath): void
     {
         $absolutePath = self::resolveStoredPhotoPath($photoPath);
@@ -814,7 +923,16 @@ final class ProductController
     private static function resolveStoredPhotoPath(?string $photoPath): ?string
     {
         $photoPath = trim((string) $photoPath);
-        if ($photoPath === '' || !str_starts_with($photoPath, '/inventory_system/uploads/products/')) {
+        if ($photoPath === '') {
+            return null;
+        }
+
+        $mediaAsset = self::extractMediaAsset($photoPath);
+        if ($mediaAsset !== null) {
+            return self::resolveSecureAssetPath($mediaAsset, 'products');
+        }
+
+        if (!str_starts_with($photoPath, '/inventory_system/uploads/products/')) {
             return null;
         }
 
@@ -836,11 +954,124 @@ final class ProductController
         return $absolutePath;
     }
 
+    private static function secureUploadDirectory(string $safeName): string
+    {
+        return self::secureUploadsBasePath() . DIRECTORY_SEPARATOR . $safeName . DIRECTORY_SEPARATOR;
+    }
+
+    private static function secureUploadsBasePath(): string
+    {
+        if (function_exists('app_secure_storage_dir')) {
+            return rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'products';
+        }
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        return $basePath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'products';
+    }
+
+    private static function buildMediaUrl(string $asset): string
+    {
+        return '/inventory_system/media.php?asset=' . rawurlencode($asset);
+    }
+
+    private static function extractMediaAsset(string $photoPath): ?string
+    {
+        if (!str_starts_with($photoPath, '/inventory_system/media.php')) {
+            return null;
+        }
+
+        $query = parse_url($photoPath, PHP_URL_QUERY);
+        if (!is_string($query) || $query === '') {
+            return null;
+        }
+
+        parse_str($query, $params);
+        $asset = trim((string) ($params['asset'] ?? ''));
+
+        return $asset !== '' ? $asset : null;
+    }
+
+    private static function resolveSecureAssetPath(string $asset, string $expectedPrefix): ?string
+    {
+        $asset = trim($asset);
+        if ($asset === '' || str_contains($asset, '..')) {
+            return null;
+        }
+
+        if (preg_match('#^[a-z0-9/_\.-]+$#i', $asset) !== 1) {
+            return null;
+        }
+
+        $prefix = $expectedPrefix . '/';
+        if (!str_starts_with($asset, $prefix)) {
+            return null;
+        }
+
+        $baseDir = rtrim(function_exists('app_secure_storage_dir') ? app_secure_storage_dir() : dirname(__DIR__), '/\\')
+            . DIRECTORY_SEPARATOR . 'uploads';
+        $absolutePath = $baseDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $asset);
+        $realBaseDir = realpath($baseDir);
+        $realDirectory = realpath(dirname($absolutePath));
+
+        if ($realBaseDir === false || $realDirectory === false) {
+            return null;
+        }
+
+        $expectedBase = $realBaseDir . DIRECTORY_SEPARATOR . $expectedPrefix;
+        if (!str_starts_with($realDirectory, $expectedBase)) {
+            return null;
+        }
+
+        return $absolutePath;
+    }
+
     private static function hasAnyDiscount(array $payload): bool
     {
         return ($payload['sale_price'] ?? null) !== null
             || ($payload['box_sale_price'] ?? null) !== null
             || ($payload['case_sale_price'] ?? null) !== null;
+    }
+
+    private static function normalizeMovementNote(?string $notes): ?string
+    {
+        $notes = trim((string) $notes);
+        if ($notes === '') {
+            return null;
+        }
+
+        if (mb_strlen($notes) > self::MAX_MOVEMENT_NOTE_LENGTH) {
+            throw new InvalidArgumentException('Movement notes must be 500 characters or fewer.');
+        }
+
+        return $notes;
+    }
+
+    private static function ensureColumn(PDO $conn, string $table, string $column, string $alterSql): void
+    {
+        $table = trim($table);
+        $column = trim($column);
+
+        if ($table === '' || $column === '') {
+            return;
+        }
+
+        $stmt = $conn->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = :table_name
+              AND COLUMN_NAME = :column_name
+        ");
+        $stmt->execute([
+            ':table_name' => $table,
+            ':column_name' => $column,
+        ]);
+
+        if ((int) $stmt->fetchColumn() > 0) {
+            return;
+        }
+
+        $conn->exec($alterSql);
     }
 
     private static function isBlankCsvRow(array $row): bool

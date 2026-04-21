@@ -4,7 +4,9 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../bootstrap/app.php';
 require_once __DIR__ . '/../../middleware/Middleware.php';
 require_once __DIR__ . '/../../controllers/AuthController.php';
+require_once __DIR__ . '/../../controllers/NotificationController.php';
 require_once __DIR__ . '/../../controllers/PosConfigController.php';
+require_once __DIR__ . '/../../controllers/ProductController.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -12,13 +14,78 @@ Middleware::auth()
     ->role(['admin', 'cashier'])
     ->ajax()
     ->methods(['POST'])
-    ->csrf();
+    ->csrf()
+    ->throttle('checkout', 20, 60, 'Too many checkout attempts. Please wait a moment and try again.');
 
 function checkout_json(array $payload, int $statusCode = 200): never
 {
     http_response_code($statusCode);
     echo json_encode($payload);
     exit;
+}
+
+function checkout_transaction_number(int $saleId, ?string $saleDate = null): string
+{
+    $datePart = date('Ymd', $saleDate !== null ? strtotime($saleDate) : time());
+    return sprintf('SALE-%s-%06d', $datePart, $saleId);
+}
+
+function checkout_notify_sale(
+    PDO $conn,
+    int $userId,
+    string $role,
+    string $type,
+    string $title,
+    string $message,
+    string $icon = 'bi-bell',
+    string $color = 'text-primary'
+): void {
+    if ($userId <= 0) {
+        return;
+    }
+
+    try {
+        NotificationController::create(
+            $conn,
+            $userId,
+            $role,
+            $type,
+            $title,
+            $message,
+            $icon,
+            $color,
+            '/inventory_system/product_management/pos.php'
+        );
+    } catch (Throwable $notificationError) {
+        error_log('[checkout.php][notification] ' . $notificationError->getMessage());
+    }
+}
+
+function checkout_failure_response(
+    PDO $conn,
+    int $userId,
+    string $role,
+    string $type,
+    string $message,
+    int $statusCode = 422,
+    array $extra = []
+): never {
+    checkout_notify_sale(
+        $conn,
+        $userId,
+        $role,
+        $type,
+        'Sale failed',
+        $message,
+        'bi-exclamation-triangle',
+        'text-danger'
+    );
+
+    checkout_json(array_merge([
+        'success' => false,
+        'error' => $message,
+        'notification_type' => $type,
+    ], $extra), $statusCode);
 }
 
 function checkout_discount_percent(array $product, string $unitType = 'piece'): float
@@ -58,14 +125,13 @@ function checkout_normalize_items(array $items): array
             $unitType = 'piece';
         }
 
-        $key = $productId . ':' . $unitType . ':' . $unitMultiplier;
+        $key = $productId . ':' . $unitType;
 
         if (!isset($normalized[$key])) {
             $normalized[$key] = [
                 'product_id' => $productId,
                 'quantity'   => 0,
                 'unit_type'  => $unitType,
-                'unit_multiplier' => $unitMultiplier,
             ];
         }
 
@@ -73,6 +139,40 @@ function checkout_normalize_items(array $items): array
     }
 
     return array_values($normalized);
+}
+
+function checkout_server_unit_multiplier(array $product, string $unitType): int
+{
+    $piecesPerBox = max(1, (int) ($product['pieces_per_box'] ?? 1));
+    $boxesPerCase = max(1, (int) ($product['boxes_per_case'] ?? 1));
+
+    return match ($unitType) {
+        'box' => $piecesPerBox,
+        'case' => $piecesPerBox * $boxesPerCase,
+        default => 1,
+    };
+}
+
+function checkout_unit_is_available(array $product, string $unitType): bool
+{
+    return match ($unitType) {
+        'box' => (float) ($product['box_price'] ?? 0) > 0,
+        'case' => (float) ($product['case_price'] ?? 0) > 0,
+        default => true,
+    };
+}
+
+function checkout_unit_label(string $unitType, int $quantity): string
+{
+    if ($quantity === 1) {
+        return $unitType;
+    }
+
+    return match ($unitType) {
+        'box' => 'boxes',
+        'case' => 'cases',
+        default => 'pieces',
+    };
 }
 
 try {
@@ -91,17 +191,25 @@ try {
     $allowedPayments = ['cash', 'card', 'gcash', 'other'];
 
     if (!in_array($paymentMethod, $allowedPayments, true)) {
-        checkout_json([
-            'success' => false,
-            'error'   => 'Invalid payment method.',
-        ], 422);
+        checkout_failure_response(
+            $conn,
+            (int) ($_SESSION['user_id'] ?? 0),
+            (string) ($_SESSION['role'] ?? 'staff'),
+            'sale_failed_invalid_payment',
+            'Invalid payment method.',
+            422
+        );
     }
 
     if ($items === []) {
-        checkout_json([
-            'success' => false,
-            'error'   => 'Cart is empty.',
-        ], 422);
+        checkout_failure_response(
+            $conn,
+            (int) ($_SESSION['user_id'] ?? 0),
+            (string) ($_SESSION['role'] ?? 'staff'),
+            'sale_failed_empty_cart',
+            'Cart is empty.',
+            422
+        );
     }
 
     $productIds = array_column($items, 'product_id');
@@ -124,6 +232,7 @@ try {
         'col_created' => $activity_log_created,
     ];
     $vatRate = PosConfigController::taxRate($conn) / 100;
+    ProductController::ensureStockMovementSchema($conn);
 
     $conn->beginTransaction();
 
@@ -134,6 +243,8 @@ try {
             price,
             box_price,
             case_price,
+            pieces_per_box,
+            boxes_per_case,
             sale_price,
             box_sale_price,
             case_sale_price,
@@ -161,12 +272,17 @@ try {
         $productId = (int) $item['product_id'];
         $quantity = (int) $item['quantity'];
         $unitType = (string) ($item['unit_type'] ?? 'piece');
-        $unitMultiplier = max(1, (int) ($item['unit_multiplier'] ?? 1));
         $product = $products[$productId] ?? null;
 
         if ($product === null || ($product['status'] ?? 'inactive') !== 'active') {
             throw new RuntimeException('One or more products are unavailable.');
         }
+
+        if (!checkout_unit_is_available($product, $unitType)) {
+            throw new RuntimeException('One or more products are missing the requested selling unit.');
+        }
+
+        $unitMultiplier = checkout_server_unit_multiplier($product, $unitType);
 
         $availableQty = (int) ($product['quantity'] ?? 0);
         $requiredBaseQty = $quantity * $unitMultiplier;
@@ -175,13 +291,24 @@ try {
                 $conn->rollBack();
             }
 
-            checkout_json([
-                'success'   => false,
-                'error'     => 'Insufficient stock for one or more items.',
-                'product'   => $product['product_name'],
-                'available' => $availableQty,
-                'requested' => $requiredBaseQty,
-            ], 409);
+            checkout_failure_response(
+                $conn,
+                $sessionUserId,
+                (string) ($_SESSION['role'] ?? 'staff'),
+                'sale_failed_low_stock',
+                sprintf(
+                    'Insufficient stock for %s. Available: %d, requested: %d.',
+                    (string) ($product['product_name'] ?? 'one or more items'),
+                    $availableQty,
+                    $requiredBaseQty
+                ),
+                409,
+                [
+                    'product'   => $product['product_name'],
+                    'available' => $availableQty,
+                    'requested' => $requiredBaseQty,
+                ]
+            );
         }
 
         $regularPrice = match ($unitType) {
@@ -230,6 +357,7 @@ try {
     ]);
 
     $saleId = (int) $conn->lastInsertId();
+    $saleDate = date('Y-m-d H:i:s');
 
     $itemStmt = $conn->prepare("
         INSERT INTO {$table_sale_items}
@@ -239,14 +367,16 @@ try {
     ");
     $stockAuditStmt = $conn->prepare("
         INSERT INTO stock_audit_log
-            (product_id, change_qty, current_qty, action, user_id, timestamp)
+            (product_id, change_qty, current_qty, action, reference_type, reference_id, notes, user_id, timestamp)
         VALUES
-            (:product_id, :change_qty, :current_qty, :action, :user_id, NOW())
+            (:product_id, :change_qty, :current_qty, :action, :reference_type, :reference_id, :notes, :user_id, NOW())
     ");
     $remainingQtyByProduct = [];
     foreach ($products as $lockedProductId => $lockedProduct) {
         $remainingQtyByProduct[(int) $lockedProductId] = (int) ($lockedProduct['quantity'] ?? 0);
     }
+
+    $transactionNo = checkout_transaction_number($saleId, $saleDate);
 
     foreach ($saleItems as $saleItem) {
         $itemStmt->execute([
@@ -265,11 +395,21 @@ try {
             ((int) ($remainingQtyByProduct[$productId] ?? 0)) - $baseQtySold
         );
 
+        $note = sprintf(
+            'Transaction %s | Sold %d %s',
+            $transactionNo,
+            (int) $saleItem['quantity'],
+            checkout_unit_label((string) $saleItem['unit_type'], (int) $saleItem['quantity'])
+        );
+
         $stockAuditStmt->execute([
             ':product_id'  => $productId,
             ':change_qty'  => -$baseQtySold,
             ':current_qty' => $remainingQtyByProduct[$productId],
             ':action'      => 'sale',
+            ':reference_type' => 'sale',
+            ':reference_id' => $saleId,
+            ':notes' => $note,
             ':user_id'     => $sessionUserId,
         ]);
     }
@@ -292,10 +432,27 @@ try {
         $saleId
     );
 
+    checkout_notify_sale(
+        $conn,
+        $sessionUserId,
+        (string) ($_SESSION['role'] ?? 'staff'),
+        'sale_success',
+        'Sale completed',
+        sprintf(
+            '%s saved successfully for %s.',
+            $transactionNo,
+            number_format($grandTotal, 2)
+        ),
+        'bi-receipt',
+        'text-success'
+    );
+
     checkout_json([
         'success' => true,
         'sale_id' => $saleId,
+        'transaction_no' => $transactionNo,
         'message' => 'Sale saved successfully.',
+        'notification_type' => 'sale_success',
         'server_totals' => [
             'subtotal' => $subtotal,
             'discount' => $discountAmount,
@@ -310,8 +467,20 @@ try {
 
     error_log('[checkout.php] ' . $e->getMessage());
 
+    checkout_notify_sale(
+        $conn,
+        $sessionUserId,
+        (string) ($_SESSION['role'] ?? 'staff'),
+        'sale_failed_error',
+        'Sale failed',
+        'Unable to complete checkout right now.',
+        'bi-exclamation-triangle',
+        'text-danger'
+    );
+
     checkout_json([
         'success' => false,
         'error'   => 'Unable to complete checkout right now.',
+        'notification_type' => 'sale_failed_error',
     ], 500);
 }

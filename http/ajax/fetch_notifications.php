@@ -10,7 +10,8 @@ header('Content-Type: application/json; charset=UTF-8');
 Middleware::auth()
     ->ajax()
     ->methods(['GET'])
-    ->sameOrigin();
+    ->sameOrigin()
+    ->throttle('fetch_notifications', 60, 60, 'Too many notification refreshes. Please wait a moment.');
 
 function jsonResponse(array $payload, int $statusCode = 200): never
 {

@@ -8,6 +8,25 @@ if (!function_exists('app_install_url')) {
     }
 }
 
+if (!function_exists('app_secure_storage_dir')) {
+    function app_secure_storage_dir(): string
+    {
+        return 'C:/xampp/secure';
+    }
+}
+
+if (!function_exists('app_external_env_path')) {
+    function app_external_env_path(): string
+    {
+        $configured = trim((string) ($_ENV['APP_ENV_FILE'] ?? $_SERVER['APP_ENV_FILE'] ?? ''));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return app_secure_storage_dir() . '/inventory_system.env';
+    }
+}
+
 if (!function_exists('app_install_lock_path')) {
     function app_install_lock_path(): string
     {
@@ -19,8 +38,12 @@ if (!function_exists('app_install_lock_path')) {
 if (!function_exists('app_setup_token_path')) {
     function app_setup_token_path(): string
     {
-        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
-        return $basePath . '/config/setup.token';
+        $configured = trim((string) ($_ENV['APP_SETUP_TOKEN_FILE'] ?? $_SERVER['APP_SETUP_TOKEN_FILE'] ?? ''));
+        if ($configured !== '') {
+            return $configured;
+        }
+
+        return app_secure_storage_dir() . '/inventory_system.setup.token';
     }
 }
 
@@ -97,6 +120,14 @@ if (!function_exists('app_is_private_or_local_ip')) {
     }
 }
 
+if (!function_exists('app_is_loopback_request')) {
+    function app_is_loopback_request(): bool
+    {
+        $ip = app_request_ip();
+        return $ip === '127.0.0.1' || $ip === '::1';
+    }
+}
+
 if (!function_exists('app_is_allowed_unlocked_install_request')) {
     function app_is_allowed_unlocked_install_request(): bool
     {
@@ -132,7 +163,7 @@ if (!function_exists('app_is_public_install_request')) {
 if (!function_exists('app_public_install_requires_token')) {
     function app_public_install_requires_token(): bool
     {
-        return app_is_public_install_request();
+        return true;
     }
 }
 
@@ -211,9 +242,35 @@ if (!function_exists('app_deny_unlocked_install_access')) {
 if (!function_exists('app_clear_setup_token')) {
     function app_clear_setup_token(string $projectRoot): void
     {
-        $tokenPath = rtrim($projectRoot, '/\\') . '/config/setup.token';
+        $tokenPath = app_setup_token_path();
         if (is_file($tokenPath)) {
             @unlink($tokenPath);
+        }
+    }
+}
+
+if (!function_exists('app_write_setup_token_hash')) {
+    function app_write_setup_token_hash(string $token): void
+    {
+        $token = trim($token);
+        if ($token === '') {
+            throw new RuntimeException('Setup access key cannot be empty.');
+        }
+
+        if (strlen($token) < 8) {
+            throw new RuntimeException('Setup access key must be at least 8 characters long.');
+        }
+
+        $tokenPath = app_setup_token_path();
+        $directory = dirname($tokenPath);
+
+        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+            throw new RuntimeException('Unable to create the setup token directory.');
+        }
+
+        $written = file_put_contents($tokenPath, hash('sha256', $token) . PHP_EOL, LOCK_EX);
+        if ($written === false) {
+            throw new RuntimeException('Unable to save the setup access key.');
         }
     }
 }
@@ -372,7 +429,13 @@ if (!function_exists('app_write_env_file')) {
             $lines[] = $key . '=' . $safeValue;
         }
 
-        $envPath = rtrim($projectRoot, '/\\') . DIRECTORY_SEPARATOR . '.env';
+        $envPath = app_external_env_path();
+        $envDirectory = dirname($envPath);
+
+        if (!is_dir($envDirectory) && !mkdir($envDirectory, 0755, true) && !is_dir($envDirectory)) {
+            throw new RuntimeException('Unable to create the secure environment directory.');
+        }
+
         $written = file_put_contents($envPath, implode(PHP_EOL, $lines) . PHP_EOL);
 
         if ($written === false) {

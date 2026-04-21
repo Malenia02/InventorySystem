@@ -13,7 +13,8 @@ Middleware::auth()
     ->role(['admin'])
     ->ajax()
     ->methods(['POST'])
-    ->csrf();
+    ->csrf()
+    ->throttle('subcategory_actions', 30, 60, 'Too many subcategory changes. Please slow down and try again.');
 
 function subcategoryJsonResponse(array $payload, int $statusCode = 200): never
 {

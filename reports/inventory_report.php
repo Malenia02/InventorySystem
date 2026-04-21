@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../bootstrap/app.php';
 require_once __DIR__ . '/../middleware/Middleware.php';
+require_once __DIR__ . '/../controllers/ProductController.php';
 
 Middleware::auth()->role(['admin']);
 
@@ -44,6 +45,63 @@ function stockBadgeClass(string $status, int $quantity, int $reorderLevel): stri
     }
 
     return 'bg-success';
+}
+
+function stockMovementReferenceLabel(array $row): ?string
+{
+    $referenceType = trim((string) ($row['reference_type'] ?? ''));
+    $referenceId = (int) ($row['reference_id'] ?? 0);
+
+    if ($referenceType === '') {
+        return null;
+    }
+
+    $label = ucwords(str_replace('_', ' ', $referenceType));
+    if ($referenceId > 0) {
+        $label .= ' #' . $referenceId;
+    }
+
+    return $label;
+}
+
+function summarizeMovementNote(?string $note, int $maxLength = 110): ?string
+{
+    $note = trim((string) $note);
+    if ($note === '') {
+        return null;
+    }
+
+    if (mb_strlen($note) <= $maxLength) {
+        return $note;
+    }
+
+    return rtrim(mb_substr($note, 0, $maxLength - 1)) . '...';
+}
+
+function movementActionMeta(string $action): array
+{
+    return match ($action) {
+        'stock_in' => [
+            'color' => 'text-success',
+            'badge' => 'bg-success-subtle text-success',
+            'label' => 'Stock In',
+        ],
+        'stock_out' => [
+            'color' => 'text-danger',
+            'badge' => 'bg-danger-subtle text-danger',
+            'label' => 'Stock Out',
+        ],
+        'sale' => [
+            'color' => 'text-primary',
+            'badge' => 'bg-primary-subtle text-primary',
+            'label' => 'Sale',
+        ],
+        default => [
+            'color' => 'text-muted',
+            'badge' => 'bg-light text-dark',
+            'label' => ucwords(str_replace('_', ' ', $action)),
+        ],
+    };
 }
 
 $page = max(1, (int) ($_GET['page'] ?? 1));
@@ -105,6 +163,8 @@ $summary = [
 ];
 $products = [];
 $stockActivity = [];
+$activityFeed = [];
+$movementDetails = [];
 $categories = [];
 $stockStatusSummary = [
     'in_stock' => 0,
@@ -115,8 +175,13 @@ $stockStatusSummary = [
 $totalRows = 0;
 $totalPages = 1;
 $errorMsg = null;
+$activityFeedLimit = 6;
+$movementDetailsLimit = 5;
+$stockActivityQueryLimit = max($activityFeedLimit, $movementDetailsLimit);
 
 try {
+    ProductController::ensureStockMovementSchema($conn);
+
     $categoryStmt = $conn->query("\n        SELECT category_id, category_name\n        FROM categories\n        ORDER BY category_name ASC\n    ");
     $categories = $categoryStmt ? ($categoryStmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
 
@@ -171,8 +236,33 @@ try {
     $productsStmt->execute();
     $products = $productsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
-    $stockActivityStmt = $conn->query("\n        SELECT\n            sal.log_id,\n            sal.action,\n            sal.change_qty,\n            sal.current_qty,\n            sal.timestamp,\n            p.product_name,\n            u.first_name,\n            u.last_name,\n            u.username\n        FROM stock_audit_log sal\n        INNER JOIN products p ON sal.product_id = p.product_id\n        LEFT JOIN users u ON sal.user_id = u.user_id\n        WHERE sal.action <> 'manual_adjust'\n        ORDER BY sal.timestamp DESC, sal.log_id DESC\n        LIMIT 12\n    ");
-    $stockActivity = $stockActivityStmt ? ($stockActivityStmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+    $stockActivitySql = "
+        SELECT
+            sal.log_id,
+            sal.action,
+            sal.change_qty,
+            sal.current_qty,
+            sal.reference_type,
+            sal.reference_id,
+            sal.notes,
+            sal.timestamp,
+            p.product_name,
+            u.first_name,
+            u.last_name,
+            u.username
+        FROM stock_audit_log sal
+        INNER JOIN products p ON sal.product_id = p.product_id
+        LEFT JOIN users u ON sal.user_id = u.user_id
+        WHERE sal.action <> 'manual_adjust'
+        ORDER BY sal.timestamp DESC, sal.log_id DESC
+        LIMIT :activity_limit
+    ";
+    $stockActivityStmt = $conn->prepare($stockActivitySql);
+    $stockActivityStmt->bindValue(':activity_limit', $stockActivityQueryLimit, PDO::PARAM_INT);
+    $stockActivityStmt->execute();
+    $stockActivity = $stockActivityStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $activityFeed = array_slice($stockActivity, 0, $activityFeedLimit);
+    $movementDetails = array_slice($stockActivity, 0, $movementDetailsLimit);
 
     if ($export === 'csv') {
         header('Content-Type: text/csv; charset=UTF-8');
@@ -235,6 +325,245 @@ $pageTitle = 'Inventory Report';
 <!DOCTYPE html>
 <html lang="en">
 <?php require __DIR__ . '/../components/head.php'; ?>
+<style>
+    .inventory-report-panel {
+        border: 1px solid #edf1f7;
+        border-radius: 18px;
+        box-shadow: 0 10px 30px rgba(13, 32, 72, 0.06);
+        overflow: hidden;
+    }
+
+    .inventory-report-panel .card-body {
+        padding: 0;
+    }
+
+    .inventory-report-panel-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 18px 14px;
+        border-bottom: 1px solid #edf1f7;
+        background: linear-gradient(180deg, #fbfcff 0%, #f4f7ff 100%);
+    }
+
+    .inventory-report-panel-title {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #19335c;
+        margin: 0;
+    }
+
+    .inventory-report-panel-subtitle {
+        margin: 4px 0 0;
+        font-size: 0.82rem;
+        color: #7b8ba7;
+    }
+
+    .inventory-report-panel-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 78px;
+        padding: 6px 12px;
+        border-radius: 999px;
+        background: #eaf1ff;
+        color: #3151a6;
+        font-size: 0.76rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .inventory-report-feed {
+        padding: 12px 14px 14px;
+        max-height: 420px;
+        overflow-y: auto;
+        background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+    }
+
+    .inventory-report-feed-item {
+        display: grid;
+        grid-template-columns: 82px 1fr;
+        gap: 12px;
+        padding: 14px;
+        margin-bottom: 12px;
+        border: 1px solid #edf1f7;
+        border-radius: 16px;
+        background: #ffffff;
+        box-shadow: 0 8px 22px rgba(18, 39, 84, 0.04);
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .inventory-report-feed-item:last-child {
+        margin-bottom: 0;
+    }
+
+    .inventory-report-feed-item:hover {
+        transform: translateY(-1px);
+        border-color: #dfe7fb;
+        box-shadow: 0 12px 26px rgba(18, 39, 84, 0.08);
+    }
+
+    .inventory-report-feed-time {
+        font-size: 0.76rem;
+        font-weight: 700;
+        color: #8a98af;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        padding: 9px 10px;
+        border-radius: 12px;
+        background: #f7f9ff;
+        border: 1px solid #edf1f7;
+        text-align: center;
+        line-height: 1.45;
+        align-self: start;
+    }
+
+    .inventory-report-feed-main {
+        min-width: 0;
+    }
+
+    .inventory-report-feed-top {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 6px;
+    }
+
+    .inventory-report-feed-product {
+        font-size: 0.95rem;
+        font-weight: 700;
+        color: #17345f;
+        margin: 0;
+        flex: 1 1 160px;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .inventory-report-feed-change {
+        font-size: 0.88rem;
+        font-weight: 700;
+    }
+
+    .inventory-report-feed-meta {
+        font-size: 0.81rem;
+        color: #7f8da5;
+        line-height: 1.55;
+    }
+
+    .inventory-report-feed-note {
+        margin-top: 7px;
+        padding: 9px 11px;
+        border-radius: 12px;
+        background: #f8faff;
+        border: 1px solid #e8eef8;
+        color: #50627f;
+        font-size: 0.79rem;
+        line-height: 1.45;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .inventory-report-table-wrap {
+        padding: 0 12px 12px;
+        max-height: 340px;
+        overflow: auto;
+        background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
+    }
+
+    .inventory-report-table {
+        margin: 0;
+    }
+
+    .inventory-report-table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #f8faff;
+        color: #7385a3;
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        border-bottom: 1px solid #e9eef7;
+        white-space: nowrap;
+    }
+
+    .inventory-report-table tbody td {
+        padding-top: 0.8rem;
+        padding-bottom: 0.8rem;
+        vertical-align: top;
+        border-color: #f0f3f8;
+    }
+
+    .inventory-report-table tbody tr:hover td {
+        background: #f9fbff;
+    }
+
+    .inventory-report-note-cell {
+        max-width: 230px;
+        color: #596b88;
+        line-height: 1.45;
+    }
+
+    .inventory-report-note-text {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+    }
+
+    .inventory-report-ref {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: #f4f7ff;
+        border: 1px solid #e2e8fa;
+        font-size: 0.78rem;
+        font-weight: 700;
+        color: #405473;
+    }
+
+    .inventory-report-feed,
+    .inventory-report-table-wrap {
+        scrollbar-width: thin;
+        scrollbar-color: #cad8fd transparent;
+    }
+
+    .inventory-report-feed::-webkit-scrollbar,
+    .inventory-report-table-wrap::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    .inventory-report-feed::-webkit-scrollbar-thumb,
+    .inventory-report-table-wrap::-webkit-scrollbar-thumb {
+        background: #cad8fd;
+        border-radius: 999px;
+    }
+
+    .inventory-report-feed::-webkit-scrollbar-track,
+    .inventory-report-table-wrap::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    @media (max-width: 991px) {
+        .inventory-report-feed-item {
+            grid-template-columns: 1fr;
+            gap: 6px;
+        }
+
+        .inventory-report-feed-time {
+            padding-top: 0;
+            text-align: left;
+        }
+    }
+</style>
 <body>
 
 <?php
@@ -412,7 +741,7 @@ require __DIR__ . '/../components/sidebar.php';
                                             </th>
                                             <td>
                                                 <a href="#" class="text-primary fw-bold"><?= e((string) $product['product_name']) ?></a>
-                                                <div class="small text-muted">#<?= (int) $product['product_id'] ?> � Reorder <?= number_format($reorderLevel) ?></div>
+                                                <div class="small text-muted">#<?= (int) $product['product_id'] ?> | Reorder <?= number_format($reorderLevel) ?></div>
                                             </td>
                                             <td><?= e((string) ($product['category_name'] ?? 'Uncategorized')) ?></td>
                                             <td><?= e((string) ($product['sku'] ?? '-')) ?></td>
@@ -482,35 +811,117 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card inventory-report-panel">
                     <div class="card-body">
-                        <h5 class="card-title">Recent Activity <span>| Stock</span></h5>
-                        <div class="activity">
-                            <?php if (empty($stockActivity)): ?>
-                                <p class="text-muted text-center">No recent activity</p>
+                        <div class="inventory-report-panel-head">
+                            <div>
+                                <h5 class="inventory-report-panel-title">Stock Movement Feed</h5>
+                                <p class="inventory-report-panel-subtitle">Latest inventory changes with a shorter, cleaner feed.</p>
+                            </div>
+                            <span class="inventory-report-panel-pill">Latest <?= count($activityFeed) ?></span>
+                        </div>
+                        <div class="inventory-report-feed">
+                            <?php if (empty($activityFeed)): ?>
+                                <p class="text-muted text-center mb-0 py-4">No recent activity</p>
                             <?php else: ?>
                                 <?php
-                                $actionColors = ['sale' => 'text-primary', 'stock_in' => 'text-success', 'stock_out' => 'text-danger'];
-                                foreach ($stockActivity as $row):
-                                    $color = $actionColors[$row['action']] ?? 'text-muted';
-                                    $qty = (int) $row['change_qty'] > 0 ? '+' . (int) $row['change_qty'] : (string) (int) $row['change_qty'];
+                                foreach ($activityFeed as $row):
+                                    $meta = movementActionMeta((string) ($row['action'] ?? ''));
+                                    $qty = (int) ($row['change_qty'] ?? 0) > 0 ? '+' . (int) $row['change_qty'] : (string) (int) ($row['change_qty'] ?? 0);
                                     $actor = trim((string) ($row['first_name'] ?? '') . ' ' . (string) ($row['last_name'] ?? ''));
+                                    $referenceLabel = stockMovementReferenceLabel($row);
+                                    $movementNote = summarizeMovementNote((string) ($row['notes'] ?? ''), 72);
                                     if ($actor === '') {
                                         $actor = (string) ($row['username'] ?? 'System');
                                     }
                                 ?>
-                                    <div class="activity-item d-flex">
-                                        <div class="activite-label"><?= e(date('M d, h:i A', strtotime((string) $row['timestamp']))) ?></div>
-                                        <i class="bi bi-circle-fill activity-badge <?= e($color) ?> align-self-start"></i>
-                                        <div class="activity-content">
-                                            <span class="fw-bold"><?= e((string) $row['product_name']) ?></span>
-                                            <span class="<?= e($color) ?>"><?= e($qty) ?></span>
-                                            <span class="text-muted">(<?= e(str_replace('_', ' ', (string) $row['action'])) ?>)</span><br>
-                                            <small class="text-muted">by <?= e($actor) ?> � current <?= (int) $row['current_qty'] ?></small>
+                                    <div class="inventory-report-feed-item">
+                                        <div class="inventory-report-feed-time">
+                                            <?= e(date('M d', strtotime((string) $row['timestamp']))) ?><br>
+                                            <?= e(date('h:i A', strtotime((string) $row['timestamp']))) ?>
+                                        </div>
+                                        <div class="inventory-report-feed-main">
+                                            <div class="inventory-report-feed-top">
+                                                <span class="badge <?= e($meta['badge']) ?>"><?= e($meta['label']) ?></span>
+                                                <p class="inventory-report-feed-product" title="<?= e((string) ($row['product_name'] ?? '-')) ?>"><?= e((string) ($row['product_name'] ?? '-')) ?></p>
+                                                <span class="inventory-report-feed-change <?= e($meta['color']) ?>"><?= e($qty) ?></span>
+                                            </div>
+                                            <div class="inventory-report-feed-meta">
+                                                by <?= e($actor) ?> | current stock <?= (int) ($row['current_qty'] ?? 0) ?>
+                                                <?php if ($referenceLabel !== null): ?>
+                                                    | <?= e($referenceLabel) ?>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php if ($movementNote !== null): ?>
+                                                <div class="inventory-report-feed-note" title="<?= e((string) ($row['notes'] ?? '')) ?>"><?= e($movementNote) ?></div>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                 <?php endforeach; ?>
                             <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card inventory-report-panel mt-3">
+                    <div class="card-body">
+                        <div class="inventory-report-panel-head">
+                            <div>
+                                <h5 class="inventory-report-panel-title">Movement Details</h5>
+                                <p class="inventory-report-panel-subtitle">Compact audit context for the most recent stock changes.</p>
+                            </div>
+                            <span class="inventory-report-panel-pill">Latest <?= count($movementDetails) ?></span>
+                        </div>
+                        <div class="table-responsive inventory-report-table-wrap">
+                            <table class="table table-sm align-middle inventory-report-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Product</th>
+                                        <th>Action</th>
+                                        <th>Reference</th>
+                                        <th>Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($movementDetails)): ?>
+                                        <tr>
+                                            <td colspan="5" class="text-center text-muted">No stock movement details yet.</td>
+                                        </tr>
+                                    <?php else: ?>
+                                        <?php foreach ($movementDetails as $row): ?>
+                                            <?php $referenceLabel = stockMovementReferenceLabel($row); ?>
+                                            <?php $movementNote = summarizeMovementNote((string) ($row['notes'] ?? ''), 80); ?>
+                                            <?php $meta = movementActionMeta((string) ($row['action'] ?? 'unknown')); ?>
+                                            <tr>
+                                                <td class="small text-muted" style="white-space: nowrap;">
+                                                    <?= e(date('M d, h:i A', strtotime((string) $row['timestamp']))) ?>
+                                                </td>
+                                                <td class="fw-semibold text-primary" title="<?= e((string) ($row['product_name'] ?? '-')) ?>"><?= e((string) ($row['product_name'] ?? '-')) ?></td>
+                                                <td>
+                                                    <span class="badge <?= e($meta['badge']) ?>">
+                                                        <?= e($meta['label']) ?>
+                                                    </span>
+                                                </td>
+                                                <td>
+                                                    <?php if ($referenceLabel !== null): ?>
+                                                        <span class="inventory-report-ref"><?= e($referenceLabel) ?></span>
+                                                    <?php else: ?>
+                                                        <span class="text-muted">-</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="small inventory-report-note-cell">
+                                                    <?php if ($movementNote !== null): ?>
+                                                        <span class="inventory-report-note-text" title="<?= e((string) ($row['notes'] ?? '')) ?>"><?= e($movementNote) ?></span>
+                                                    <?php else: ?>
+                                                        <span class="text-muted">No notes</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -524,4 +935,3 @@ require __DIR__ . '/../components/sidebar.php';
 
 </body>
 </html>
-

@@ -31,6 +31,7 @@ CREATE TABLE `activity_logs` (
   KEY `idx_activity_logs_user_created` (`user_id`,`created_at`),
   CONSTRAINT `activity_logs_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `categories`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
@@ -246,6 +247,31 @@ CREATE TABLE `sales` (
   CONSTRAINT `sales_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shift_closings`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `shift_closings` (
+  `shift_closing_id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) DEFAULT NULL,
+  `shift_date` date NOT NULL,
+  `opened_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `closed_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `total_transactions` int(11) NOT NULL DEFAULT 0,
+  `total_items` int(11) NOT NULL DEFAULT 0,
+  `total_sales` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `cash_sales` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `expected_cash` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `counted_cash` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `variance` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `payment_breakdown_json` longtext DEFAULT NULL,
+  `notes` text DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`shift_closing_id`),
+  UNIQUE KEY `uniq_shift_closings_user_date` (`user_id`,`shift_date`),
+  KEY `idx_shift_closings_closed_at` (`closed_at`),
+  CONSTRAINT `shift_closings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `stock_audit_log`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -255,6 +281,9 @@ CREATE TABLE `stock_audit_log` (
   `change_qty` int(11) NOT NULL,
   `current_qty` int(11) NOT NULL,
   `action` enum('sale','stock_in','stock_out','manual_adjust') NOT NULL,
+  `reference_type` varchar(50) DEFAULT NULL,
+  `reference_id` int(11) DEFAULT NULL,
+  `notes` text DEFAULT NULL,
   `user_id` int(11) DEFAULT NULL,
   `timestamp` datetime DEFAULT current_timestamp(),
   PRIMARY KEY (`log_id`),
@@ -262,6 +291,8 @@ CREATE TABLE `stock_audit_log` (
   CONSTRAINT `stock_audit_log_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`product_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+
 DROP TABLE IF EXISTS `stock_in`;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
@@ -271,6 +302,7 @@ CREATE TABLE `stock_in` (
   `quantity` int(11) NOT NULL,
   `stockin_date` timestamp NOT NULL DEFAULT current_timestamp(),
   `user_id` int(11) DEFAULT NULL,
+  `notes` text DEFAULT NULL,
   PRIMARY KEY (`stockin_id`),
   KEY `product_id` (`product_id`),
   KEY `user_id` (`user_id`),
@@ -305,7 +337,7 @@ BEGIN
 
     INSERT INTO stock_audit_log
 
-        (product_id, change_qty, current_qty, action, user_id)
+        (product_id, change_qty, current_qty, action, reference_type, reference_id, notes, user_id)
 
     VALUES
 
@@ -318,6 +350,12 @@ BEGIN
             (SELECT quantity FROM products WHERE product_id = NEW.product_id),
 
             'stock_in',
+
+            'stock_in',
+
+            NEW.stockin_id,
+
+            NEW.notes,
 
             NEW.user_id
 
@@ -418,7 +456,7 @@ BEGIN
 
     INSERT INTO stock_audit_log
 
-        (product_id, change_qty, current_qty, action, user_id)
+        (product_id, change_qty, current_qty, action, reference_type, reference_id, notes, user_id)
 
     VALUES
 
@@ -431,6 +469,12 @@ BEGIN
             (SELECT quantity FROM products WHERE product_id = NEW.product_id),
 
             'stock_out',
+
+            'stock_out',
+
+            NEW.stockout_id,
+
+            NEW.reason,
 
             NEW.user_id
 

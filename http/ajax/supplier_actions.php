@@ -13,7 +13,8 @@ Middleware::auth()
     ->role(['admin'])
     ->ajax()
     ->methods(['POST'])
-    ->csrf();
+    ->csrf()
+    ->throttle('supplier_actions', 30, 60, 'Too many supplier changes. Please wait a moment and try again.');
 
 function jsonResponse(array $payload, int $statusCode = 200): never
 {

@@ -17,6 +17,21 @@ function parseDisplayedAmount(text) {
     return parseFloat(String(text || '').replace(/[^\d.-]/g, '')) || 0;
 }
 
+function formatTransactionNo(saleId, dateValue = null) {
+    const numericSaleId = Number(saleId || 0);
+    if (!Number.isFinite(numericSaleId) || numericSaleId <= 0) {
+        return 'SALE-00000000-000000';
+    }
+
+    const sourceDate = dateValue ? new Date(dateValue) : new Date();
+    const safeDate = Number.isNaN(sourceDate.getTime()) ? new Date() : sourceDate;
+    const year = safeDate.getFullYear();
+    const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+    const day = String(safeDate.getDate()).padStart(2, '0');
+
+    return `SALE-${year}${month}${day}-${String(numericSaleId).padStart(6, '0')}`;
+}
+
 function updateClock() {
     const now = new Date();
     const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
@@ -27,12 +42,169 @@ function updateClock() {
 updateClock();
 setInterval(updateClock, 10000);
 
+function sendCheckoutNotificationUpdate(type = 'sale_success') {
+    if (window.socket && window.socket.readyState === WebSocket.OPEN) {
+        window.socket.send(JSON.stringify({
+            event: 'notification_update',
+            type,
+        }));
+    }
+}
+
 const productCards = Array.from(document.querySelectorAll('.product-card'));
 const cartItemsEl = document.getElementById('cart-items');
+const cartRecoveryNoteEl = document.getElementById('cartRecoveryNote');
 const cart = {};
+const CART_STORAGE_KEY = `pos_cart_${String(POS_CONFIG.userId || 'guest')}`;
+const CART_STORAGE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
 
 function cartKey(productId, unitType) {
     return `${productId}:${unitType}`;
+}
+
+function setCartRecoveryNote(message = '', tone = 'muted') {
+    if (!cartRecoveryNoteEl) return;
+
+    if (!message) {
+        cartRecoveryNoteEl.hidden = true;
+        cartRecoveryNoteEl.textContent = '';
+        cartRecoveryNoteEl.className = 'small text-muted mt-2';
+        return;
+    }
+
+    const toneClass = tone === 'warning'
+        ? 'text-warning'
+        : tone === 'success'
+            ? 'text-success'
+            : 'text-muted';
+
+    cartRecoveryNoteEl.hidden = false;
+    cartRecoveryNoteEl.textContent = message;
+    cartRecoveryNoteEl.className = `small ${toneClass} mt-2`;
+}
+
+function buildCartLineItem(data, unit, qty) {
+    return {
+        product_id: data.productId,
+        name: data.name,
+        qty,
+        price: unit.regularPrice,
+        vatable: data.vatable,
+        discount: unit.discount || 0,
+        unit_type: unit.unitType,
+        unit_label: unit.unitLabel,
+        unit_multiplier: unit.multiplier,
+    };
+}
+
+function serializeCart() {
+    return Object.values(cart).map((item) => ({
+        product_id: item.product_id,
+        unit_type: item.unit_type,
+        qty: item.qty,
+    }));
+}
+
+function clearStoredCart() {
+    try {
+        localStorage.removeItem(CART_STORAGE_KEY);
+    } catch (_) {}
+}
+
+function persistCart() {
+    try {
+        const items = serializeCart();
+        if (items.length === 0) {
+            clearStoredCart();
+            return;
+        }
+
+        localStorage.setItem(CART_STORAGE_KEY, JSON.stringify({
+            saved_at: Date.now(),
+            items,
+        }));
+    } catch (_) {}
+}
+
+function restoreCartFromStorage() {
+    try {
+        const raw = localStorage.getItem(CART_STORAGE_KEY);
+        if (!raw) return;
+
+        const payload = JSON.parse(raw);
+        const savedAt = Number(payload?.saved_at || 0);
+        const storedItems = Array.isArray(payload?.items) ? payload.items : [];
+
+        if (!storedItems.length) {
+            clearStoredCart();
+            return;
+        }
+
+        if (!savedAt || (Date.now() - savedAt) > CART_STORAGE_MAX_AGE_MS) {
+            clearStoredCart();
+            setCartRecoveryNote('Saved cart expired and was cleared.', 'warning');
+            return;
+        }
+
+        const cardByProductId = new Map(productCards.map((card) => [parseInt(card.dataset.id || '0', 10), card]));
+        const reservedBaseQty = {};
+        let restoredLines = 0;
+        let adjustedLines = 0;
+
+        storedItems.forEach((storedItem) => {
+            const productId = parseInt(storedItem?.product_id || '0', 10);
+            const unitType = String(storedItem?.unit_type || 'piece');
+            const requestedQty = Math.max(0, parseInt(storedItem?.qty || '0', 10));
+
+            if (productId <= 0 || requestedQty <= 0) {
+                return;
+            }
+
+            const card = cardByProductId.get(productId);
+            if (!card || card.classList.contains('stock-out')) {
+                adjustedLines += 1;
+                return;
+            }
+
+            const data = getCardData(card);
+            const unit = data.units[unitType];
+            if (!unit) {
+                adjustedLines += 1;
+                return;
+            }
+
+            const reserved = reservedBaseQty[productId] || 0;
+            const remainingBaseStock = Math.max(0, data.maxStock - reserved);
+            const allowedQty = Math.min(requestedQty, Math.floor(remainingBaseStock / unit.multiplier));
+
+            if (allowedQty <= 0) {
+                adjustedLines += 1;
+                return;
+            }
+
+            if (allowedQty < requestedQty) {
+                adjustedLines += 1;
+            }
+
+            cart[cartKey(productId, unit.unitType)] = buildCartLineItem(data, unit, allowedQty);
+            reservedBaseQty[productId] = reserved + (allowedQty * unit.multiplier);
+            restoredLines += 1;
+        });
+
+        if (restoredLines > 0) {
+            setCartRecoveryNote(
+                adjustedLines > 0
+                    ? 'Cart restored with stock adjustments based on current inventory.'
+                    : 'Cart restored from your last unfinished sale.',
+                adjustedLines > 0 ? 'warning' : 'success'
+            );
+        } else {
+            clearStoredCart();
+            setCartRecoveryNote('Saved cart could not be restored with current stock.', 'warning');
+        }
+    } catch (_) {
+        clearStoredCart();
+    }
 }
 
 function getCardData(card) {
@@ -199,6 +371,7 @@ function applyCartQuantity(card, unitType, delta) {
     }
 
     updateAllCards(data.productId);
+    setCartRecoveryNote('');
     renderCart();
     return true;
 }
@@ -256,6 +429,7 @@ function renderCart() {
                 if ((getProductBaseQtyInCart(item.product_id) + item.unit_multiplier) > maxStock) return;
                 item.qty += 1;
                 updateAllCards(item.product_id);
+                setCartRecoveryNote('');
                 renderCart();
             });
 
@@ -265,12 +439,14 @@ function renderCart() {
                     delete cart[key];
                 }
                 updateAllCards(item.product_id);
+                setCartRecoveryNote('');
                 renderCart();
             });
 
             row.querySelector('.remove')?.addEventListener('click', () => {
                 delete cart[key];
                 updateAllCards(item.product_id);
+                setCartRecoveryNote('');
                 renderCart();
             });
         });
@@ -285,9 +461,11 @@ function renderCart() {
     document.getElementById('vat').textContent = peso(totalVAT);
     document.getElementById('grand-total').textContent = peso(grandTotal);
 
+    persistCart();
     updateReceiptBtn();
 }
 
+restoreCartFromStorage();
 renderCart();
 
 const productUnitModalOverlay = document.getElementById('productUnitModalOverlay');
@@ -666,6 +844,7 @@ function buildReceiptHtml({ title, itemsHtml, subtotal, discount, vat, grandTota
     const address = document.getElementById('pAddress').value || '';
     const phone = document.getElementById('pPhone').value || '';
     const cashier = document.getElementById('pCashier').value || 'Cashier';
+    const logo = POS_CONFIG.logo || '';
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -673,11 +852,12 @@ function buildReceiptHtml({ title, itemsHtml, subtotal, discount, vat, grandTota
 <meta charset="UTF-8">
 <title>${escapeHtml(title)}</title>
 <style>
-*{box-sizing:border-box}body{background:#e0e0e0;display:flex;justify-content:center;padding:30px 0 60px;font-family:'Courier New',Courier,monospace}.receipt{background:#fff;width:302px;padding:16px 14px 20px;font-size:11.5px;color:#000;line-height:1.45;box-shadow:0 2px 12px rgba(0,0,0,.15)}.r-store{text-align:center;font-size:15px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px}.r-info{text-align:center;font-size:10.5px;color:#333;margin-bottom:10px;line-height:1.5}.r-meta{font-size:10.5px;margin-bottom:2px}.r-dash{border:none;border-top:1px dashed #000;margin:7px 0}.r-solid{border:none;border-top:1px solid #000;margin:7px 0}.r-eq{border:none;border-top:2px solid #000;margin:7px 0}.sale-no{text-align:center;font-size:10px;color:#888;margin-bottom:4px}table{width:100%;border-collapse:collapse}thead th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:3px 2px;border-bottom:1px solid #000}.th-name{text-align:left;width:44%}.th-qty{text-align:center;width:10%}.th-price{text-align:right;width:22%}.th-total{text-align:right;width:24%}.item-name{padding:3px 2px;vertical-align:top;word-break:break-word}.item-qty{text-align:center;padding:3px 2px}.item-price{text-align:right;padding:3px 2px}.item-total{text-align:right;padding:3px 2px;font-weight:bold}.disc-tag{background:#eee;font-size:9px;padding:0 2px;border-radius:2px}.totals td{padding:2px 2px;font-size:11px}.t-label{text-align:left}.t-value{text-align:right}.discount{color:#c00}.grand-row td{font-size:14px;font-weight:bold;padding-top:5px}.r-footer{text-align:center;font-size:10.5px;color:#444;margin-top:10px;line-height:1.6}.thank{font-size:12px;font-weight:bold;color:#000}@media print{@page{size:A4 portrait;margin:10mm 0}body{background:none;padding:0}.receipt{box-shadow:none;width:302px;margin:0 auto}}</style>
+*{box-sizing:border-box}body{background:#e0e0e0;display:flex;justify-content:center;padding:30px 0 60px;font-family:'Courier New',Courier,monospace}.receipt{background:#fff;width:302px;padding:16px 14px 20px;font-size:11.5px;color:#000;line-height:1.45;box-shadow:0 2px 12px rgba(0,0,0,.15)}.r-logo{text-align:center;margin-bottom:6px}.r-logo img{max-width:72px;max-height:72px;object-fit:contain}.r-store{text-align:center;font-size:15px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase;margin-bottom:3px}.r-info{text-align:center;font-size:10.5px;color:#333;margin-bottom:10px;line-height:1.5}.r-meta{font-size:10.5px;margin-bottom:2px}.r-dash{border:none;border-top:1px dashed #000;margin:7px 0}.r-solid{border:none;border-top:1px solid #000;margin:7px 0}.r-eq{border:none;border-top:2px solid #000;margin:7px 0}.sale-no{text-align:center;font-size:10px;color:#888;margin-bottom:4px}table{width:100%;border-collapse:collapse}thead th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;padding:3px 2px;border-bottom:1px solid #000}.th-name{text-align:left;width:44%}.th-qty{text-align:center;width:10%}.th-price{text-align:right;width:22%}.th-total{text-align:right;width:24%}.item-name{padding:3px 2px;vertical-align:top;word-break:break-word}.item-qty{text-align:center;padding:3px 2px}.item-price{text-align:right;padding:3px 2px}.item-total{text-align:right;padding:3px 2px;font-weight:bold}.disc-tag{background:#eee;font-size:9px;padding:0 2px;border-radius:2px}.totals td{padding:2px 2px;font-size:11px}.t-label{text-align:left}.t-value{text-align:right}.discount{color:#c00}.grand-row td{font-size:14px;font-weight:bold;padding-top:5px}.r-footer{text-align:center;font-size:10.5px;color:#444;margin-top:10px;line-height:1.6}.thank{font-size:12px;font-weight:bold;color:#000}@media print{@page{size:A4 portrait;margin:10mm 0}body{background:none;padding:0}.receipt{box-shadow:none;width:302px;margin:0 auto}}</style>
 </head>
 <body>
 <div class="receipt">
 <div class="sale-no">${escapeHtml(title)}</div>
+${logo ? `<div class="r-logo"><img src="${escapeHtml(logo)}" alt="Store logo"></div>` : ''}
 <div class="r-store">${escapeHtml(storeName)}</div>
 <div class="r-info">${address ? `${escapeHtml(address)}<br>` : ''}${phone ? `Tel: ${escapeHtml(phone)}` : ''}</div>
 <hr class="r-eq">
@@ -787,6 +967,8 @@ function showPrintPrompt() {
 
 function clearCartAndClose() {
     Object.keys(cart).forEach((key) => delete cart[key]);
+    clearStoredCart();
+    setCartRecoveryNote('');
     updateAllCards();
     renderCart();
     document.getElementById('printPromptOverlay')?.classList.remove('open');
@@ -903,12 +1085,21 @@ confirmCheckoutBtn?.addEventListener('click', async () => {
         const data = await response.json();
         if (!data.success) {
             setCheckoutStatus('err', data.error || 'Checkout failed');
+            if (data.notification_type) {
+                sendCheckoutNotificationUpdate(data.notification_type);
+            }
             return;
         }
 
-        setCheckoutStatus('ok', `Sale #${data.sale_id} saved`);
+        const transactionNo = data.transaction_no || formatTransactionNo(data.sale_id);
+        setCheckoutStatus('ok', `${transactionNo} saved`);
+        if (data.notification_type) {
+            sendCheckoutNotificationUpdate(data.notification_type);
+        }
+        clearStoredCart();
         lastSaleData = {
             sale_id: data.sale_id,
+            transaction_no: transactionNo,
             items: items.map((item) => ({
                 name: item.name,
                 qty: item.qty,
@@ -952,7 +1143,7 @@ function printReceipt(sale) {
     }[sale.payment] || sale.payment;
 
     const receiptHtml = buildReceiptHtml({
-        title: `Sale #${Number(sale.sale_id) || 0}`,
+        title: sale.transaction_no || formatTransactionNo(sale.sale_id, sale.date),
         itemsHtml,
         subtotal: sale.subtotal,
         discount: sale.discount,

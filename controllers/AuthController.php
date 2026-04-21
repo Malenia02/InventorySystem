@@ -324,6 +324,8 @@ final class AuthController
                 rt.selector,
                 rt.token_hash,
                 rt.expires_at,
+                rt.user_agent,
+                rt.ip_address,
                 u.user_id AS u_user_id,
                 u.username,
                 u.role,
@@ -358,6 +360,17 @@ final class AuthController
         }
 
         if (($row['status'] ?? 'active') !== 'active') {
+            $delete = $conn->prepare("DELETE FROM " . self::REMEMBER_TABLE . " WHERE selector = :selector");
+            $delete->execute([':selector' => $selector]);
+
+            self::clearRememberCookie();
+            return false;
+        }
+
+        if (self::rememberContextMismatch($row)) {
+            $delete = $conn->prepare("DELETE FROM " . self::REMEMBER_TABLE . " WHERE selector = :selector");
+            $delete->execute([':selector' => $selector]);
+
             self::clearRememberCookie();
             return false;
         }
@@ -469,7 +482,7 @@ final class AuthController
         ]);
 
         $cookieValue = $selector . ':' . $token;
-        $isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+        $isHttps = self::rememberCookieSecureFlag();
 
         setcookie(self::REMEMBER_COOKIE, $cookieValue, [
             'expires'  => time() + (86400 * self::REMEMBER_DAYS),
@@ -483,7 +496,7 @@ final class AuthController
 
     private static function clearRememberCookie(): void
     {
-        $isHttps = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+        $isHttps = self::rememberCookieSecureFlag();
 
         setcookie(self::REMEMBER_COOKIE, '', [
             'expires'  => time() - 3600,
@@ -498,6 +511,39 @@ final class AuthController
     private static function getIpAddress(): string
     {
         return (string) ($_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN');
+    }
+
+    private static function rememberContextMismatch(array $row): bool
+    {
+        $currentUserAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+        $storedUserAgent = (string) ($row['user_agent'] ?? '');
+
+        if ($storedUserAgent !== '' && $currentUserAgent !== '' && !hash_equals($storedUserAgent, $currentUserAgent)) {
+            return true;
+        }
+
+        $storedIp = trim((string) ($row['ip_address'] ?? ''));
+        $currentIp = trim(self::getIpAddress());
+
+        if ($storedIp === '' || $storedIp === 'UNKNOWN' || $currentIp === '' || $currentIp === 'UNKNOWN') {
+            return false;
+        }
+
+        $enforceIpBinding = true;
+        if (function_exists('app_is_private_or_local_ip')) {
+            $enforceIpBinding = app_is_private_or_local_ip($storedIp) || app_is_private_or_local_ip($currentIp);
+        }
+
+        return $enforceIpBinding && !hash_equals($storedIp, $currentIp);
+    }
+
+    private static function rememberCookieSecureFlag(): bool
+    {
+        if (function_exists('app_is_https')) {
+            return app_is_https();
+        }
+
+        return !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
     }
 
     private static function normalizeLoginIdentifier(string $username): string

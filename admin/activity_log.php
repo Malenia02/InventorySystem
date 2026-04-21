@@ -36,10 +36,20 @@ function actionBadge(string $action): string
     };
 }
 
+function severityBadgeClass(string $level): string
+{
+    return match (strtolower(trim($level))) {
+        'warning'  => 'bg-warning text-dark',
+        'critical' => 'bg-danger',
+        'security' => 'bg-dark text-white',
+        default    => 'bg-info text-dark',
+    };
+}
+
 function timeAgo(?string $timestamp): string
 {
     if (!$timestamp) {
-        return '—';
+        return '-';
     }
 
     $diff = time() - strtotime($timestamp);
@@ -88,7 +98,7 @@ function maskIp(?string $ip, bool $isAdmin): string
     $ip = trim((string)$ip);
 
     if ($ip === '') {
-        return '—';
+        return '-';
     }
 
     if ($isAdmin) {
@@ -120,7 +130,10 @@ $action     = trim((string)($_GET['action'] ?? ''));
 $search     = trim((string)($_GET['search'] ?? ''));
 $dateFrom   = normalizeDate($_GET['date_from'] ?? null, false);
 $dateTo     = normalizeDate($_GET['date_to'] ?? null, true);
+$level      = trim((string)($_GET['level'] ?? ''));
+$entityType = trim((string)($_GET['entity_type'] ?? ''));
 $offset     = ($page - 1) * $perPage;
+$allowedLevels = ['info', 'warning', 'critical', 'security'];
 
 $where = [];
 $params = [];
@@ -135,6 +148,16 @@ if (!$isAdmin) {
 if ($action !== '') {
     $where[] = "al.{$activity_log_action} = :action";
     $params[':action'] = $action;
+}
+
+if ($level !== '' && in_array($level, $allowedLevels, true)) {
+    $where[] = "al.level = :level";
+    $params[':level'] = $level;
+}
+
+if ($entityType !== '') {
+    $where[] = "al.entity_type = :entity_type";
+    $params[':entity_type'] = $entityType;
 }
 
 if ($search !== '') {
@@ -164,6 +187,7 @@ $activityLogs = [];
 $totalRows = 0;
 $errorMsg = null;
 $actionOptions = [];
+$entityOptions = [];
 
 try {
     $countSql = "
@@ -191,6 +215,9 @@ try {
         SELECT
             al.{$activity_log_id} AS id,
             al.{$activity_log_action} AS action,
+            al.level,
+            al.entity_type,
+            al.entity_id,
             al.{$activity_log_desc} AS description,
             al.{$activity_log_ip} AS ip_address,
             al.{$activity_log_created} AS created_at,
@@ -239,6 +266,30 @@ try {
     }
     $actionStmt->execute();
     $actionOptions = $actionStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+
+    $entitySql = "
+        SELECT DISTINCT entity_type
+        FROM {$table_activity_logs}
+        WHERE entity_type IS NOT NULL AND entity_type <> ''
+        ORDER BY entity_type ASC
+    ";
+    if (!$isAdmin) {
+        $entitySql = "
+            SELECT DISTINCT al.entity_type
+            FROM {$table_activity_logs} al
+            WHERE al.{$activity_log_user_id} = :session_user_id
+              AND al.entity_type IS NOT NULL
+              AND al.entity_type <> ''
+            ORDER BY al.entity_type ASC
+        ";
+    }
+
+    $entityStmt = $conn->prepare($entitySql);
+    if (!$isAdmin) {
+        $entityStmt->bindValue(':session_user_id', $sessionUserId, PDO::PARAM_INT);
+    }
+    $entityStmt->execute();
+    $entityOptions = $entityStmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
 
 } catch (Throwable $e) {
     error_log('[activity_log.php] ' . $e->getMessage());
@@ -318,6 +369,30 @@ require __DIR__ . '/../components/sidebar.php';
                             </div>
 
                             <div class="col-md-2">
+                                <label class="form-label">Severity</label>
+                                <select name="level" class="form-select">
+                                    <option value="">All severities</option>
+                                    <?php foreach ($allowedLevels as $severity): ?>
+                                        <option value="<?= e($severity) ?>" <?= $level === $severity ? 'selected' : '' ?>>
+                                            <?= e(ucfirst($severity)) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+
+                            <div class="col-md-2">
+                                <label class="form-label">Entity</label>
+                                <select name="entity_type" class="form-select">
+                                    <option value="">All entities</option>
+                                    <?php foreach ($entityOptions as $entity): ?>
+                                        <option value="<?= e((string) $entity) ?>" <?= $entityType === (string) $entity ? 'selected' : '' ?>>
+                                            <?= e(ucwords(str_replace('_', ' ', (string) $entity))) ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+
+                            <div class="col-md-2">
                                 <label class="form-label">From</label>
                                 <input
                                     type="date"
@@ -364,6 +439,8 @@ require __DIR__ . '/../components/sidebar.php';
                                             <th>Role</th>
                                         <?php endif; ?>
                                         <th>Action</th>
+                                        <th>Severity</th>
+                                        <th>Entity</th>
                                         <th>Description</th>
                                         <?php if ($isAdmin): ?>
                                             <th>IP Address</th>
@@ -392,7 +469,7 @@ require __DIR__ . '/../components/sidebar.php';
                                                                 <?= e(ucfirst((string)$log['role'])) ?>
                                                             </span>
                                                         <?php else: ?>
-                                                            <span class="text-muted">—</span>
+                                                            <span class="text-muted">-</span>
                                                         <?php endif; ?>
                                                     </td>
                                                 <?php endif; ?>
@@ -403,8 +480,28 @@ require __DIR__ . '/../components/sidebar.php';
                                                     </span>
                                                 </td>
 
+                                                
+                                                <td>
+                                                    <span class="badge <?= e(severityBadgeClass((string) ($log['level'] ?? 'info'))) ?>">
+                                                        <?= e(ucfirst((string) ($log['level'] ?? 'info'))) ?>
+                                                    </span>
+                                                </td>
+
+                                                <td>
+                                                    <?php if (!empty($log['entity_type'])): ?>
+                                                        <span class="badge bg-light text-dark border">
+                                                            <?= e(ucwords(str_replace('_', ' ', (string) $log['entity_type']))) ?>
+                                                        </span>
+                                                        <?php if (!empty($log['entity_id'])): ?>
+                                                            <div class="text-muted small mt-1">ID #<?= (int) $log['entity_id'] ?></div>
+                                                        <?php endif; ?>
+                                                    <?php else: ?>
+                                                        <span class="text-muted">-</span>
+                                                    <?php endif; ?>
+                                                </td>
+
                                                 <td style="min-width: 280px;">
-                                                    <?= e($log['description'] ?? '—') ?>
+                                                    <?= e($log['description'] ?? '-') ?>
                                                 </td>
 
                                                 <?php if ($isAdmin): ?>
@@ -421,7 +518,7 @@ require __DIR__ . '/../components/sidebar.php';
                                         <?php endforeach; ?>
                                     <?php else: ?>
                                         <tr>
-                                            <td colspan="<?= $isAdmin ? 7 : 4 ?>" class="text-center py-4 text-muted">
+                                            <td colspan="<?= $isAdmin ? 9 : 6 ?>" class="text-center py-4 text-muted">
                                                 No activity logs found.
                                             </td>
                                         </tr>
@@ -466,3 +563,6 @@ require __DIR__ . '/../components/sidebar.php';
 
 </body>
 </html>
+
+
+

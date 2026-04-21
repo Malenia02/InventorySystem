@@ -13,7 +13,8 @@ Middleware::auth()
     ->role(['admin'])
     ->ajax()
     ->methods(['POST'])
-    ->csrf();
+    ->csrf()
+    ->throttle('category_actions', 30, 60, 'Too many category changes. Please slow down and try again.');
 
 function jsonResponse(array $payload, int $statusCode = 200): never
 {

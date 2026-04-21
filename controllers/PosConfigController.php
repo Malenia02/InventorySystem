@@ -4,6 +4,12 @@ declare(strict_types=1);
 final class PosConfigController
 {
     private const TABLE = 'pos_config';
+    private const MAX_LOGO_SIZE = 2097152; // 2MB
+    private const ALLOWED_LOGO_MIME_TYPES = [
+        'image/jpeg' => 'jpg',
+        'image/png'  => 'png',
+        'image/webp' => 'webp',
+    ];
 
     public static function get(PDO $conn): array
     {
@@ -29,75 +35,103 @@ final class PosConfigController
         return $config ?: self::defaults();
     }
 
-    public static function save(PDO $conn, array $input): array
+    public static function save(PDO $conn, array $input, array $files = []): array
     {
         $payload = self::validate($input);
-        $existing = self::existingId($conn);
+        $existing = self::existingConfig($conn);
+        $existingId = isset($existing['config_id']) ? (int) $existing['config_id'] : null;
+        $existingLogo = trim((string) ($existing['logo'] ?? ''));
+        $newLogo = null;
 
-        if ($existing !== null) {
-            $stmt = $conn->prepare("
-                UPDATE " . self::TABLE . "
-                SET
-                    store_name = :store_name,
-                    store_address = :store_address,
-                    store_phone = :store_phone,
-                    store_email = :store_email,
-                    opening_hours = :opening_hours,
-                    closing_hours = :closing_hours,
-                    tax_rate = :tax_rate,
-                    currency = :currency,
-                    logo = :logo
-                WHERE config_id = :config_id
-            ");
+        try {
+            $newLogo = self::handleLogoUpload($files['logo_upload'] ?? null);
+            if ($newLogo !== null) {
+                $payload['logo'] = $newLogo;
+            } elseif ($payload['logo'] === null && $existingLogo !== '') {
+                $payload['logo'] = $existingLogo;
+            }
+        } catch (Throwable $e) {
+            if ($newLogo !== null) {
+                self::deleteStoredLogo($newLogo);
+            }
+            throw $e;
+        }
 
-            $stmt->execute([
-                ':store_name'    => $payload['store_name'],
-                ':store_address' => $payload['store_address'],
-                ':store_phone'   => $payload['store_phone'],
-                ':store_email'   => $payload['store_email'],
-                ':opening_hours' => $payload['opening_hours'],
-                ':closing_hours' => $payload['closing_hours'],
-                ':tax_rate'      => $payload['tax_rate'],
-                ':currency'      => $payload['currency'],
-                ':logo'          => $payload['logo'],
-                ':config_id'     => $existing,
-            ]);
-        } else {
-            $stmt = $conn->prepare("
-                INSERT INTO " . self::TABLE . " (
-                    store_name,
-                    store_address,
-                    store_phone,
-                    store_email,
-                    opening_hours,
-                    closing_hours,
-                    tax_rate,
-                    currency,
-                    logo
-                ) VALUES (
-                    :store_name,
-                    :store_address,
-                    :store_phone,
-                    :store_email,
-                    :opening_hours,
-                    :closing_hours,
-                    :tax_rate,
-                    :currency,
-                    :logo
-                )
-            ");
+        try {
+            if ($existingId !== null) {
+                $stmt = $conn->prepare("
+                    UPDATE " . self::TABLE . "
+                    SET
+                        store_name = :store_name,
+                        store_address = :store_address,
+                        store_phone = :store_phone,
+                        store_email = :store_email,
+                        opening_hours = :opening_hours,
+                        closing_hours = :closing_hours,
+                        tax_rate = :tax_rate,
+                        currency = :currency,
+                        logo = :logo
+                    WHERE config_id = :config_id
+                ");
 
-            $stmt->execute([
-                ':store_name'    => $payload['store_name'],
-                ':store_address' => $payload['store_address'],
-                ':store_phone'   => $payload['store_phone'],
-                ':store_email'   => $payload['store_email'],
-                ':opening_hours' => $payload['opening_hours'],
-                ':closing_hours' => $payload['closing_hours'],
-                ':tax_rate'      => $payload['tax_rate'],
-                ':currency'      => $payload['currency'],
-                ':logo'          => $payload['logo'],
-            ]);
+                $stmt->execute([
+                    ':store_name'    => $payload['store_name'],
+                    ':store_address' => $payload['store_address'],
+                    ':store_phone'   => $payload['store_phone'],
+                    ':store_email'   => $payload['store_email'],
+                    ':opening_hours' => $payload['opening_hours'],
+                    ':closing_hours' => $payload['closing_hours'],
+                    ':tax_rate'      => $payload['tax_rate'],
+                    ':currency'      => $payload['currency'],
+                    ':logo'          => $payload['logo'],
+                    ':config_id'     => $existingId,
+                ]);
+            } else {
+                $stmt = $conn->prepare("
+                    INSERT INTO " . self::TABLE . " (
+                        store_name,
+                        store_address,
+                        store_phone,
+                        store_email,
+                        opening_hours,
+                        closing_hours,
+                        tax_rate,
+                        currency,
+                        logo
+                    ) VALUES (
+                        :store_name,
+                        :store_address,
+                        :store_phone,
+                        :store_email,
+                        :opening_hours,
+                        :closing_hours,
+                        :tax_rate,
+                        :currency,
+                        :logo
+                    )
+                ");
+
+                $stmt->execute([
+                    ':store_name'    => $payload['store_name'],
+                    ':store_address' => $payload['store_address'],
+                    ':store_phone'   => $payload['store_phone'],
+                    ':store_email'   => $payload['store_email'],
+                    ':opening_hours' => $payload['opening_hours'],
+                    ':closing_hours' => $payload['closing_hours'],
+                    ':tax_rate'      => $payload['tax_rate'],
+                    ':currency'      => $payload['currency'],
+                    ':logo'          => $payload['logo'],
+                ]);
+            }
+        } catch (Throwable $e) {
+            if ($newLogo !== null) {
+                self::deleteStoredLogo($newLogo);
+            }
+            throw $e;
+        }
+
+        if ($newLogo !== null && $existingLogo !== '' && $existingLogo !== $newLogo) {
+            self::deleteStoredLogo($existingLogo);
         }
 
         return self::get($conn);
@@ -108,18 +142,57 @@ final class PosConfigController
         return (float) (self::get($conn)['tax_rate'] ?? 12.00);
     }
 
+    public static function logoUrl(?string $logo): ?string
+    {
+        $logo = trim((string) $logo);
+        if ($logo === '') {
+            return null;
+        }
+
+        if (preg_match('#^https?://#i', $logo) === 1 || str_starts_with($logo, '/')) {
+            return $logo;
+        }
+
+        if (
+            preg_match('#^[a-z0-9/_\.-]+$#i', $logo) === 1
+            && (str_starts_with($logo, 'pos-config/')
+                || str_starts_with($logo, 'products/')
+                || str_starts_with($logo, 'staff/'))
+        ) {
+            return self::buildMediaUrl($logo);
+        }
+
+        return $logo;
+    }
+
     private static function existingId(PDO $conn): ?int
     {
+        $existing = self::existingConfig($conn);
+        return isset($existing['config_id']) ? (int) $existing['config_id'] : null;
+    }
+
+    private static function existingConfig(PDO $conn): ?array
+    {
         $stmt = $conn->query("
-            SELECT config_id
+            SELECT
+                config_id,
+                store_name,
+                store_address,
+                store_phone,
+                store_email,
+                opening_hours,
+                closing_hours,
+                tax_rate,
+                currency,
+                logo
             FROM " . self::TABLE . "
             ORDER BY config_id ASC
             LIMIT 1
         ");
 
-        $id = $stmt->fetchColumn();
+        $config = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $id !== false ? (int) $id : null;
+        return $config ?: null;
     }
 
     private static function validate(array $input): array
@@ -131,7 +204,7 @@ final class PosConfigController
         $openingHours = self::nullableTrim($input['opening_hours'] ?? null);
         $closingHours = self::nullableTrim($input['closing_hours'] ?? null);
         $currency = strtoupper(trim((string) ($input['currency'] ?? 'PHP')));
-        $logo = self::nullableTrim($input['logo'] ?? null);
+        $logo = self::nullableTrim($input['logo_current'] ?? $input['logo'] ?? null);
         $taxRate = round((float) ($input['tax_rate'] ?? 12), 2);
 
         if ($storeName === '') {
@@ -167,6 +240,55 @@ final class PosConfigController
         ];
     }
 
+    private static function handleLogoUpload(mixed $file): ?string
+    {
+        if (
+            !is_array($file)
+            || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE
+        ) {
+            return null;
+        }
+
+        if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Logo upload failed.');
+        }
+
+        $tmpFile = (string) ($file['tmp_name'] ?? '');
+        if ($tmpFile === '' || !is_uploaded_file($tmpFile)) {
+            throw new RuntimeException('Invalid uploaded logo file.');
+        }
+
+        $fileSize = (int) ($file['size'] ?? 0);
+        if ($fileSize <= 0 || $fileSize > self::MAX_LOGO_SIZE) {
+            throw new RuntimeException('Logo file is too large. Maximum size is 2MB.');
+        }
+
+        $mimeType = mime_content_type($tmpFile);
+        if (!is_string($mimeType) || !array_key_exists($mimeType, self::ALLOWED_LOGO_MIME_TYPES)) {
+            throw new RuntimeException('Invalid logo file type. Only JPG, PNG, and WEBP are allowed.');
+        }
+
+        if (getimagesize($tmpFile) === false) {
+            throw new RuntimeException('Uploaded logo is not a valid image.');
+        }
+
+        $extension = self::ALLOWED_LOGO_MIME_TYPES[$mimeType];
+        $uploadDir = self::secureUploadDirectory();
+
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+            throw new RuntimeException('Failed to create the logo upload directory.');
+        }
+
+        $fileName = 'logo_' . bin2hex(random_bytes(12)) . '.' . $extension;
+        $targetPath = $uploadDir . $fileName;
+
+        if (!move_uploaded_file($tmpFile, $targetPath)) {
+            throw new RuntimeException('Failed to save the uploaded logo.');
+        }
+
+        return self::buildMediaUrl('pos-config/' . $fileName);
+    }
+
     private static function defaults(): array
     {
         return [
@@ -181,6 +303,120 @@ final class PosConfigController
             'currency'       => 'PHP',
             'logo'           => null,
         ];
+    }
+
+    private static function deleteStoredLogo(?string $logoPath): void
+    {
+        $absolutePath = self::resolveStoredLogoPath($logoPath);
+        if ($absolutePath === null || !is_file($absolutePath)) {
+            return;
+        }
+
+        @unlink($absolutePath);
+    }
+
+    private static function resolveStoredLogoPath(?string $logoPath): ?string
+    {
+        $logoPath = trim((string) $logoPath);
+        if ($logoPath === '') {
+            return null;
+        }
+
+        $mediaAsset = self::extractMediaAsset($logoPath);
+        if ($mediaAsset !== null) {
+            return self::resolveSecureAssetPath($mediaAsset, 'pos-config');
+        }
+
+        if (!str_starts_with($logoPath, '/inventory_system/uploads/pos-config/')) {
+            return null;
+        }
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        $relativePath = substr($logoPath, strlen('/inventory_system'));
+        $absolutePath = $basePath . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+        $realBasePath = realpath($basePath);
+        $realDirectory = realpath(dirname($absolutePath));
+
+        if ($realBasePath === false || $realDirectory === false) {
+            return null;
+        }
+
+        $uploadsBase = $realBasePath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'pos-config';
+        if (!str_starts_with($realDirectory, $uploadsBase)) {
+            return null;
+        }
+
+        return $absolutePath;
+    }
+
+    private static function secureUploadDirectory(): string
+    {
+        return self::secureUploadsBasePath() . DIRECTORY_SEPARATOR . 'pos-config' . DIRECTORY_SEPARATOR;
+    }
+
+    private static function secureUploadsBasePath(): string
+    {
+        if (function_exists('app_secure_storage_dir')) {
+            return rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'uploads';
+        }
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        return $basePath . DIRECTORY_SEPARATOR . 'uploads';
+    }
+
+    private static function buildMediaUrl(string $asset): string
+    {
+        return '/inventory_system/media.php?asset=' . rawurlencode($asset);
+    }
+
+    private static function extractMediaAsset(string $path): ?string
+    {
+        if (!str_starts_with($path, '/inventory_system/media.php')) {
+            return null;
+        }
+
+        $query = parse_url($path, PHP_URL_QUERY);
+        if (!is_string($query) || $query === '') {
+            return null;
+        }
+
+        parse_str($query, $params);
+        $asset = trim((string) ($params['asset'] ?? ''));
+
+        return $asset !== '' ? $asset : null;
+    }
+
+    private static function resolveSecureAssetPath(string $asset, string $expectedPrefix): ?string
+    {
+        $asset = trim($asset);
+        if ($asset === '' || str_contains($asset, '..')) {
+            return null;
+        }
+
+        if (preg_match('#^[a-z0-9/_\.-]+$#i', $asset) !== 1) {
+            return null;
+        }
+
+        $prefix = $expectedPrefix . '/';
+        if (!str_starts_with($asset, $prefix)) {
+            return null;
+        }
+
+        $baseDir = self::secureUploadsBasePath();
+        $absolutePath = $baseDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $asset);
+        $realBaseDir = realpath($baseDir);
+        $realDirectory = realpath(dirname($absolutePath));
+
+        if ($realBaseDir === false || $realDirectory === false) {
+            return null;
+        }
+
+        $expectedBase = $realBaseDir . DIRECTORY_SEPARATOR . $expectedPrefix;
+        if (!str_starts_with($realDirectory, $expectedBase)) {
+            return null;
+        }
+
+        return $absolutePath;
     }
 
     private static function nullableTrim(?string $value): ?string

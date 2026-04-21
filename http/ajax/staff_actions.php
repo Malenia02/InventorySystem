@@ -13,7 +13,8 @@ Middleware::auth()
     ->role(['admin'])
     ->ajax()
     ->methods(['POST'])
-    ->csrf();
+    ->csrf()
+    ->throttle('staff_actions', 25, 60, 'Too many staff changes. Please wait a bit before trying again.');
 
 function jsonResponse(array $payload, int $statusCode = 200): never
 {

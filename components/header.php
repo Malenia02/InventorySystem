@@ -255,7 +255,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const notifBadge = document.getElementById('notifBadge');
     const notifList = document.getElementById('notifList');
     const notifDropdown = document.getElementById('notifDropdown');
+    const websocketMeta = document.querySelector('meta[name="websocket-url"]');
     let currentNotifView = 'all';
+    let socketReconnectTimer = null;
+    let socketConnectInProgress = false;
 
     function escapeHtml(str) {
         const div = document.createElement('div');
@@ -454,9 +457,61 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function connectWebSocket() {
-        const socketUrl = document.querySelector('meta[name="websocket-url"]')?.getAttribute('content') || '';
+    async function getFreshWebSocketUrl() {
+        const fallbackUrl = websocketMeta?.getAttribute('content') || '';
+
+        try {
+            const response = await fetch('/inventory_system/http/ajax/websocket_auth.php', {
+                method: 'GET',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'Accept': 'application/json'
+                }
+            });
+            const text = await response.text();
+
+            let data = null;
+            try {
+                data = JSON.parse(text);
+            } catch (error) {
+                console.error('Invalid JSON from websocket_auth.php:', text);
+            }
+
+            if (response.ok && data?.success && data.url) {
+                if (websocketMeta) {
+                    websocketMeta.setAttribute('content', data.url);
+                }
+                return data.url;
+            }
+        } catch (error) {
+            console.error('WebSocket auth refresh failed:', error);
+        }
+
+        return fallbackUrl;
+    }
+
+    function scheduleWebSocketReconnect() {
+        if (socketReconnectTimer !== null) {
+            return;
+        }
+
+        socketReconnectTimer = window.setTimeout(() => {
+            socketReconnectTimer = null;
+            connectWebSocket();
+        }, 3000);
+    }
+
+    async function connectWebSocket() {
+        if (socketConnectInProgress) {
+            return;
+        }
+
+        socketConnectInProgress = true;
+        const socketUrl = await getFreshWebSocketUrl();
+        socketConnectInProgress = false;
+
         if (!socketUrl) {
+            scheduleWebSocketReconnect();
             return;
         }
 
@@ -481,7 +536,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             window.socket.onclose = () => {
                 console.warn('WebSocket disconnected. Reconnecting in 3 seconds...');
-                setTimeout(connectWebSocket, 3000);
+                scheduleWebSocketReconnect();
             };
 
             window.socket.onerror = (err) => {
@@ -489,7 +544,7 @@ document.addEventListener('DOMContentLoaded', () => {
             };
         } catch (e) {
             console.error('WebSocket init failed:', e);
-            setTimeout(connectWebSocket, 3000);
+            scheduleWebSocketReconnect();
         }
     }
 

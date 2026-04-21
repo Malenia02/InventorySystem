@@ -659,6 +659,17 @@ function renderSubcategoryOptions(array $subcategories): string
                                                     <label class="form-label">Quantity to Add</label>
                                                     <input type="number" name="quantity" class="form-control" required min="1" placeholder="Enter quantity">
                                                 </div>
+
+                                                <div class="mt-3 mb-0">
+                                                    <label class="form-label">Restock Note (optional)</label>
+                                                    <textarea
+                                                        name="notes"
+                                                        class="form-control"
+                                                        rows="3"
+                                                        maxlength="500"
+                                                        placeholder="Example: Delivery received from supplier, emergency refill, counted adjustment"
+                                                    ></textarea>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -718,7 +729,7 @@ function renderSubcategoryOptions(array $subcategories): string
 
                                                 <div class="mb-0">
                                                     <label class="form-label">Custom Reason (optional)</label>
-                                                    <input type="text" id="customStockOutReason" class="form-control" placeholder="Enter custom reason if needed">
+                                                    <input type="text" id="customStockOutReason" class="form-control" maxlength="500" placeholder="Enter custom reason if needed">
                                                 </div>
                                             </div>
                                         </div>

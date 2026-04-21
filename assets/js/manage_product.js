@@ -619,6 +619,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const productId = document.getElementById("restockProductId")?.value || "";
       const quantity = restockForm.querySelector('input[name="quantity"]')?.value || "";
+      const notes = restockForm.querySelector('textarea[name="notes"]')?.value.trim() || "";
 
       if (!productId || parseInt(productId, 10) <= 0) {
         showToast("Invalid product ID", "error");
@@ -627,6 +628,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!quantity || parseInt(quantity, 10) <= 0) {
         showToast("Invalid quantity", "error");
+        return;
+      }
+
+      if (notes.length > 500) {
+        showToast("Restock notes must be 500 characters or fewer", "error");
         return;
       }
 
@@ -692,6 +698,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!finalReason) {
         showToast("Please provide a reason", "error");
+        return;
+      }
+
+      if (finalReason.length > 500) {
+        showToast("Reason must be 500 characters or fewer", "error");
         return;
       }
 

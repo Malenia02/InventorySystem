@@ -21,7 +21,9 @@ $productPages = [
 $adminPages = [
     'manage_staff.php',
     'activity_log.php',
-    'pos_settings.php'
+    'pos_settings.php',
+    'backup_restore.php',
+    'reorder_planner.php'
 ];
 
 $reportPages = [
@@ -122,6 +124,20 @@ $showInventoryMenu = $inventoryLinks !== [];
                             <span>POS Config</span>
                         </a>
                     </li>
+
+                    <li>
+                        <a href="/inventory_system/admin/backup_restore.php" class="<?= $current_page === 'backup_restore.php' ? 'active' : '' ?>">
+                            <i class="bi bi-circle"></i>
+                            <span>Backup &amp; Restore</span>
+                        </a>
+                    </li>
+
+                    <li>
+                        <a href="/inventory_system/admin/reorder_planner.php" class="<?= $current_page === 'reorder_planner.php' ? 'active' : '' ?>">
+                            <i class="bi bi-circle"></i>
+                            <span>Reorder Planner</span>
+                        </a>
+                    </li>
                 </ul>
             </li>
         <?php endif; ?>
@@ -183,6 +199,15 @@ $showInventoryMenu = $inventoryLinks !== [];
         <?php endif; ?>
 
         <li class="nav-heading">Account</li>
+
+        <?php if ($isAdmin || $isCashier): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $current_page === 'shift_closing.php' ? '' : 'collapsed' ?>" href="/inventory_system/shift_closing.php">
+                    <i class="bi bi-journal-check"></i>
+                    <span>Shift Closing</span>
+                </a>
+            </li>
+        <?php endif; ?>
 
         <li class="nav-item">
             <a class="nav-link <?= $current_page === 'profile.php' ? '' : 'collapsed' ?>" href="/inventory_system/profile.php">

@@ -202,9 +202,7 @@ final class StaffController
 
         $extension = self::ALLOWED_MIME_TYPES[$mimeType];
         $safeName = preg_replace('/[^a-zA-Z0-9_-]/', '_', strtolower(trim($staffName))) ?: 'unknown';
-
-        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
-        $uploadDir = $basePath . '/uploads/staff/' . $safeName . '/';
+        $uploadDir = self::secureUploadDirectory($safeName);
 
         if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
             throw new RuntimeException('Failed to create upload directory.');
@@ -217,7 +215,7 @@ final class StaffController
             throw new RuntimeException('Failed to save uploaded file.');
         }
 
-        return '/inventory_system/uploads/staff/' . $safeName . '/' . $photoName;
+        return self::buildMediaUrl('staff/' . $safeName . '/' . $photoName);
     }
 
     public static function normalizeForView(array $staff): array
@@ -252,7 +250,16 @@ final class StaffController
     private static function resolveStoredPhotoPath(?string $photoPath): ?string
     {
         $photoPath = trim((string) $photoPath);
-        if ($photoPath === '' || $photoPath === self::DEFAULT_PHOTO || !str_starts_with($photoPath, '/inventory_system/uploads/staff/')) {
+        if ($photoPath === '' || $photoPath === self::DEFAULT_PHOTO) {
+            return null;
+        }
+
+        $mediaAsset = self::extractMediaAsset($photoPath);
+        if ($mediaAsset !== null) {
+            return self::resolveSecureAssetPath($mediaAsset, 'staff');
+        }
+
+        if (!str_starts_with($photoPath, '/inventory_system/uploads/staff/')) {
             return null;
         }
 
@@ -268,6 +275,77 @@ final class StaffController
 
         $uploadsBase = $realBasePath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'staff';
         if (!str_starts_with($realDirectory, $uploadsBase)) {
+            return null;
+        }
+
+        return $absolutePath;
+    }
+
+    private static function secureUploadDirectory(string $safeName): string
+    {
+        return self::secureUploadsBasePath() . DIRECTORY_SEPARATOR . $safeName . DIRECTORY_SEPARATOR;
+    }
+
+    private static function secureUploadsBasePath(): string
+    {
+        if (function_exists('app_secure_storage_dir')) {
+            return rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'staff';
+        }
+
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__);
+        return $basePath . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'staff';
+    }
+
+    private static function buildMediaUrl(string $asset): string
+    {
+        return '/inventory_system/media.php?asset=' . rawurlencode($asset);
+    }
+
+    private static function extractMediaAsset(string $photoPath): ?string
+    {
+        if (!str_starts_with($photoPath, '/inventory_system/media.php')) {
+            return null;
+        }
+
+        $query = parse_url($photoPath, PHP_URL_QUERY);
+        if (!is_string($query) || $query === '') {
+            return null;
+        }
+
+        parse_str($query, $params);
+        $asset = trim((string) ($params['asset'] ?? ''));
+
+        return $asset !== '' ? $asset : null;
+    }
+
+    private static function resolveSecureAssetPath(string $asset, string $expectedPrefix): ?string
+    {
+        $asset = trim($asset);
+        if ($asset === '' || str_contains($asset, '..')) {
+            return null;
+        }
+
+        if (preg_match('#^[a-z0-9/_\.-]+$#i', $asset) !== 1) {
+            return null;
+        }
+
+        $prefix = $expectedPrefix . '/';
+        if (!str_starts_with($asset, $prefix)) {
+            return null;
+        }
+
+        $baseDir = rtrim(function_exists('app_secure_storage_dir') ? app_secure_storage_dir() : dirname(__DIR__), '/\\')
+            . DIRECTORY_SEPARATOR . 'uploads';
+        $absolutePath = $baseDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $asset);
+        $realBaseDir = realpath($baseDir);
+        $realDirectory = realpath(dirname($absolutePath));
+
+        if ($realBaseDir === false || $realDirectory === false) {
+            return null;
+        }
+
+        $expectedBase = $realBaseDir . DIRECTORY_SEPARATOR . $expectedPrefix;
+        if (!str_starts_with($realDirectory, $expectedBase)) {
             return null;
         }
 

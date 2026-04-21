@@ -128,6 +128,35 @@ class Middleware
         return $this;
     }
 
+    public function throttle(string $scope, int $maxRequests, int $windowSeconds, string $message = 'Too many requests. Please slow down.'): static
+    {
+        $scope = trim($scope);
+        if ($scope === '' || $maxRequests <= 0 || $windowSeconds <= 0) {
+            return $this;
+        }
+
+        $bucket = $this->readRateLimitBucket($scope, $windowSeconds);
+        if (count($bucket) >= $maxRequests) {
+            error_log(sprintf(
+                '[Middleware] Rate limit exceeded - scope: %s, user_id: %s, ip: %s',
+                $scope,
+                $_SESSION['user_id'] ?? 'guest',
+                $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN'
+            ));
+
+            $this->denyAccess(
+                429,
+                $message,
+                '/inventory_system/error.php?code=429'
+            );
+        }
+
+        $bucket[] = time();
+        $this->writeRateLimitBucket($scope, $bucket);
+
+        return $this;
+    }
+
     private function validateCsrfToken(): void
     {
         $sessionToken = (string) ($_SESSION['csrf_token'] ?? '');
@@ -317,5 +346,56 @@ class Middleware
         $userRole = $_SESSION['role'] ?? null;
 
         return in_array($userRole, $roles, true);
+    }
+
+    private function readRateLimitBucket(string $scope, int $windowSeconds): array
+    {
+        $path = $this->rateLimitPath($scope);
+        if ($path === null || !is_file($path)) {
+            return [];
+        }
+
+        $raw = file_get_contents($path);
+        $decoded = json_decode($raw !== false ? $raw : '[]', true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+
+        $cutoff = time() - $windowSeconds;
+
+        return array_values(array_filter($decoded, static fn($timestamp): bool => is_int($timestamp) && $timestamp >= $cutoff));
+    }
+
+    private function writeRateLimitBucket(string $scope, array $timestamps): void
+    {
+        $path = $this->rateLimitPath($scope);
+        if ($path === null) {
+            return;
+        }
+
+        $directory = dirname($path);
+        if (!is_dir($directory)) {
+            @mkdir($directory, 0755, true);
+        }
+
+        $payload = json_encode(array_values($timestamps));
+        if ($payload === false) {
+            return;
+        }
+
+        @file_put_contents($path, $payload, LOCK_EX);
+    }
+
+    private function rateLimitPath(string $scope): ?string
+    {
+        if (!defined('LOG_PATH')) {
+            return null;
+        }
+
+        $userId = (string) ($_SESSION['user_id'] ?? 'guest');
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN');
+        $key = hash('sha256', strtolower($scope) . '|' . $userId . '|' . $ip);
+
+        return LOG_PATH . '/rate_limits/' . $key . '.json';
     }
 }
