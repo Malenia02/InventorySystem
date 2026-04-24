@@ -110,12 +110,21 @@ class NotificationWebSocket implements MessageComponentInterface
             return;
         }
 
+        $targetRoles = $this->normalizeTargetRoles($data['target_roles'] ?? []);
+        $targetUserIds = $this->normalizeTargetUserIds($data['target_user_ids'] ?? []);
+
         $payload = json_encode([
             'event' => 'notification_update',
             'type'  => $type,
         ]);
 
         foreach ($this->clients as $client) {
+            $clientMeta = is_array($this->clients[$client] ?? null) ? $this->clients[$client] : [];
+
+            if (!$this->shouldDeliverToClient($clientMeta, $targetRoles, $targetUserIds)) {
+                continue;
+            }
+
             $client->send($payload);
         }
     }
@@ -200,5 +209,55 @@ class NotificationWebSocket implements MessageComponentInterface
         $this->messageBuckets[$connectionId] = $bucket;
 
         return false;
+    }
+
+    private function normalizeTargetRoles(mixed $roles): array
+    {
+        if (!is_array($roles)) {
+            return [];
+        }
+
+        $allowedRoles = ['admin', 'cashier', 'staff'];
+        $normalized = [];
+
+        foreach ($roles as $role) {
+            $role = strtolower(trim((string) $role));
+            if ($role !== '' && in_array($role, $allowedRoles, true)) {
+                $normalized[] = $role;
+            }
+        }
+
+        return array_values(array_unique(array_slice($normalized, 0, 5)));
+    }
+
+    private function normalizeTargetUserIds(mixed $userIds): array
+    {
+        if (!is_array($userIds)) {
+            return [];
+        }
+
+        $normalized = [];
+
+        foreach ($userIds as $userId) {
+            $userId = (int) $userId;
+            if ($userId > 0) {
+                $normalized[] = $userId;
+            }
+        }
+
+        return array_values(array_unique(array_slice($normalized, 0, 20)));
+    }
+
+    private function shouldDeliverToClient(array $clientMeta, array $targetRoles, array $targetUserIds): bool
+    {
+        if ($targetRoles === [] && $targetUserIds === []) {
+            return true;
+        }
+
+        $clientRole = strtolower(trim((string) ($clientMeta['role'] ?? '')));
+        $clientUserId = (int) ($clientMeta['user_id'] ?? 0);
+
+        return in_array($clientRole, $targetRoles, true)
+            || in_array($clientUserId, $targetUserIds, true);
     }
 }

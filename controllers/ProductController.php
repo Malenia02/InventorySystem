@@ -56,7 +56,9 @@ final class ProductController
                 s.supplier_name
             FROM " . self::TABLE . " p
             LEFT JOIN categories c ON p.category_id = c.category_id
-            LEFT JOIN subcategories sc ON p.subcategory_id = sc.subcategory_id
+            LEFT JOIN subcategories sc
+                ON p.subcategory_id = sc.subcategory_id
+               AND sc.category_id = p.category_id
             LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
             ORDER BY p.created_at DESC, p.product_id DESC
         ");
@@ -100,7 +102,9 @@ final class ProductController
                 s.supplier_name
             FROM " . self::TABLE . " p
             LEFT JOIN categories c ON p.category_id = c.category_id
-            LEFT JOIN subcategories sc ON p.subcategory_id = sc.subcategory_id
+            LEFT JOIN subcategories sc
+                ON p.subcategory_id = sc.subcategory_id
+               AND sc.category_id = p.category_id
             LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
             WHERE p.product_id = :id
             LIMIT 1
@@ -120,7 +124,7 @@ final class ProductController
                 p.product_id,
                 p.product_name,
                 p.category_id,
-                p.subcategory_id,
+                sc.subcategory_id,
                 p.supplier_id,
                 p.sku,
                 p.price,
@@ -142,7 +146,10 @@ final class ProductController
                 s.supplier_name
             FROM " . self::TABLE . " p
             INNER JOIN categories c ON p.category_id = c.category_id
-            LEFT JOIN subcategories sc ON p.subcategory_id = sc.subcategory_id
+            LEFT JOIN subcategories sc
+                ON p.subcategory_id = sc.subcategory_id
+               AND sc.category_id = p.category_id
+               AND sc.status = 'active'
             LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
             WHERE p.status = 'active'
               AND c.status = 'active'

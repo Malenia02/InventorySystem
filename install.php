@@ -20,6 +20,86 @@ $setupKeyForm        = [
     'new_setup_access_key_confirm' => '',
 ];
 
+function install_store_logo_upload(?array $file): ?string
+{
+    if (
+        !is_array($file)
+        || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE
+    ) {
+        return null;
+    }
+
+    if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+        throw new RuntimeException('Store logo upload failed. Please choose another image.');
+    }
+
+    $tmpFile = (string) ($file['tmp_name'] ?? '');
+    if ($tmpFile === '' || !is_uploaded_file($tmpFile)) {
+        throw new RuntimeException('The uploaded store logo is invalid.');
+    }
+
+    $fileSize = (int) ($file['size'] ?? 0);
+    if ($fileSize <= 0 || $fileSize > 2097152) {
+        throw new RuntimeException('Store logo must be 2MB or smaller.');
+    }
+
+    $allowedMimeTypes = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+    ];
+    $mimeType = mime_content_type($tmpFile);
+    if (!is_string($mimeType) || !array_key_exists($mimeType, $allowedMimeTypes)) {
+        throw new RuntimeException('Store logo must be a JPG, PNG, or WEBP image.');
+    }
+
+    if (getimagesize($tmpFile) === false) {
+        throw new RuntimeException('Store logo must be a valid image file.');
+    }
+
+    $uploadDir = rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'pos-config' . DIRECTORY_SEPARATOR;
+    if (!is_dir($uploadDir) && !mkdir($uploadDir, 0755, true) && !is_dir($uploadDir)) {
+        throw new RuntimeException('Unable to create the secure logo upload folder.');
+    }
+
+    $fileName = 'logo_' . bin2hex(random_bytes(12)) . '.' . $allowedMimeTypes[$mimeType];
+    $targetPath = $uploadDir . $fileName;
+
+    if (!move_uploaded_file($tmpFile, $targetPath)) {
+        throw new RuntimeException('Unable to save the uploaded store logo.');
+    }
+
+    return '/inventory_system/media.php?asset=' . rawurlencode('pos-config/' . $fileName);
+}
+
+function install_delete_uploaded_logo(?string $logoUrl): void
+{
+    $logoUrl = trim((string) $logoUrl);
+    if ($logoUrl === '' || !str_starts_with($logoUrl, '/inventory_system/media.php')) {
+        return;
+    }
+
+    $query = parse_url($logoUrl, PHP_URL_QUERY);
+    if (!is_string($query) || $query === '') {
+        return;
+    }
+
+    parse_str($query, $params);
+    $asset = trim((string) ($params['asset'] ?? ''));
+    if ($asset === '' || str_contains($asset, '..') || !str_starts_with($asset, 'pos-config/')) {
+        return;
+    }
+
+    $baseDir = rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'uploads';
+    $path = $baseDir . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $asset);
+    $realBase = realpath($baseDir);
+    $realDir = realpath(dirname($path));
+
+    if ($realBase !== false && $realDir !== false && str_starts_with($realDir, $realBase) && is_file($path)) {
+        @unlink($path);
+    }
+}
+
 if (empty($_SESSION['install_csrf']) || !is_string($_SESSION['install_csrf'])) {
     $_SESSION['install_csrf'] = bin2hex(random_bytes(32));
 }
@@ -145,10 +225,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($form['store_email'] !== '' && !filter_var($form['store_email'], FILTER_VALIDATE_EMAIL))
             $errors[] = 'Store email must be a valid email address.';
+
+        if (
+            isset($_FILES['store_logo'])
+            && is_array($_FILES['store_logo'])
+            && (int) ($_FILES['store_logo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE
+            && (int) ($_FILES['store_logo']['size'] ?? 0) > 2097152
+        ) {
+            $errors[] = 'Store logo must be 2MB or smaller.';
+        }
     }
 
     if ($errors === [] && $postAction !== 'create_setup_key') {
+        $uploadedLogo = null;
         try {
+            $uploadedLogo = install_store_logo_upload($_FILES['store_logo'] ?? null);
             $serverConn  = app_create_database_connection($form['db_host'], $form['db_port'], $form['db_user'], $form['db_pass']);
             $quotedDbName = str_replace('`', '``', $form['db_name']);
             $serverConn->exec("CREATE DATABASE IF NOT EXISTS `{$quotedDbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci");
@@ -170,8 +261,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $dbConn->exec('DELETE FROM pos_config');
             $dbConn->prepare('
-                INSERT INTO pos_config (store_name,store_address,store_phone,store_email,opening_hours,closing_hours,tax_rate,currency)
-                VALUES (:store_name,:store_address,:store_phone,:store_email,:opening_hours,:closing_hours,:tax_rate,:currency)
+                INSERT INTO pos_config (store_name,store_address,store_phone,store_email,opening_hours,closing_hours,tax_rate,currency,logo)
+                VALUES (:store_name,:store_address,:store_phone,:store_email,:opening_hours,:closing_hours,:tax_rate,:currency,:logo)
             ')->execute([
                 ':store_name'    => $form['store_name'],
                 ':store_address' => $form['store_address'] !== '' ? $form['store_address'] : null,
@@ -181,6 +272,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':closing_hours' => $form['closing_hours'] !== '' ? $form['closing_hours'] : null,
                 ':tax_rate'      => (float) $form['tax_rate'],
                 ':currency'      => $form['currency']      !== '' ? strtoupper($form['currency']) : 'PHP',
+                ':logo'          => $uploadedLogo,
             ]);
 
             $existingUserStmt = $dbConn->prepare('
@@ -232,6 +324,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (Throwable $e) {
             if (isset($dbConn) && $dbConn instanceof PDO && $dbConn->inTransaction()) {
                 $dbConn->rollBack();
+            }
+            if ($uploadedLogo !== null) {
+                install_delete_uploaded_logo($uploadedLogo);
             }
             error_log('[install.php] ' . $e->getMessage());
             $errors[] = $e instanceof RuntimeException
@@ -403,7 +498,7 @@ $activeStep = max(0, min(3, (int) ($_POST['active_step'] ?? 0)));
       <?php endif; ?>
 
       <!-- ── Main install form ── -->
-      <form method="post" action="" id="installForm">
+      <form method="post" action="" id="installForm" enctype="multipart/form-data">
         <input type="hidden" name="install_csrf" value="<?= htmlspecialchars((string) $_SESSION['install_csrf'], ENT_QUOTES, 'UTF-8') ?>">
         <input type="hidden" name="form_action"  value="install">
         <input type="hidden" name="active_step"  id="activeStepInput" value="<?= $activeStep ?>">
@@ -477,6 +572,24 @@ $activeStep = max(0, min(3, (int) ($_POST['active_step'] ?? 0)));
 
           <div class="install-section">
             <div class="install-section-label">Store details</div>
+            <div class="install-logo-upload">
+              <div class="install-logo-preview" id="storeLogoPreview">
+                <i class="bi bi-shop-window"></i>
+                <img src="" alt="Store logo preview" hidden>
+              </div>
+              <div class="install-logo-upload-copy">
+                <label class="install-label" for="storeLogoInput">Store logo</label>
+                <p>Upload the client logo once during setup. It will appear on POS receipts and store branding areas.</p>
+                <div class="install-logo-actions">
+                  <label class="install-logo-pick" for="storeLogoInput">
+                    <i class="bi bi-cloud-arrow-up"></i>
+                    Choose logo
+                  </label>
+                  <span id="storeLogoName">JPG, PNG, or WEBP up to 2MB</span>
+                </div>
+                <input type="file" id="storeLogoInput" name="store_logo" accept="image/jpeg,image/png,image/webp">
+              </div>
+            </div>
             <div class="install-field-grid install-field-grid--two">
               <div class="install-field-group">
                 <label class="install-label">Store name</label>
@@ -605,6 +718,7 @@ $activeStep = max(0, min(3, (int) ($_POST['active_step'] ?? 0)));
             <div class="install-section-label">Store profile</div>
             <div class="install-review-table">
               <div class="install-review-row"><span>Store name</span><strong><?= htmlspecialchars($form['store_name'],    ENT_QUOTES, 'UTF-8') ?></strong></div>
+              <div class="install-review-row"><span>Logo</span>       <strong id="reviewStoreLogo">Optional upload</strong></div>
               <div class="install-review-row"><span>VAT rate</span>  <strong><?= htmlspecialchars($form['tax_rate'],      ENT_QUOTES, 'UTF-8') ?>%</strong></div>
               <div class="install-review-row"><span>Currency</span>  <strong><?= htmlspecialchars(strtoupper($form['currency']), ENT_QUOTES, 'UTF-8') ?></strong></div>
               <div class="install-review-row"><span>Hours</span>     <strong><?= htmlspecialchars($form['opening_hours'] . ' – ' . $form['closing_hours'], ENT_QUOTES, 'UTF-8') ?></strong></div>

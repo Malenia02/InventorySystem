@@ -369,6 +369,15 @@ h6 {
   margin-right: 6px;
 }
 
+.logo img.brand-logo-custom {
+  width: 60px;
+  height: 60px;
+  max-height: 60px;
+  object-fit: contain;
+  padding: 4px;
+  border-radius: 10px;
+}
+
 .logo span {
   font-size: 26px;
   font-weight: 700;

@@ -33,7 +33,6 @@ function checkout_transaction_number(int $saleId, ?string $saleDate = null): str
 function checkout_notify_sale(
     PDO $conn,
     int $userId,
-    string $role,
     string $type,
     string $title,
     string $message,
@@ -48,7 +47,7 @@ function checkout_notify_sale(
         NotificationController::create(
             $conn,
             $userId,
-            $role,
+            'admin',
             $type,
             $title,
             $message,
@@ -61,10 +60,20 @@ function checkout_notify_sale(
     }
 }
 
+function checkout_actor_label(): string
+{
+    $name = trim((string) ($_SESSION['first_name'] ?? '') . ' ' . (string) ($_SESSION['last_name'] ?? ''));
+    if ($name !== '') {
+        return $name;
+    }
+
+    $username = trim((string) ($_SESSION['username'] ?? ''));
+    return $username !== '' ? $username : 'Cashier';
+}
+
 function checkout_failure_response(
     PDO $conn,
     int $userId,
-    string $role,
     string $type,
     string $message,
     int $statusCode = 422,
@@ -73,10 +82,9 @@ function checkout_failure_response(
     checkout_notify_sale(
         $conn,
         $userId,
-        $role,
         $type,
         'Sale failed',
-        $message,
+        checkout_actor_label() . ': ' . $message,
         'bi-exclamation-triangle',
         'text-danger'
     );
@@ -194,7 +202,6 @@ try {
         checkout_failure_response(
             $conn,
             (int) ($_SESSION['user_id'] ?? 0),
-            (string) ($_SESSION['role'] ?? 'staff'),
             'sale_failed_invalid_payment',
             'Invalid payment method.',
             422
@@ -205,7 +212,6 @@ try {
         checkout_failure_response(
             $conn,
             (int) ($_SESSION['user_id'] ?? 0),
-            (string) ($_SESSION['role'] ?? 'staff'),
             'sale_failed_empty_cart',
             'Cart is empty.',
             422
@@ -294,7 +300,6 @@ try {
             checkout_failure_response(
                 $conn,
                 $sessionUserId,
-                (string) ($_SESSION['role'] ?? 'staff'),
                 'sale_failed_low_stock',
                 sprintf(
                     'Insufficient stock for %s. Available: %d, requested: %d.',
@@ -435,11 +440,11 @@ try {
     checkout_notify_sale(
         $conn,
         $sessionUserId,
-        (string) ($_SESSION['role'] ?? 'staff'),
         'sale_success',
         'Sale completed',
         sprintf(
-            '%s saved successfully for %s.',
+            '%s saved %s for PHP %s.',
+            checkout_actor_label(),
             $transactionNo,
             number_format($grandTotal, 2)
         ),
@@ -470,10 +475,9 @@ try {
     checkout_notify_sale(
         $conn,
         $sessionUserId,
-        (string) ($_SESSION['role'] ?? 'staff'),
         'sale_failed_error',
         'Sale failed',
-        'Unable to complete checkout right now.',
+        checkout_actor_label() . ' could not complete checkout right now.',
         'bi-exclamation-triangle',
         'text-danger'
     );

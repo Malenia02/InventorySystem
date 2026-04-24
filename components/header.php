@@ -6,10 +6,12 @@
 require_once __DIR__ . '/../controllers/NotificationController.php';
 require_once __DIR__ . '/../middleware/Middleware.php';
 require_once __DIR__ . '/../src/WebSocket/WebSocketSecurity.php';
+require_once __DIR__ . '/branding.php';
 
 use InventorySystem\WebSocket\WebSocketSecurity;
 
 $csrfToken = Middleware::generateCsrfToken();
+$brand = app_branding($conn ?? null);
 
 $sessionUserId   = (int)($_SESSION['user_id'] ?? 0);
 $sessionRole     = $_SESSION['role'] ?? 'staff';
@@ -23,6 +25,7 @@ if (empty($sessionFullName)) {
 $profilePhoto = !empty($sessionPhoto)
     ? htmlspecialchars($sessionPhoto)
     : '/inventory_system/assets/img/profile-img.jpg';
+$notificationActivityUrl = '/inventory_system/notifications.php';
 
 $notifications = [];
 $unreadNotifications = [];
@@ -90,9 +93,12 @@ function renderNotificationItems(array $items, string $emptyTitle, string $empty
 
     <div class="d-flex align-items-center justify-content-between">
         <a href="/inventory_system/index.php" class="logo d-flex align-items-center">
-            <img src="/inventory_system/assets/img/logo.png" alt="">
-            <span class="d-none d-lg-block">StockWise
-</span>
+            <img
+                src="<?= htmlspecialchars((string) $brand['logo'], ENT_QUOTES, 'UTF-8') ?>"
+                alt="<?= htmlspecialchars((string) $brand['name'], ENT_QUOTES, 'UTF-8') ?> logo"
+                class="<?= !empty($brand['has_custom_logo']) ? 'brand-logo-custom' : '' ?>"
+            >
+            <span class="d-none d-lg-block"><?= htmlspecialchars((string) $brand['name'], ENT_QUOTES, 'UTF-8') ?></span>
         </a>
         <i class="bi bi-list toggle-sidebar-btn"></i>
     </div>
@@ -150,7 +156,7 @@ function renderNotificationItems(array $items, string $emptyTitle, string $empty
                                         Mark all as read
                                     </button>
                                 <?php endif; ?>
-                                <a href="/inventory_system/admin/activity_log.php" class="btn btn-link btn-sm">View all</a>
+                                <a href="<?= htmlspecialchars($notificationActivityUrl, ENT_QUOTES, 'UTF-8') ?>" class="btn btn-link btn-sm">View all</a>
                             </div>
                         </div>
 
@@ -193,7 +199,7 @@ function renderNotificationItems(array $items, string $emptyTitle, string $empty
                         </div>
 
                         <div class="dropdown-footer">
-                            <a href="/inventory_system/admin/activity_log.php">Show all activity</a>
+                            <a href="<?= htmlspecialchars($notificationActivityUrl, ENT_QUOTES, 'UTF-8') ?>">Show all activity</a>
                         </div>
                     </li>
                 </ul>
@@ -256,6 +262,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const notifList = document.getElementById('notifList');
     const notifDropdown = document.getElementById('notifDropdown');
     const websocketMeta = document.querySelector('meta[name="websocket-url"]');
+    const notificationActivityUrl = <?= json_encode($notificationActivityUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     let currentNotifView = 'all';
     let socketReconnectTimer = null;
     let socketConnectInProgress = false;
@@ -328,7 +335,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                     <div class="notif-topbar-actions">
                         ${data.count > 0 ? '<button type="button" class="btn btn-link btn-sm notif-mark-read" id="notifMarkReadBtn">Mark all as read</button>' : ''}
-                        <a href="/inventory_system/admin/activity_log.php" class="btn btn-link btn-sm">View all</a>
+                        <a href="${escapeHtml(notificationActivityUrl)}" class="btn btn-link btn-sm">View all</a>
                     </div>
                 </div>
 
@@ -369,7 +376,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="dropdown-footer">
-                    <a href="/inventory_system/admin/activity_log.php">Show all activity</a>
+                    <a href="${escapeHtml(notificationActivityUrl)}">Show all activity</a>
                 </div>
             </li>
         `;
@@ -415,6 +422,8 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Notification refresh failed:', err);
         });
     }
+
+    window.refreshHeaderNotifications = updateNotifications;
 
     function markNotificationsSeen() {
         const csrfToken =
@@ -528,6 +537,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (data.event === 'notification_update') {
                         updateNotifications();
+                        if (typeof window.refreshNotificationCenter === 'function') {
+                            window.refreshNotificationCenter();
+                        }
                     }
                 } catch (e) {
                     console.error('Invalid WS message:', e);

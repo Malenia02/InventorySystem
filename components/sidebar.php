@@ -202,6 +202,13 @@ $showInventoryMenu = $inventoryLinks !== [];
 
         <?php if ($isAdmin || $isCashier): ?>
             <li class="nav-item">
+                <a class="nav-link <?= $current_page === 'notifications.php' ? '' : 'collapsed' ?>" href="/inventory_system/notifications.php">
+                    <i class="bi bi-bell"></i>
+                    <span>Notification Center</span>
+                </a>
+            </li>
+
+            <li class="nav-item">
                 <a class="nav-link <?= $current_page === 'shift_closing.php' ? '' : 'collapsed' ?>" href="/inventory_system/shift_closing.php">
                     <i class="bi bi-journal-check"></i>
                     <span>Shift Closing</span>

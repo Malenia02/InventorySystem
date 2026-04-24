@@ -5,6 +5,7 @@ define('AUTH_CONTEXT', 'public');
 
 require_once __DIR__ . '/bootstrap/app.php';
 require_once __DIR__ . '/controllers/AuthController.php';
+require_once __DIR__ . '/components/branding.php';
 
 // Activity log config
 $logConfig = [
@@ -31,6 +32,7 @@ $error_message = '';
 $success_message = '';
 $submittedUsername = (string) ($_POST['username'] ?? '');
 $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername);
+$brand = app_branding($conn ?? null);
 
 if (!empty($_SESSION['setup_success'])) {
     $success_message = (string) $_SESSION['setup_success'];
@@ -122,6 +124,33 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
         color: #ffffff;
         font-weight: 700;
         letter-spacing: 0.01em;
+        font-size: clamp(1.7rem, 4vw, 2.25rem);
+        line-height: 1;
+    }   
+
+    .login-logo img,
+    .login-logo .login-brand-mark {
+        width: 86px;
+        height: 78px;
+        max-height: none;
+        border-radius: 0;
+        object-fit: contain;
+        background: transparent;
+        padding: 0;
+        box-shadow: none;
+        margin-right: 0;
+    }
+
+    .login-logo {
+        gap: 6px;
+        width: auto !important;
+        justify-content: center;
+    }
+
+    .login-logo .login-brand-mark.is-default {
+        background: transparent;
+        padding: 0;
+        box-shadow: none;
     }
 
     @media (max-width: 991.98px) {
@@ -156,8 +185,12 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
 
                         <div class="d-flex justify-content-center py-4">
                             <a href="/inventory_system/index.php" class="logo login-logo d-flex align-items-center w-auto">
-                                <img src="/inventory_system/assets/img/logo.png" alt="Logo">
-                                <span class="d-none d-lg-block">StockWise</span>
+                                <img
+                                    src="<?= htmlspecialchars((string) $brand['logo'], ENT_QUOTES, 'UTF-8') ?>"
+                                    alt="<?= htmlspecialchars((string) $brand['name'], ENT_QUOTES, 'UTF-8') ?> logo"
+                                    class="login-brand-mark <?= !empty($brand['has_custom_logo']) ? '' : 'is-default' ?>"
+                                >
+                                <span class="d-none d-lg-block"><?= htmlspecialchars((string) $brand['name'], ENT_QUOTES, 'UTF-8') ?></span>
                             </a>
                         </div>
 

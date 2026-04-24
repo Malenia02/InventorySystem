@@ -44,10 +44,18 @@ setInterval(updateClock, 10000);
 
 function sendCheckoutNotificationUpdate(type = 'sale_success') {
     if (window.socket && window.socket.readyState === WebSocket.OPEN) {
-        window.socket.send(JSON.stringify({
+        const userId = Number(POS_CONFIG.userId || 0);
+        const payload = {
             event: 'notification_update',
             type,
-        }));
+            target_roles: ['admin'],
+        };
+
+        if (Number.isFinite(userId) && userId > 0) {
+            payload.target_user_ids = [userId];
+        }
+
+        window.socket.send(JSON.stringify(payload));
     }
 }
 
@@ -625,6 +633,11 @@ let activeSubcategoryId = 'all';
 let searchTerm = '';
 let currentPage = 1;
 
+function normalizeFilterId(value) {
+    const id = String(value ?? '').trim();
+    return id === '' || id === '0' ? 'all' : id;
+}
+
 function isSidebarOpen() {
     return !document.body.classList.contains('toggle-sidebar');
 }
@@ -649,8 +662,9 @@ const posBrowserTitle = document.getElementById('posBrowserTitle');
 const posProductCount = document.getElementById('posProductCount');
 
 function setActiveButton(container, selector, activeId) {
+    const normalizedActiveId = normalizeFilterId(activeId);
     container?.querySelectorAll(selector).forEach((button) => {
-        button.classList.toggle('active', button.dataset.id === activeId);
+        button.classList.toggle('active', normalizeFilterId(button.dataset.id) === normalizedActiveId);
     });
 }
 
@@ -680,17 +694,17 @@ function renderSubcategoryBar() {
     }
 
     const scoped = POS_SUBCATEGORIES.filter((subcategory) => (
-        String(subcategory.category_id) === activeCategoryId
+        normalizeFilterId(subcategory.category_id) === activeCategoryId
     ));
 
-    if (!scoped.some((subcategory) => String(subcategory.subcategory_id) === activeSubcategoryId)) {
+    if (!scoped.some((subcategory) => normalizeFilterId(subcategory.subcategory_id) === activeSubcategoryId)) {
         activeSubcategoryId = 'all';
     }
 
     subcategoryBar.innerHTML = `
         <button class="sub-pill subcat-btn ${activeSubcategoryId === 'all' ? 'active' : ''}" data-id="all">All</button>
         ${scoped.map((subcategory) => `
-            <button class="sub-pill subcat-btn ${String(subcategory.subcategory_id) === activeSubcategoryId ? 'active' : ''}" data-id="${subcategory.subcategory_id}">
+            <button class="sub-pill subcat-btn ${normalizeFilterId(subcategory.subcategory_id) === activeSubcategoryId ? 'active' : ''}" data-id="${subcategory.subcategory_id}">
                 ${escapeHtml(subcategory.subcategory_name)}
             </button>
         `).join('')}
@@ -723,7 +737,7 @@ function updateBrowserHeader(matchedCount = null) {
 categoryBar?.addEventListener('click', (event) => {
     const button = event.target.closest('.cat-btn');
     if (!button) return;
-    activeCategoryId = button.dataset.id;
+    activeCategoryId = normalizeFilterId(button.dataset.id);
     activeSubcategoryId = 'all';
     currentPage = 1;
     setActiveButton(categoryBar, '.cat-btn', activeCategoryId);
@@ -734,7 +748,7 @@ categoryBar?.addEventListener('click', (event) => {
 subcategoryBar?.addEventListener('click', (event) => {
     const button = event.target.closest('.subcat-btn');
     if (!button) return;
-    activeSubcategoryId = button.dataset.id;
+    activeSubcategoryId = normalizeFilterId(button.dataset.id);
     currentPage = 1;
     setActiveButton(subcategoryBar, '.subcat-btn', activeSubcategoryId);
     applyFilters();
@@ -779,8 +793,10 @@ function buildPagination(active, total) {
 function applyFilters() {
     const itemsPerPage = getItemsPerPage();
     const matched = productCards.filter((card) => {
-        const categoryMatch = activeCategoryId === 'all' || card.dataset.category === activeCategoryId;
-        const subcategoryMatch = activeSubcategoryId === 'all' || card.dataset.subcategory === activeSubcategoryId;
+        const categoryId = normalizeFilterId(card.dataset.category);
+        const subcategoryId = normalizeFilterId(card.dataset.subcategory);
+        const categoryMatch = activeCategoryId === 'all' || categoryId === activeCategoryId;
+        const subcategoryMatch = activeSubcategoryId === 'all' || subcategoryId === activeSubcategoryId;
         const searchMatch = searchTerm === '' || (card.dataset.name || '').toLowerCase().includes(searchTerm);
         return categoryMatch && subcategoryMatch && searchMatch;
     });
@@ -984,6 +1000,66 @@ document.getElementById('printPromptYes')?.addEventListener('click', () => {
 
 document.getElementById('printPromptNo')?.addEventListener('click', () => {
     clearCartAndClose();
+});
+
+function renderSaleBreakdown(sale) {
+    const body = document.getElementById('saleBreakdownBody');
+    const title = document.getElementById('saleBreakdownTitle');
+    const meta = document.getElementById('saleBreakdownMeta');
+
+    if (!body || !sale) return;
+
+    title.textContent = sale.transaction_no || formatTransactionNo(sale.sale_id, sale.date);
+    meta.textContent = `${sale.date || ''} | ${String(sale.payment || 'cash').toUpperCase()} payment`;
+
+    const rows = sale.items.map((item) => {
+        const discountedUnitPrice = Number(item.price || 0) * (1 - Number(item.discount || 0) / 100);
+        const lineTotal = discountedUnitPrice * Number(item.qty || 0);
+        return `
+            <tr>
+                <td>
+                    <strong>${escapeHtml(item.name)}</strong>
+                    <span style="display:block;color:var(--text-secondary);font-size:12px;">${escapeHtml(item.unit_label || 'piece')}${Number(item.discount || 0) > 0 ? ` | ${Number(item.discount)}% discount` : ''}</span>
+                </td>
+                <td style="text-align:right;">${Number(item.qty || 0).toLocaleString()}</td>
+                <td style="text-align:right;">${peso(discountedUnitPrice)}</td>
+                <td style="text-align:right;font-weight:800;">${peso(lineTotal)}</td>
+            </tr>
+        `;
+    }).join('');
+
+    body.innerHTML = `
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:14px;">
+            <div class="sale-breakdown-chip"><span>Subtotal</span><strong>${escapeHtml(sale.subtotal)}</strong></div>
+            <div class="sale-breakdown-chip"><span>Discount</span><strong>${escapeHtml(sale.discount)}</strong></div>
+            <div class="sale-breakdown-chip"><span>VAT</span><strong>${escapeHtml(sale.vat)}</strong></div>
+            <div class="sale-breakdown-chip"><span>Total</span><strong>${escapeHtml(sale.grand_total)}</strong></div>
+        </div>
+        <div style="max-height:360px;overflow:auto;border:1px solid var(--border);border-radius:14px;">
+            <table class="sale-breakdown-table">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th style="text-align:right;">Qty</th>
+                        <th style="text-align:right;">Unit Price</th>
+                        <th style="text-align:right;">Line Total</th>
+                    </tr>
+                </thead>
+                <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary);padding:18px;">No items found.</td></tr>'}</tbody>
+            </table>
+        </div>
+        ${sale.payment === 'cash' ? `<div style="margin-top:12px;color:var(--text-secondary);font-weight:700;">Change: <strong style="color:var(--accent-green);">${escapeHtml(sale.change)}</strong></div>` : ''}
+    `;
+}
+
+document.getElementById('printPromptDetails')?.addEventListener('click', () => {
+    if (!lastSaleData) return;
+    renderSaleBreakdown(lastSaleData);
+    document.getElementById('saleBreakdownOverlay')?.classList.add('open');
+});
+
+document.getElementById('saleBreakdownClose')?.addEventListener('click', () => {
+    document.getElementById('saleBreakdownOverlay')?.classList.remove('open');
 });
 
 document.getElementById('checkoutBtn')?.addEventListener('click', () => {

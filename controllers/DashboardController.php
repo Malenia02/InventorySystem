@@ -1,14 +1,17 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/SaleController.php';
+
 final class DashboardController
 {
     private const ALLOWED_PERIODS = ['today', 'week', 'month', 'year'];
 
     public static function salesCount(PDO $conn, string $period = 'today'): int
     {
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('sale_date', $period);
-        $stmt = $conn->prepare("SELECT COUNT(*) FROM sales WHERE {$where}");
+        $stmt = $conn->prepare("SELECT COUNT(*) FROM sales WHERE {$where} AND " . self::completedSaleCondition());
         $stmt->execute();
 
         return (int) $stmt->fetchColumn();
@@ -16,8 +19,9 @@ final class DashboardController
 
     public static function revenue(PDO $conn, string $period = 'month'): float
     {
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('sale_date', $period);
-        $stmt = $conn->prepare("SELECT IFNULL(SUM(total_amount), 0) FROM sales WHERE {$where}");
+        $stmt = $conn->prepare("SELECT IFNULL(SUM(total_amount), 0) FROM sales WHERE {$where} AND " . self::completedSaleCondition());
         $stmt->execute();
 
         return (float) $stmt->fetchColumn();
@@ -25,12 +29,14 @@ final class DashboardController
 
     public static function totalItemsSold(PDO $conn, string $period = 'today'): int
     {
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('s.sale_date', $period);
         $stmt = $conn->prepare("
             SELECT IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0)
             FROM sale_items si
             INNER JOIN sales s ON si.sale_id = s.sale_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
         ");
         $stmt->execute();
 
@@ -127,6 +133,7 @@ final class DashboardController
 
     public static function topSellingProducts(PDO $conn, string $period = 'month', int $limit = 5): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
         $limit = self::normalizeLimit($limit, 5, 100);
         $where = self::periodWhere('s.sale_date', $period);
@@ -143,6 +150,7 @@ final class DashboardController
             JOIN sales s ON si.sale_id = s.sale_id
             JOIN products p ON si.product_id = p.product_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY p.product_id, p.product_name, p.photo, p.price
             ORDER BY total_sold DESC
             LIMIT :limit
@@ -155,6 +163,7 @@ final class DashboardController
 
     public static function recentSales(PDO $conn, int $limit = 10, string $period = 'month'): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
         $limit = self::normalizeLimit($limit, 10, 200);
         $where = self::periodWhere('s.sale_date', $period);
@@ -172,6 +181,7 @@ final class DashboardController
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY s.sale_id, s.total_amount, s.payment_method, s.sale_date, u.first_name, u.last_name
             ORDER BY s.sale_date DESC
             LIMIT :limit
@@ -184,6 +194,7 @@ final class DashboardController
 
     public static function topRevenueProducts(PDO $conn, string $period = 'month', int $limit = 5): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
         $limit = self::normalizeLimit($limit, 5, 100);
         $where = self::periodWhere('s.sale_date', $period);
@@ -200,6 +211,7 @@ final class DashboardController
             JOIN sales s ON si.sale_id = s.sale_id
             JOIN products p ON si.product_id = p.product_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY p.product_id, p.product_name, p.photo, p.price
             ORDER BY total_revenue DESC, total_sold DESC, p.product_name ASC
             LIMIT :limit
@@ -216,8 +228,9 @@ final class DashboardController
             return 0;
         }
 
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('sale_date', $period);
-        $stmt = $conn->prepare("SELECT COUNT(*) FROM sales WHERE user_id = :user_id AND {$where}");
+        $stmt = $conn->prepare("SELECT COUNT(*) FROM sales WHERE user_id = :user_id AND {$where} AND " . self::completedSaleCondition());
         $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
 
@@ -230,8 +243,9 @@ final class DashboardController
             return 0.0;
         }
 
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('sale_date', $period);
-        $stmt = $conn->prepare("SELECT IFNULL(SUM(total_amount), 0) FROM sales WHERE user_id = :user_id AND {$where}");
+        $stmt = $conn->prepare("SELECT IFNULL(SUM(total_amount), 0) FROM sales WHERE user_id = :user_id AND {$where} AND " . self::completedSaleCondition());
         $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
 
@@ -244,12 +258,14 @@ final class DashboardController
             return 0;
         }
 
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('s.sale_date', $period);
         $stmt = $conn->prepare("
             SELECT IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0)
             FROM sale_items si
             INNER JOIN sales s ON si.sale_id = s.sale_id
             WHERE s.user_id = :user_id AND {$where}
+              AND " . self::completedSaleCondition('s') . "
         ");
         $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
         $stmt->execute();
@@ -263,6 +279,7 @@ final class DashboardController
             return [];
         }
 
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
         $limit = self::normalizeLimit($limit, 10, 200);
         $where = self::periodWhere('s.sale_date', $period);
@@ -277,6 +294,7 @@ final class DashboardController
             FROM sales s
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id
             WHERE s.user_id = :user_id AND {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY s.sale_id, s.total_amount, s.payment_method, s.sale_date
             ORDER BY s.sale_date DESC
             LIMIT :limit
@@ -294,6 +312,7 @@ final class DashboardController
             return [];
         }
 
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('sale_date', $period);
 
         $stmt = $conn->prepare("
@@ -303,6 +322,7 @@ final class DashboardController
                 IFNULL(SUM(total_amount), 0) AS total
             FROM sales
             WHERE user_id = :user_id AND {$where}
+              AND " . self::completedSaleCondition() . "
             GROUP BY payment_method
             ORDER BY total DESC, payment_method ASC
         ");
@@ -329,6 +349,7 @@ final class DashboardController
                 FROM sales
                 WHERE user_id = :user_id
                   AND sale_date >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                  AND " . self::completedSaleCondition() . "
                 GROUP BY DATE_FORMAT(sale_date, '%Y-%m-%d %H:00')
                 ORDER BY day ASC
             ");
@@ -347,6 +368,7 @@ final class DashboardController
                 FROM sales
                 WHERE user_id = :user_id
                   AND sale_date >= DATE_SUB(CURDATE(), INTERVAL 11 MONTH)
+                  AND " . self::completedSaleCondition() . "
                 GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
                 ORDER BY day ASC
             ");
@@ -381,6 +403,7 @@ final class DashboardController
                 FROM sales
                 WHERE user_id = :user_id
                   AND sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                  AND " . self::completedSaleCondition() . "
                 GROUP BY DATE(sale_date)
                 ORDER BY day ASC
             ");
@@ -414,6 +437,7 @@ final class DashboardController
             FROM sales
             WHERE user_id = :user_id
               AND sale_date >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+              AND " . self::completedSaleCondition() . "
             GROUP BY DATE(sale_date)
             ORDER BY day ASC
         ");
@@ -441,6 +465,7 @@ final class DashboardController
 
     public static function salesChartData(PDO $conn, string $period = 'month'): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
 
         if ($period === 'today') {
@@ -451,6 +476,7 @@ final class DashboardController
                     IFNULL(SUM(total_amount), 0) AS revenue
                 FROM sales
                 WHERE sale_date >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                  AND " . self::completedSaleCondition() . "
                 GROUP BY DATE_FORMAT(sale_date, '%Y-%m-%d %H:00')
                 ORDER BY day ASC
             ");
@@ -466,6 +492,7 @@ final class DashboardController
                     IFNULL(SUM(total_amount), 0) AS revenue
                 FROM sales
                 WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 11 MONTH)
+                  AND " . self::completedSaleCondition() . "
                 GROUP BY DATE_FORMAT(sale_date, '%Y-%m')
                 ORDER BY day ASC
             ");
@@ -497,6 +524,7 @@ final class DashboardController
                     IFNULL(SUM(total_amount), 0) AS revenue
                 FROM sales
                 WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 DAY)
+                  AND " . self::completedSaleCondition() . "
                 GROUP BY DATE(sale_date)
                 ORDER BY day ASC
             ");
@@ -527,6 +555,7 @@ final class DashboardController
                 IFNULL(SUM(total_amount), 0) AS revenue
             FROM sales
             WHERE sale_date >= DATE_SUB(CURDATE(), INTERVAL 29 DAY)
+              AND " . self::completedSaleCondition() . "
             GROUP BY DATE(sale_date)
             ORDER BY day ASC
         ");
@@ -589,6 +618,7 @@ final class DashboardController
 
     public static function paymentBreakdown(PDO $conn, string $period = 'month'): array
     {
+        self::ensureSalesSchema($conn);
         $where = self::periodWhere('sale_date', $period);
 
         $stmt = $conn->prepare("
@@ -650,6 +680,7 @@ final class DashboardController
 
     public static function chatbotBestSellers(PDO $conn, string $period = 'today', int $limit = 5): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizeChatPeriod($period);
         $limit = self::normalizeLimit($limit, 5, 25);
         $where = self::chatPeriodWhere('s.sale_date', $period);
@@ -664,6 +695,7 @@ final class DashboardController
             INNER JOIN sales s ON si.sale_id = s.sale_id
             INNER JOIN products p ON si.product_id = p.product_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY p.product_id, p.product_name
             ORDER BY total_pieces DESC, total_revenue DESC, p.product_name ASC
             LIMIT :limit
@@ -676,6 +708,7 @@ final class DashboardController
 
     public static function chatbotReorderSuggestions(PDO $conn, int $limit = 8): array
     {
+        self::ensureSalesSchema($conn);
         $limit = self::normalizeLimit($limit, 8, 50);
 
         $stmt = $conn->prepare("
@@ -697,6 +730,7 @@ final class DashboardController
                 FROM sale_items si
                 INNER JOIN sales s ON si.sale_id = s.sale_id
                 WHERE s.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                  AND " . self::completedSaleCondition('s') . "
                 GROUP BY si.product_id
             ) sales_30 ON sales_30.product_id = p.product_id
             WHERE p.status = 'active'
@@ -727,6 +761,7 @@ final class DashboardController
 
     public static function chatbotSlowMovingProducts(PDO $conn, int $limit = 8): array
     {
+        self::ensureSalesSchema($conn);
         $limit = self::normalizeLimit($limit, 8, 50);
 
         $stmt = $conn->prepare("
@@ -742,6 +777,7 @@ final class DashboardController
             LEFT JOIN sale_items si ON si.product_id = p.product_id
             LEFT JOIN sales s ON s.sale_id = si.sale_id
                 AND s.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                AND " . self::completedSaleCondition('s') . "
             LEFT JOIN (
                 SELECT
                     si2.product_id,
@@ -749,6 +785,7 @@ final class DashboardController
                 FROM sale_items si2
                 INNER JOIN sales s2 ON s2.sale_id = si2.sale_id
                 WHERE s2.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                  AND " . self::completedSaleCondition('s2') . "
                 GROUP BY si2.product_id
             ) sales_30 ON sales_30.product_id = p.product_id
             WHERE p.status = 'active'
@@ -764,6 +801,7 @@ final class DashboardController
 
     public static function noRecentSalesProducts(PDO $conn, int $days = 30, int $limit = 8): array
     {
+        self::ensureSalesSchema($conn);
         $days = max(1, min($days, 365));
         $limit = self::normalizeLimit($limit, 8, 50);
         $cutoff = (new \DateTimeImmutable())->modify("-{$days} days")->format('Y-m-d H:i:s');
@@ -780,6 +818,7 @@ final class DashboardController
             LEFT JOIN categories c ON p.category_id = c.category_id
             LEFT JOIN sale_items si ON si.product_id = p.product_id
             LEFT JOIN sales s ON s.sale_id = si.sale_id
+                AND " . self::completedSaleCondition('s') . "
             WHERE p.status = 'active'
             GROUP BY p.product_id, p.product_name, p.quantity, p.reorder_level, c.category_name
             HAVING MAX(s.sale_date) IS NULL OR MAX(s.sale_date) < :cutoff
@@ -799,6 +838,7 @@ final class DashboardController
 
     public static function noRecentSalesCount(PDO $conn, int $days = 30): int
     {
+        self::ensureSalesSchema($conn);
         $days = max(1, min($days, 365));
         $cutoff = (new \DateTimeImmutable())->modify("-{$days} days")->format('Y-m-d H:i:s');
 
@@ -809,6 +849,7 @@ final class DashboardController
                 FROM products p
                 LEFT JOIN sale_items si ON si.product_id = p.product_id
                 LEFT JOIN sales s ON s.sale_id = si.sale_id
+                    AND " . self::completedSaleCondition('s') . "
                 WHERE p.status = 'active'
                 GROUP BY p.product_id
                 HAVING MAX(s.sale_date) IS NULL OR MAX(s.sale_date) < :cutoff
@@ -822,6 +863,7 @@ final class DashboardController
 
     public static function cashierPerformance(PDO $conn, string $period = 'today', int $limit = 5): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
         $limit = self::normalizeLimit($limit, 5, 25);
         $where = self::periodWhere('s.sale_date', $period);
@@ -839,6 +881,7 @@ final class DashboardController
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON si.sale_id = s.sale_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY s.user_id, u.first_name, u.last_name, u.username
             ORDER BY total_revenue DESC, sale_count DESC, items_sold DESC
             LIMIT :limit
@@ -863,6 +906,7 @@ final class DashboardController
             throw new InvalidArgumentException('Unsupported unit type.');
         }
 
+        self::ensureSalesSchema($conn);
         $where = self::chatPeriodWhere('s.sale_date', $period);
 
         $stmt = $conn->prepare("
@@ -877,6 +921,7 @@ final class DashboardController
             INNER JOIN sales s ON s.sale_id = si.sale_id
             INNER JOIN products p ON p.product_id = si.product_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
               AND si.unit_type = :unit_type
               AND p.product_name LIKE :product_term
             GROUP BY p.product_id, p.product_name, si.unit_type
@@ -895,6 +940,7 @@ final class DashboardController
 
     public static function chatbotTopCategories(PDO $conn, string $period = 'month', int $limit = 5): array
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizeChatPeriod($period);
         $limit = self::normalizeLimit($limit, 5, 25);
         $where = self::chatPeriodWhere('s.sale_date', $period);
@@ -910,6 +956,7 @@ final class DashboardController
             INNER JOIN products p ON p.product_id = si.product_id
             LEFT JOIN categories c ON c.category_id = p.category_id
             WHERE {$where}
+              AND " . self::completedSaleCondition('s') . "
             GROUP BY c.category_id, c.category_name
             ORDER BY total_revenue DESC, total_pieces DESC, c.category_name ASC
             LIMIT :limit
@@ -964,6 +1011,17 @@ final class DashboardController
         };
     }
 
+    private static function ensureSalesSchema(PDO $conn): void
+    {
+        SaleController::ensureVoidSchema($conn);
+    }
+
+    private static function completedSaleCondition(string $alias = 'sales'): string
+    {
+        $prefix = $alias !== '' ? $alias . '.' : '';
+        return "COALESCE({$prefix}status, 'completed') <> 'voided'";
+    }
+
     private static function chatPeriodWhere(string $column, string $period): string
     {
         $period = self::normalizeChatPeriod($period);
@@ -978,6 +1036,7 @@ final class DashboardController
 
     private static function salesCountPrevious(PDO $conn, string $period): int
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
 
         $where = match ($period) {
@@ -987,7 +1046,7 @@ final class DashboardController
             'year'  => "YEAR(sale_date) = YEAR(CURDATE()) - 1",
         };
 
-        $stmt = $conn->prepare("SELECT COUNT(*) FROM sales WHERE {$where}");
+        $stmt = $conn->prepare("SELECT COUNT(*) FROM sales WHERE {$where} AND " . self::completedSaleCondition());
         $stmt->execute();
 
         return (int) $stmt->fetchColumn();
@@ -995,6 +1054,7 @@ final class DashboardController
 
     private static function revenuePrevious(PDO $conn, string $period): float
     {
+        self::ensureSalesSchema($conn);
         $period = self::normalizePeriod($period);
 
         $where = match ($period) {
@@ -1004,7 +1064,7 @@ final class DashboardController
             'year'  => "YEAR(sale_date) = YEAR(CURDATE()) - 1",
         };
 
-        $stmt = $conn->prepare("SELECT IFNULL(SUM(total_amount), 0) FROM sales WHERE {$where}");
+        $stmt = $conn->prepare("SELECT IFNULL(SUM(total_amount), 0) FROM sales WHERE {$where} AND " . self::completedSaleCondition());
         $stmt->execute();
 
         return (float) $stmt->fetchColumn();

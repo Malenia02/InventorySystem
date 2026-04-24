@@ -110,6 +110,7 @@ function chatbotDefaultSuggestions(string $intent, string $role, array $detected
                 'My revenue today',
                 'My recent transactions',
                 'My shift summary',
+                'Sales today',
             ],
             'system_status' => [
                 'My sales today',
@@ -522,6 +523,7 @@ function chatbotDetectIntent(string $question): array
         str_contains($normalized, 'my payment methods')
         || str_contains($normalized, 'my payment summary')
         || str_contains($normalized, 'my payment breakdown')
+        || str_contains($normalized, 'what payment methods did my customers use this month')
     ) {
         return [
             'intent' => 'cashier_payment_breakdown',
@@ -583,6 +585,7 @@ function chatbotDetectIntent(string $question): array
         || str_contains($normalized, 'running out')
         || str_contains($normalized, 'out-of-stock')
         || str_contains($normalized, 'out of stock')
+        
     ) {
         return ['intent' => 'low_stock'];
     }
@@ -835,6 +838,7 @@ function chatbotDetectIntent(string $question): array
         || str_contains($normalized, 'no sales this month')
         || str_contains($normalized, 'products not selling')
         || str_contains($normalized, 'dead stock this month')
+        || str_contains($normalized, 'what are the slow moving products this month')
     ) {
         return ['intent' => 'no_sales_this_month'];
     }

@@ -12,7 +12,7 @@ require_once __DIR__ . '/../controllers/PosConfigController.php';
 
 Middleware::auth()->role(['admin','cashier']);
 
-$categories = CategoryController::all($conn);
+$categories = CategoryController::all($conn, 'active');
 $subcategories = SubcategoryController::all($conn, null, 'active');
 $products   = ProductController::activeProductsForPOS($conn);
 $posConfig  = PosConfigController::get($conn);
@@ -379,6 +379,24 @@ require __DIR__ . '/../components/sidebar.php';
       </button>
     </div>
 
+    <button class="receipt-btn" id="printPromptDetails" style="margin-top:10px; width:100%;">
+      View sale breakdown
+    </button>
+
+  </div>
+</div>
+
+<div class="print-modal-overlay" id="saleBreakdownOverlay">
+  <div class="print-modal" style="width:min(720px, 94vw);">
+    <div class="print-modal-header">
+      <div>
+        <div class="print-modal-title" id="saleBreakdownTitle">Sale Breakdown</div>
+        <p style="margin:4px 0 0; color:var(--text-secondary); font-size:13px;" id="saleBreakdownMeta"></p>
+      </div>
+      <button class="print-modal-close" id="saleBreakdownClose">close</button>
+    </div>
+
+    <div id="saleBreakdownBody" style="margin-top:14px;"></div>
   </div>
 </div>
 

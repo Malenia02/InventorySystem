@@ -1529,6 +1529,68 @@ body.toggle-sidebar .product-grid {
 .print-status.busy .status-dot { background: var(--accent); animation: pulse .8s infinite; }
 .print-status.busy             { color: var(--accent); }
 
+.sale-breakdown-chip {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.72);
+}
+
+.sale-breakdown-chip span,
+.sale-breakdown-chip strong {
+    display: block;
+}
+
+.sale-breakdown-chip span {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.sale-breakdown-chip strong {
+    margin-top: 4px;
+    color: var(--text);
+    font-size: 15px;
+}
+
+.sale-breakdown-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.sale-breakdown-table th,
+.sale-breakdown-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+
+.sale-breakdown-table th {
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 900;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.sale-breakdown-table td {
+    color: var(--text);
+    font-size: 14px;
+}
+
+.sale-breakdown-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+@media (max-width: 640px) {
+    #saleBreakdownBody > div:first-child {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+}
+
 @keyframes pulse {
     0%,100% { opacity: 1; }
     50%      { opacity: .3; }

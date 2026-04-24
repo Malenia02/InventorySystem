@@ -242,8 +242,13 @@ CREATE TABLE `sales` (
   `payment_method` enum('cash','card','gcash','other') DEFAULT 'cash',
   `sale_date` timestamp NOT NULL DEFAULT current_timestamp(),
   `user_id` int(11) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'completed',
+  `voided_at` datetime DEFAULT NULL,
+  `voided_by` int(11) DEFAULT NULL,
+  `void_reason` text DEFAULT NULL,
   PRIMARY KEY (`sale_id`),
   KEY `user_id` (`user_id`),
+  KEY `idx_sales_status` (`status`),
   CONSTRAINT `sales_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -255,19 +260,22 @@ CREATE TABLE `shift_closings` (
   `user_id` int(11) DEFAULT NULL,
   `shift_date` date NOT NULL,
   `opened_at` datetime NOT NULL DEFAULT current_timestamp(),
-  `closed_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `closed_at` datetime DEFAULT NULL,
   `total_transactions` int(11) NOT NULL DEFAULT 0,
   `total_items` int(11) NOT NULL DEFAULT 0,
   `total_sales` decimal(12,2) NOT NULL DEFAULT 0.00,
   `cash_sales` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `starting_cash` decimal(12,2) NOT NULL DEFAULT 0.00,
   `expected_cash` decimal(12,2) NOT NULL DEFAULT 0.00,
   `counted_cash` decimal(12,2) NOT NULL DEFAULT 0.00,
   `variance` decimal(12,2) NOT NULL DEFAULT 0.00,
   `payment_breakdown_json` longtext DEFAULT NULL,
   `notes` text DEFAULT NULL,
+  `status` enum('open','closed') NOT NULL DEFAULT 'closed',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`shift_closing_id`),
   UNIQUE KEY `uniq_shift_closings_user_date` (`user_id`,`shift_date`),
+  KEY `idx_shift_closings_status` (`status`),
   KEY `idx_shift_closings_closed_at` (`closed_at`),
   CONSTRAINT `shift_closings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

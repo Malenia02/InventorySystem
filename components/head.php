@@ -1,10 +1,19 @@
 <?php
 require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/branding.php';
 
 // Default title if page does not set one
 if (!isset($pageTitle)) {
     $pageTitle = 'Inventory System';
 }
+
+$headBrand = app_branding($conn ?? null);
+$faviconUrl = !empty($headBrand['has_custom_logo'])
+    ? (string) $headBrand['logo']
+    : '/inventory_system/assets/img/favicon.png';
+$appleTouchIconUrl = !empty($headBrand['has_custom_logo'])
+    ? (string) $headBrand['logo']
+    : '/inventory_system/assets/img/apple-touch-icon.png';
 ?>
 
   <meta charset="utf-8">
@@ -13,8 +22,8 @@ if (!isset($pageTitle)) {
   <title><?= htmlspecialchars($pageTitle) ?></title>
 
   <!-- Favicons -->
-  <link href="/inventory_system/assets/img/favicon.png" rel="icon">
-  <link href="/inventory_system/assets/img/apple-touch-icon.png" rel="apple-touch-icon">
+  <link href="<?= htmlspecialchars($faviconUrl, ENT_QUOTES, 'UTF-8') ?>" rel="icon">
+  <link href="<?= htmlspecialchars($appleTouchIconUrl, ENT_QUOTES, 'UTF-8') ?>" rel="apple-touch-icon">
 
   <!-- Google Fonts -->
   <link href="https://fonts.gstatic.com" rel="preconnect">

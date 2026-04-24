@@ -47,6 +47,12 @@ document.addEventListener("DOMContentLoaded", () => {
     const progressFill = document.getElementById("progressFill");
     const activeInput = document.getElementById("activeStepInput");
     const form = document.getElementById("installForm");
+    const logoInput = document.getElementById("storeLogoInput");
+    const logoPreview = document.getElementById("storeLogoPreview");
+    const logoPreviewImg = logoPreview?.querySelector("img");
+    const logoPreviewIcon = logoPreview?.querySelector("i");
+    const logoName = document.getElementById("storeLogoName");
+    const reviewStoreLogo = document.getElementById("reviewStoreLogo");
 
     function render() {
         const meta = STEP_META[current];
@@ -103,6 +109,17 @@ document.addEventListener("DOMContentLoaded", () => {
             const storeEmail = get("store_email");
             if (storeEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(storeEmail)) {
                 return "Store email must be a valid email address.";
+            }
+
+            const logoFile = logoInput?.files?.[0];
+            if (logoFile) {
+                const allowed = ["image/jpeg", "image/png", "image/webp"];
+                if (!allowed.includes(logoFile.type)) {
+                    return "Store logo must be a JPG, PNG, or WEBP image.";
+                }
+                if (logoFile.size > 2 * 1024 * 1024) {
+                    return "Store logo must be 2MB or smaller.";
+                }
             }
         }
 
@@ -222,6 +239,33 @@ document.addEventListener("DOMContentLoaded", () => {
         if (pwLabel) {
             pwLabel.textContent = strength.label;
             pwLabel.style.color = strength.color || "";
+        }
+    });
+
+    logoInput?.addEventListener("change", () => {
+        const file = logoInput.files?.[0];
+        if (!file) {
+            if (logoPreviewImg) {
+                logoPreviewImg.hidden = true;
+                logoPreviewImg.src = "";
+            }
+            if (logoPreviewIcon) logoPreviewIcon.hidden = false;
+            if (logoName) logoName.textContent = "JPG, PNG, or WEBP up to 2MB";
+            if (reviewStoreLogo) reviewStoreLogo.textContent = "Optional upload";
+            return;
+        }
+
+        if (logoName) {
+            logoName.textContent = `${file.name} (${Math.max(1, Math.round(file.size / 1024))} KB)`;
+        }
+        if (reviewStoreLogo) {
+            reviewStoreLogo.textContent = file.name;
+        }
+
+        if (file.type.startsWith("image/") && logoPreviewImg) {
+            logoPreviewImg.src = URL.createObjectURL(file);
+            logoPreviewImg.hidden = false;
+            if (logoPreviewIcon) logoPreviewIcon.hidden = true;
         }
     });
 

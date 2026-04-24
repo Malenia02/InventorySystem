@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 require __DIR__ . '/../bootstrap/app.php';
 require_once __DIR__ . '/../middleware/Middleware.php';
+require_once __DIR__ . '/../controllers/SaleController.php';
 
 Middleware::auth()->role(['admin']);
+SaleController::ensureVoidSchema($conn);
 
 function e(?string $value): string
 {
@@ -94,6 +96,7 @@ if ($dateTo === null) {
 $where = [];
 $params = [];
 $categories = [];
+$where[] = "COALESCE(s.status, 'completed') <> 'voided'";
 
 if ($dateFrom !== null) {
     $where[] = 's.sale_date >= :date_from';
@@ -222,6 +225,9 @@ try {
             s.discount,
             s.payment_method,
             s.user_id,
+            s.status,
+            s.voided_at,
+            s.void_reason,
             u.first_name,
             u.last_name,
             u.username,
@@ -233,6 +239,7 @@ try {
         {$salesWhereSql}
         GROUP BY
             s.sale_id, s.sale_date, s.total_amount, s.tax, s.discount, s.payment_method, s.user_id,
+            s.status, s.voided_at, s.void_reason,
             u.first_name, u.last_name, u.username
         ORDER BY s.sale_date DESC, s.sale_id DESC
         LIMIT :limit OFFSET :offset
@@ -459,6 +466,7 @@ $pageTitle = 'Sales Report';
 <!DOCTYPE html>
 <html lang="en">
 <?php require __DIR__ . '/../components/head.php'; ?>
+<link rel="stylesheet" href="/inventory_system/assets/css/sales-report.css">
 <body>
 
 <?php
@@ -821,11 +829,12 @@ require __DIR__ . '/../components/sidebar.php';
                                     <th scope="col">Total</th>
                                     <th scope="col">Payment</th>
                                     <th scope="col">Date</th>
+                                    <th scope="col">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php if (empty($sales)): ?>
-                                    <tr><td colspan="8" class="text-center text-muted py-3">No sales found for this filter.</td></tr>
+                                    <tr><td colspan="9" class="text-center text-muted py-3">No sales found for this filter.</td></tr>
                                 <?php else: ?>
                                     <?php foreach ($sales as $sale): ?>
                                         <?php
@@ -835,7 +844,17 @@ require __DIR__ . '/../components/sidebar.php';
                                         }
                                         ?>
                                         <tr>
-                                            <th scope="row"><a href="#"><?= e(formatTransactionNumber((int) $sale['sale_id'], (string) $sale['sale_date'])) ?></a></th>
+                                            <th scope="row">
+                                                <button
+                                                    type="button"
+                                                    class="sale-detail-link"
+                                                    data-sale-detail-id="<?= (int) $sale['sale_id'] ?>"
+                                                    title="View sale breakdown"
+                                                >
+                                                    <?= e(formatTransactionNumber((int) $sale['sale_id'], (string) $sale['sale_date'])) ?>
+                                                    <i class="bi bi-box-arrow-up-right"></i>
+                                                </button>
+                                            </th>
                                             <td><?= e($cashierName) ?></td>
                                             <td>
                                                 <?= (int) $sale['total_items'] ?> item<?= (int) $sale['total_items'] !== 1 ? 's' : '' ?>
@@ -846,29 +865,23 @@ require __DIR__ . '/../components/sidebar.php';
                                             <td><?= e(formatMoney((float) $sale['total_amount'])) ?></td>
                                             <td><span class="badge <?= e(paymentBadgeClass((string) ($sale['payment_method'] ?? ''))) ?>"><?= e(ucfirst((string) ($sale['payment_method'] ?? 'N/A'))) ?></span></td>
                                             <td class="text-muted small"><?= e(date('M d, Y h:i A', strtotime((string) $sale['sale_date']))) ?></td>
+                                            <td>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-sm btn-outline-danger void-sale-btn"
+                                                    data-void-sale-id="<?= (int) $sale['sale_id'] ?>"
+                                                    data-void-sale-no="<?= e(formatTransactionNumber((int) $sale['sale_id'], (string) $sale['sale_date'])) ?>"
+                                                >
+                                                    Void
+                                                </button>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </tbody>
                         </table>
 
-                        <?php if ($totalPages > 1): ?>
-                            <nav class="mt-3">
-                                <ul class="pagination mb-0">
-                                    <li class="page-item <?= $page <= 1 ? 'disabled' : '' ?>">
-                                        <a class="page-link" href="<?= $page <= 1 ? '#' : e(buildQueryUrl(['page' => $page - 1])) ?>">Previous</a>
-                                    </li>
-                                    <?php for ($i = max(1, $page - 2); $i <= min($totalPages, $page + 2); $i++): ?>
-                                        <li class="page-item <?= $i === $page ? 'active' : '' ?>">
-                                            <a class="page-link" href="<?= e(buildQueryUrl(['page' => $i])) ?>"><?= $i ?></a>
-                                        </li>
-                                    <?php endfor; ?>
-                                    <li class="page-item <?= $page >= $totalPages ? 'disabled' : '' ?>">
-                                        <a class="page-link" href="<?= $page >= $totalPages ? '#' : e(buildQueryUrl(['page' => $page + 1])) ?>">Next</a>
-                                    </li>
-                                </ul>
-                            </nav>
-                        <?php endif; ?>
+                        
                     </div>
                 </div>
             </div>
@@ -1042,8 +1055,29 @@ require __DIR__ . '/../components/sidebar.php';
     </section>
 </main>
 
+<div class="modal fade sale-details-modal" id="saleDetailsModal" tabindex="-1" aria-labelledby="saleDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <p class="text-muted small text-uppercase fw-bold mb-1">Transaction item breakdown</p>
+                    <h5 class="modal-title" id="saleDetailsModalLabel">Sale Breakdown</h5>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="saleDetailsBody">
+                <div class="sale-details-state">
+                    <span class="spinner-border text-primary" role="status" aria-hidden="true"></span>
+                    <strong>Loading sale breakdown...</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php require __DIR__ . '/../components/footer.php'; ?>
 <?php require __DIR__ . '/../components/js_script.php'; ?>
+<script src="/inventory_system/assets/js/sales-report.js"></script>
 
 </body>
 </html>
