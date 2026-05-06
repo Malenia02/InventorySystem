@@ -32,7 +32,7 @@ final class DashboardController
         self::ensureSalesSchema($conn);
         $where = self::periodWhere('s.sale_date', $period);
         $stmt = $conn->prepare("
-            SELECT IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0)
+            SELECT IFNULL(SUM(" . self::netPiecesExpression('si') . "), 0)
             FROM sale_items si
             INNER JOIN sales s ON si.sale_id = s.sale_id
             WHERE {$where}
@@ -144,8 +144,8 @@ final class DashboardController
                 p.product_name,
                 p.photo,
                 p.price,
-                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_sold,
-                SUM(si.quantity * si.unit_price) AS total_revenue
+                SUM(" . self::netPiecesExpression('si') . ") AS total_sold,
+                SUM(" . self::netRevenueExpression('si') . ") AS total_revenue
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.sale_id
             JOIN products p ON si.product_id = p.product_id
@@ -176,7 +176,7 @@ final class DashboardController
                 s.sale_date,
                 u.first_name,
                 u.last_name,
-                COUNT(si.sale_item_id) AS item_count
+                SUM(" . self::activeLineCountExpression('si') . ") AS item_count
             FROM sales s
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id
@@ -205,8 +205,8 @@ final class DashboardController
                 p.product_name,
                 p.photo,
                 p.price,
-                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_sold,
-                SUM(si.quantity * si.unit_price) AS total_revenue
+                SUM(" . self::netPiecesExpression('si') . ") AS total_sold,
+                SUM(" . self::netRevenueExpression('si') . ") AS total_revenue
             FROM sale_items si
             JOIN sales s ON si.sale_id = s.sale_id
             JOIN products p ON si.product_id = p.product_id
@@ -261,7 +261,7 @@ final class DashboardController
         self::ensureSalesSchema($conn);
         $where = self::periodWhere('s.sale_date', $period);
         $stmt = $conn->prepare("
-            SELECT IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0)
+            SELECT IFNULL(SUM(" . self::netPiecesExpression('si') . "), 0)
             FROM sale_items si
             INNER JOIN sales s ON si.sale_id = s.sale_id
             WHERE s.user_id = :user_id AND {$where}
@@ -290,7 +290,7 @@ final class DashboardController
                 s.total_amount,
                 s.payment_method,
                 s.sale_date,
-                COUNT(si.sale_item_id) AS item_count
+                SUM(" . self::activeLineCountExpression('si') . ") AS item_count
             FROM sales s
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id
             WHERE s.user_id = :user_id AND {$where}
@@ -628,6 +628,7 @@ final class DashboardController
                 IFNULL(SUM(total_amount), 0) AS total
             FROM sales
             WHERE {$where}
+              AND " . self::completedSaleCondition() . "
             GROUP BY payment_method
         ");
         $stmt->execute();
@@ -689,8 +690,8 @@ final class DashboardController
             SELECT
                 p.product_id,
                 p.product_name,
-                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_pieces,
-                SUM(si.quantity * si.unit_price) AS total_revenue
+                SUM(" . self::netPiecesExpression('si') . ") AS total_pieces,
+                SUM(" . self::netRevenueExpression('si') . ") AS total_revenue
             FROM sale_items si
             INNER JOIN sales s ON si.sale_id = s.sale_id
             INNER JOIN products p ON si.product_id = p.product_id
@@ -726,7 +727,7 @@ final class DashboardController
             LEFT JOIN (
                 SELECT
                     si.product_id,
-                    SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_pieces_sold
+                    SUM(" . self::netPiecesExpression('si') . ") AS total_pieces_sold
                 FROM sale_items si
                 INNER JOIN sales s ON si.sale_id = s.sale_id
                 WHERE s.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
@@ -775,13 +776,14 @@ final class DashboardController
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.category_id
             LEFT JOIN sale_items si ON si.product_id = p.product_id
+                AND " . self::netUnitsExpression('si') . " > 0
             LEFT JOIN sales s ON s.sale_id = si.sale_id
                 AND s.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
                 AND " . self::completedSaleCondition('s') . "
             LEFT JOIN (
                 SELECT
                     si2.product_id,
-                    SUM(si2.quantity * COALESCE(si2.unit_multiplier, 1)) AS total_pieces_sold
+                    SUM(" . self::netPiecesExpression('si2') . ") AS total_pieces_sold
                 FROM sale_items si2
                 INNER JOIN sales s2 ON s2.sale_id = si2.sale_id
                 WHERE s2.sale_date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
@@ -817,6 +819,7 @@ final class DashboardController
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.category_id
             LEFT JOIN sale_items si ON si.product_id = p.product_id
+                AND " . self::netUnitsExpression('si') . " > 0
             LEFT JOIN sales s ON s.sale_id = si.sale_id
                 AND " . self::completedSaleCondition('s') . "
             WHERE p.status = 'active'
@@ -848,6 +851,7 @@ final class DashboardController
                 SELECT p.product_id, MAX(s.sale_date) AS last_sale_date
                 FROM products p
                 LEFT JOIN sale_items si ON si.product_id = p.product_id
+                    AND " . self::netUnitsExpression('si') . " > 0
                 LEFT JOIN sales s ON s.sale_id = si.sale_id
                     AND " . self::completedSaleCondition('s') . "
                 WHERE p.status = 'active'
@@ -876,7 +880,7 @@ final class DashboardController
                 u.username,
                 COUNT(DISTINCT s.sale_id) AS sale_count,
                 IFNULL(SUM(s.total_amount), 0) AS total_revenue,
-                IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS items_sold
+                IFNULL(SUM(" . self::netPiecesExpression('si') . "), 0) AS items_sold
             FROM sales s
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON si.sale_id = s.sale_id
@@ -914,9 +918,9 @@ final class DashboardController
                 p.product_id,
                 p.product_name,
                 si.unit_type,
-                SUM(si.quantity) AS units_sold,
-                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS pieces_sold,
-                SUM(si.quantity * si.unit_price) AS revenue
+                SUM(" . self::netUnitsExpression('si') . ") AS units_sold,
+                SUM(" . self::netPiecesExpression('si') . ") AS pieces_sold,
+                SUM(" . self::netRevenueExpression('si') . ") AS revenue
             FROM sale_items si
             INNER JOIN sales s ON s.sale_id = si.sale_id
             INNER JOIN products p ON p.product_id = si.product_id
@@ -949,8 +953,8 @@ final class DashboardController
             SELECT
                 c.category_id,
                 c.category_name,
-                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_pieces,
-                SUM(si.quantity * si.unit_price) AS total_revenue
+                SUM(" . self::netPiecesExpression('si') . ") AS total_pieces,
+                SUM(" . self::netRevenueExpression('si') . ") AS total_revenue
             FROM sale_items si
             INNER JOIN sales s ON s.sale_id = si.sale_id
             INNER JOIN products p ON p.product_id = si.product_id
@@ -1013,13 +1017,33 @@ final class DashboardController
 
     private static function ensureSalesSchema(PDO $conn): void
     {
-        SaleController::ensureVoidSchema($conn);
+        SaleController::ensureReturnSchema($conn);
     }
 
     private static function completedSaleCondition(string $alias = 'sales'): string
     {
         $prefix = $alias !== '' ? $alias . '.' : '';
-        return "COALESCE({$prefix}status, 'completed') <> 'voided'";
+        return "COALESCE({$prefix}status, 'completed') NOT IN ('voided', 'returned')";
+    }
+
+    private static function netUnitsExpression(string $alias = 'si'): string
+    {
+        return "GREATEST(COALESCE({$alias}.quantity, 0) - COALESCE({$alias}.returned_quantity, 0), 0)";
+    }
+
+    private static function netPiecesExpression(string $alias = 'si'): string
+    {
+        return self::netUnitsExpression($alias) . " * COALESCE({$alias}.unit_multiplier, 1)";
+    }
+
+    private static function netRevenueExpression(string $alias = 'si'): string
+    {
+        return self::netUnitsExpression($alias) . " * COALESCE({$alias}.unit_price, 0)";
+    }
+
+    private static function activeLineCountExpression(string $alias = 'si'): string
+    {
+        return "CASE WHEN " . self::netUnitsExpression($alias) . " > 0 THEN 1 ELSE 0 END";
     }
 
     private static function chatPeriodWhere(string $column, string $period): string

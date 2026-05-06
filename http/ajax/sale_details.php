@@ -14,7 +14,7 @@ Middleware::auth()
     ->sameOrigin()
     ->throttle('sale_details', 60, 60, 'Too many sale detail requests. Please wait a moment.');
 
-SaleController::ensureVoidSchema($conn);
+SaleController::ensureReturnSchema($conn);
 
 function saleDetailsJson(array $payload, int $statusCode = 200): never
 {
@@ -90,10 +90,13 @@ try {
             c.category_name,
             si.unit_price,
             si.quantity,
+            COALESCE(si.returned_quantity, 0) AS returned_quantity,
             si.unit_type,
             si.unit_multiplier,
             (si.quantity * COALESCE(si.unit_multiplier, 1)) AS pieces_sold,
-            (si.quantity * si.unit_price) AS line_total
+            ((si.quantity - COALESCE(si.returned_quantity, 0)) * COALESCE(si.unit_multiplier, 1)) AS net_pieces_sold,
+            (si.quantity * si.unit_price) AS line_total,
+            ((si.quantity - COALESCE(si.returned_quantity, 0)) * si.unit_price) AS net_line_total
         FROM {$table_sale_items} si
         INNER JOIN {$table_products} p ON p.product_id = si.product_id
         LEFT JOIN {$table_categories} c ON c.category_id = p.category_id
@@ -102,6 +105,31 @@ try {
     ");
     $itemsStmt->execute([':sale_id' => $saleId]);
     $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    $returnsStmt = $conn->prepare("
+        SELECT
+            sir.return_id,
+            sir.sale_item_id,
+            sir.product_id,
+            sir.quantity,
+            sir.unit_multiplier,
+            sir.unit_price,
+            sir.tax_amount,
+            sir.discount_amount,
+            sir.reason,
+            sir.created_at,
+            p.product_name,
+            u.first_name,
+            u.last_name,
+            u.username
+        FROM sale_item_returns sir
+        INNER JOIN {$table_products} p ON p.product_id = sir.product_id
+        LEFT JOIN {$table_users} u ON u.user_id = sir.user_id
+        WHERE sir.sale_id = :sale_id
+        ORDER BY sir.created_at DESC, sir.return_id DESC
+    ");
+    $returnsStmt->execute([':sale_id' => $saleId]);
+    $returns = $returnsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $cashierName = trim((string) ($sale['first_name'] ?? '') . ' ' . (string) ($sale['last_name'] ?? ''));
     if ($cashierName === '') {
@@ -128,6 +156,7 @@ try {
             'discount' => (float) ($sale['discount'] ?? 0),
             'tax' => (float) ($sale['tax'] ?? 0),
             'total_amount' => (float) ($sale['total_amount'] ?? 0),
+            'can_return_items' => $viewerRole === 'admin' && !in_array(strtolower((string) ($sale['status'] ?? 'completed')), ['voided', 'returned'], true),
         ],
         'items' => array_map(
             static fn(array $item): array => [
@@ -138,13 +167,38 @@ try {
                 'category_name' => (string) ($item['category_name'] ?? 'Uncategorized'),
                 'unit_price' => (float) ($item['unit_price'] ?? 0),
                 'quantity' => (int) ($item['quantity'] ?? 0),
+                'returned_quantity' => (int) ($item['returned_quantity'] ?? 0),
+                'remaining_quantity' => max(0, (int) ($item['quantity'] ?? 0) - (int) ($item['returned_quantity'] ?? 0)),
                 'unit_type' => (string) ($item['unit_type'] ?? 'piece'),
                 'unit_multiplier' => (int) ($item['unit_multiplier'] ?? 1),
                 'pieces_sold' => (int) ($item['pieces_sold'] ?? 0),
+                'net_pieces_sold' => (int) ($item['net_pieces_sold'] ?? 0),
                 'line_total' => (float) ($item['line_total'] ?? 0),
+                'net_line_total' => (float) ($item['net_line_total'] ?? 0),
             ],
             $items
         ),
+        'returns' => array_map(static function (array $return): array {
+            $userName = trim((string) ($return['first_name'] ?? '') . ' ' . (string) ($return['last_name'] ?? ''));
+            if ($userName === '') {
+                $userName = (string) ($return['username'] ?? 'Admin');
+            }
+
+            return [
+                'return_id' => (int) $return['return_id'],
+                'sale_item_id' => (int) $return['sale_item_id'],
+                'product_id' => (int) $return['product_id'],
+                'product_name' => (string) ($return['product_name'] ?? 'Product'),
+                'quantity' => (int) ($return['quantity'] ?? 0),
+                'unit_multiplier' => (int) ($return['unit_multiplier'] ?? 1),
+                'unit_price' => (float) ($return['unit_price'] ?? 0),
+                'tax_amount' => (float) ($return['tax_amount'] ?? 0),
+                'discount_amount' => (float) ($return['discount_amount'] ?? 0),
+                'reason' => (string) ($return['reason'] ?? ''),
+                'created_at' => (string) ($return['created_at'] ?? ''),
+                'user_name' => $userName,
+            ];
+        }, $returns),
     ]);
 } catch (Throwable $e) {
     error_log('[sale_details.php] ' . $e->getMessage());

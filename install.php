@@ -5,6 +5,10 @@ define('INSTALL_CONTEXT', true);
 
 require_once __DIR__ . '/config/config.php';
 
+if (session_status() === PHP_SESSION_NONE && php_sapi_name() !== 'cli') {
+    session_start();
+}
+
 $pageTitle = 'System Setup';
 $appUrlDefault = (app_is_https() ? 'https://' : 'http://')
     . ($_SERVER['HTTP_HOST'] ?? 'localhost')
@@ -19,6 +23,21 @@ $setupKeyForm        = [
     'new_setup_access_key'         => '',
     'new_setup_access_key_confirm' => '',
 ];
+$setupAttemptKey = 'install_setup_attempts';
+$setupLockUntilKey = 'install_setup_lock_until';
+$setupIpMaxAttempts = 3;
+$setupIpLockSeconds = 300;
+if (!defined('INSTALL_SETUP_IP_RETENTION_SECONDS')) {
+    define('INSTALL_SETUP_IP_RETENTION_SECONDS', 86400);
+}
+
+if (
+    (string) env_value('APP_ENV', 'production') === 'production'
+    && app_is_public_install_request()
+    && !filter_var(env_value('APP_ENABLE_PUBLIC_INSTALLER', false), FILTER_VALIDATE_BOOL)
+) {
+    app_deny_unlocked_install_access('Public installer access is disabled in production. Run setup locally or explicitly enable APP_ENABLE_PUBLIC_INSTALLER for a one-time setup window.');
+}
 
 function install_store_logo_upload(?array $file): ?string
 {
@@ -53,8 +72,14 @@ function install_store_logo_upload(?array $file): ?string
         throw new RuntimeException('Store logo must be a JPG, PNG, or WEBP image.');
     }
 
-    if (getimagesize($tmpFile) === false) {
+    $imageInfo = getimagesize($tmpFile);
+    if ($imageInfo === false) {
         throw new RuntimeException('Store logo must be a valid image file.');
+    }
+    $width = (int) ($imageInfo[0] ?? 0);
+    $height = (int) ($imageInfo[1] ?? 0);
+    if ($width <= 0 || $height <= 0) {
+        throw new RuntimeException('Store logo dimensions are invalid.');
     }
 
     $uploadDir = rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'pos-config' . DIRECTORY_SEPARATOR;
@@ -65,11 +90,173 @@ function install_store_logo_upload(?array $file): ?string
     $fileName = 'logo_' . bin2hex(random_bytes(12)) . '.' . $allowedMimeTypes[$mimeType];
     $targetPath = $uploadDir . $fileName;
 
-    if (!move_uploaded_file($tmpFile, $targetPath)) {
+    // Re-encode image when GD is available to reduce polyglot payload risks.
+    $saved = false;
+    if (function_exists('imagecreatefromjpeg') && function_exists('imagecreatefrompng') && function_exists('imagecreatefromwebp')) {
+        $resource = null;
+        if ($mimeType === 'image/jpeg') {
+            $resource = @imagecreatefromjpeg($tmpFile);
+        } elseif ($mimeType === 'image/png') {
+            $resource = @imagecreatefrompng($tmpFile);
+        } elseif ($mimeType === 'image/webp') {
+            $resource = @imagecreatefromwebp($tmpFile);
+        }
+
+        if ($resource !== false && $resource !== null) {
+            if ($mimeType === 'image/jpeg') {
+                $saved = @imagejpeg($resource, $targetPath, 90);
+            } elseif ($mimeType === 'image/png') {
+                $saved = @imagepng($resource, $targetPath, 6);
+            } else {
+                $saved = function_exists('imagewebp') ? (bool) @imagewebp($resource, $targetPath, 85) : false;
+            }
+            @imagedestroy($resource);
+        }
+    }
+
+    if (!$saved && !move_uploaded_file($tmpFile, $targetPath)) {
         throw new RuntimeException('Unable to save the uploaded store logo.');
     }
 
     return '/inventory_system/media.php?asset=' . rawurlencode('pos-config/' . $fileName);
+}
+
+function install_password_is_strong(string $password): bool
+{
+    if (strlen($password) < 12) {
+        return false;
+    }
+
+    return preg_match('/[A-Z]/', $password) === 1
+        && preg_match('/[a-z]/', $password) === 1
+        && preg_match('/\d/', $password) === 1
+        && preg_match('/[^a-zA-Z0-9]/', $password) === 1;
+}
+
+function install_setup_ip_throttle_path(): string
+{
+    $dir = rtrim(app_secure_storage_dir(), '/\\') . DIRECTORY_SEPARATOR . 'security';
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException('Unable to create installer security directory.');
+    }
+
+    return $dir . DIRECTORY_SEPARATOR . 'install_setup_key_attempts.json';
+}
+
+function install_setup_ip_key(): string
+{
+    $ip = trim((string) ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+    return hash('sha256', $ip !== '' ? $ip : 'unknown');
+}
+
+function install_setup_ip_read_state(): array
+{
+    $path = install_setup_ip_throttle_path();
+    if (!is_file($path)) {
+        return [];
+    }
+
+    $raw = file_get_contents($path);
+    $decoded = json_decode($raw !== false ? $raw : '[]', true);
+    if (!is_array($decoded)) {
+        return [];
+    }
+
+    $now = time();
+    $filtered = [];
+    foreach ($decoded as $key => $row) {
+        if (!is_string($key) || !is_array($row)) {
+            continue;
+        }
+
+        $attempts = (int) ($row['attempts'] ?? 0);
+        $lockUntil = (int) ($row['lock_until'] ?? 0);
+        $updatedAt = (int) ($row['updated_at'] ?? 0);
+
+        $isLocked = $lockUntil > $now;
+        $recentEnough = $updatedAt > 0 && ($now - $updatedAt) <= INSTALL_SETUP_IP_RETENTION_SECONDS;
+        if ($isLocked || $attempts > 0 || $recentEnough) {
+            $filtered[$key] = [
+                'attempts' => max(0, $attempts),
+                'lock_until' => max(0, $lockUntil),
+                'updated_at' => $updatedAt > 0 ? $updatedAt : $now,
+            ];
+        }
+    }
+
+    return $filtered;
+}
+
+function install_setup_ip_write_state(array $state): void
+{
+    $now = time();
+    $pruned = [];
+    foreach ($state as $key => $row) {
+        if (!is_string($key) || !is_array($row)) {
+            continue;
+        }
+
+        $attempts = (int) ($row['attempts'] ?? 0);
+        $lockUntil = (int) ($row['lock_until'] ?? 0);
+        $updatedAt = (int) ($row['updated_at'] ?? 0);
+        $isLocked = $lockUntil > $now;
+        $recentEnough = $updatedAt > 0 && ($now - $updatedAt) <= INSTALL_SETUP_IP_RETENTION_SECONDS;
+
+        if ($isLocked || $attempts > 0 || $recentEnough) {
+            $pruned[$key] = [
+                'attempts' => max(0, $attempts),
+                'lock_until' => max(0, $lockUntil),
+                'updated_at' => $updatedAt > 0 ? $updatedAt : $now,
+            ];
+        }
+    }
+
+    $path = install_setup_ip_throttle_path();
+    file_put_contents($path, json_encode($pruned, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), LOCK_EX);
+}
+
+function install_setup_ip_lock_remaining_seconds(): int
+{
+    $state = install_setup_ip_read_state();
+    $key = install_setup_ip_key();
+    $lockUntil = (int) (($state[$key]['lock_until'] ?? 0));
+    return max(0, $lockUntil - time());
+}
+
+function install_setup_ip_record_failure(int $maxAttempts, int $lockSeconds): array
+{
+    $state = install_setup_ip_read_state();
+    $key = install_setup_ip_key();
+    $now = time();
+
+    $row = is_array($state[$key] ?? null) ? $state[$key] : ['attempts' => 0, 'lock_until' => 0];
+    $row['attempts'] = (int) ($row['attempts'] ?? 0) + 1;
+    $row['lock_until'] = (int) ($row['lock_until'] ?? 0);
+
+    if ($row['attempts'] >= $maxAttempts) {
+        $row['lock_until'] = $now + $lockSeconds;
+        $row['attempts'] = 0;
+    }
+    $row['updated_at'] = $now;
+
+    $state[$key] = $row;
+    install_setup_ip_write_state($state);
+
+    return [
+        'locked' => $row['lock_until'] > $now,
+        'remaining_attempts' => max(0, $maxAttempts - (int) $row['attempts']),
+        'wait_seconds' => max(0, (int) $row['lock_until'] - $now),
+    ];
+}
+
+function install_setup_ip_clear_failures(): void
+{
+    $state = install_setup_ip_read_state();
+    $key = install_setup_ip_key();
+    if (isset($state[$key])) {
+        unset($state[$key]);
+        install_setup_ip_write_state($state);
+    }
 }
 
 function install_delete_uploaded_logo(?string $logoUrl): void
@@ -182,12 +369,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $form['setup_access_key'] = (string) ($_POST['setup_access_key'] ?? '');
     $adminPassword        = (string) ($_POST['admin_password']         ?? '');
     $adminPasswordConfirm = (string) ($_POST['admin_password_confirm'] ?? '');
+    $confirmInstall       = (string) ($_POST['confirm_install'] ?? '');
 
     if ($errors === [] && $postAction !== 'create_setup_key' && app_public_install_requires_token()) {
-        if (!app_has_setup_token()) {
+        $ipWaitSeconds = install_setup_ip_lock_remaining_seconds();
+        if ($ipWaitSeconds > 0) {
+            $errors[] = 'Too many invalid setup key attempts from this IP. Please wait ' . $ipWaitSeconds . ' second(s) and try again.';
+        }
+
+        $lockUntil = (int) ($_SESSION[$setupLockUntilKey] ?? 0);
+        if ($errors === [] && $lockUntil > time()) {
+            $wait = $lockUntil - time();
+            $errors[] = 'Too many invalid setup key attempts. Please wait ' . $wait . ' second(s) and try again.';
+        } elseif ($errors === [] && !app_has_setup_token()) {
             $errors[] = 'Installer access requires a setup token. Create the first setup access key on localhost before continuing.';
-        } elseif (!app_validate_setup_token($form['setup_access_key'])) {
-            $errors[] = 'Installer access denied.';
+        } elseif ($errors === [] && !app_validate_setup_token($form['setup_access_key'])) {
+            $attempts = (int) ($_SESSION[$setupAttemptKey] ?? 0) + 1;
+            $_SESSION[$setupAttemptKey] = $attempts;
+            $ipResult = install_setup_ip_record_failure($setupIpMaxAttempts, $setupIpLockSeconds);
+            if ($attempts >= 3) {
+                $_SESSION[$setupLockUntilKey] = time() + 300;
+                $_SESSION[$setupAttemptKey] = 0;
+                $errors[] = 'Installer access denied. Too many invalid setup key attempts. Locked for 5 minutes.';
+            } elseif (!empty($ipResult['locked'])) {
+                $errors[] = 'Installer access denied. Too many invalid setup key attempts from this IP. Locked for '
+                    . (int) ($ipResult['wait_seconds'] ?? $setupIpLockSeconds) . ' second(s).';
+            } else {
+                $remaining = 3 - $attempts;
+                $ipRemaining = (int) ($ipResult['remaining_attempts'] ?? $setupIpMaxAttempts);
+                $errors[] = 'Installer access denied. Session remaining: ' . $remaining
+                    . '. IP remaining: ' . $ipRemaining . ' attempt(s) before temporary lock.';
+            }
+        } else {
+            $_SESSION[$setupAttemptKey] = 0;
+            unset($_SESSION[$setupLockUntilKey]);
+            install_setup_ip_clear_failures();
         }
     }
 
@@ -214,8 +430,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($form['admin_first_name'] === '' || $form['admin_last_name'] === '' || $form['admin_username'] === '')
             $errors[] = 'Admin first name, last name, and username are required.';
 
-        if ($adminPassword === '' || strlen($adminPassword) < 8)
-            $errors[] = 'Admin password must be at least 8 characters.';
+        if ($form['admin_username'] !== '' && preg_match('/^[a-zA-Z0-9_]{3,32}$/', $form['admin_username']) !== 1)
+            $errors[] = 'Admin username must be 3-32 characters and use only letters, numbers, and underscores.';
+
+        if (!install_password_is_strong($adminPassword))
+            $errors[] = 'Admin password must be at least 12 characters and include uppercase, lowercase, number, and special character.';
 
         if ($adminPassword !== $adminPasswordConfirm)
             $errors[] = 'Admin password confirmation does not match.';
@@ -225,6 +444,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if ($form['store_email'] !== '' && !filter_var($form['store_email'], FILTER_VALIDATE_EMAIL))
             $errors[] = 'Store email must be a valid email address.';
+
+        $currencyCode = strtoupper($form['currency']);
+        if ($currencyCode === '' || preg_match('/^[A-Z]{3}$/', $currencyCode) !== 1)
+            $errors[] = 'Currency must be a 3-letter ISO code (example: PHP, USD).';
+
+        if ($confirmInstall !== '1')
+            $errors[] = 'Please confirm the final setup review before completing installation.';
 
         if (
             isset($_FILES['store_logo'])
@@ -239,6 +465,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($errors === [] && $postAction !== 'create_setup_key') {
         $uploadedLogo = null;
         try {
+            if (preg_match('/^[A-Za-z0-9_]+$/', $form['db_name']) !== 1) {
+                throw new RuntimeException('Database name is invalid.');
+            }
             $uploadedLogo = install_store_logo_upload($_FILES['store_logo'] ?? null);
             $serverConn  = app_create_database_connection($form['db_host'], $form['db_port'], $form['db_user'], $form['db_pass']);
             $quotedDbName = str_replace('`', '``', $form['db_name']);

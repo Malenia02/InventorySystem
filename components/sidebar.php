@@ -9,71 +9,264 @@ $isAdmin = $userRole === 'admin';
 $isCashier = $userRole === 'cashier';
 $isStaff = $userRole === 'staff';
 
-$productPages = [
-    'pos.php',
-    'manage_product.php',
-    'bulk_upload_products.php',
-    'manage_category.php',
-    'manage_subcategory.php',
-    'manage_supplier.php'
-];
+if (!function_exists('sidebar_is_active')) {
+    function sidebar_is_active(string $currentPage, array $links): bool
+    {
+        foreach ($links as $link) {
+            if (($link['page'] ?? '') === $currentPage) {
+                return true;
+            }
+        }
 
-$adminPages = [
-    'manage_staff.php',
-    'activity_log.php',
-    'pos_settings.php',
-    'backup_restore.php',
-    'reorder_planner.php'
-];
+        return false;
+    }
+}
 
-$reportPages = [
-    'sales_report.php',
-    'inventory_report.php'
-];
+if (!function_exists('sidebar_render_group')) {
+    function sidebar_render_group(string $id, string $label, string $icon, array $links, string $currentPage): void
+    {
+        if ($links === []) {
+            return;
+        }
 
+        $isActive = sidebar_is_active($currentPage, $links);
+        ?>
+        <li class="nav-item">
+            <a
+                class="nav-link <?= $isActive ? '' : 'collapsed' ?>"
+                data-bs-target="#<?= htmlspecialchars($id, ENT_QUOTES, 'UTF-8') ?>"
+                data-bs-toggle="collapse"
+                href="#"
+            >
+                <i class="bi <?= htmlspecialchars($icon, ENT_QUOTES, 'UTF-8') ?>"></i>
+                <span><?= htmlspecialchars($label, ENT_QUOTES, 'UTF-8') ?></span>
+                <i class="bi bi-chevron-down ms-auto"></i>
+            </a>
+
+            <ul
+                id="<?= htmlspecialchars($id, ENT_QUOTES, 'UTF-8') ?>"
+                class="nav-content collapse <?= $isActive ? 'show' : '' ?>"
+                data-bs-parent="#sidebar-nav"
+            >
+                <?php foreach ($links as $link): ?>
+                    <li>
+                        <a
+                            href="<?= htmlspecialchars((string) $link['href'], ENT_QUOTES, 'UTF-8') ?>"
+                            class="<?= $currentPage === ($link['page'] ?? '') ? 'active' : '' ?>"
+                        >
+                            <i class="bi <?= htmlspecialchars((string) ($link['icon'] ?? 'bi-circle'), ENT_QUOTES, 'UTF-8') ?>"></i>
+                            <span><?= htmlspecialchars((string) $link['label'], ENT_QUOTES, 'UTF-8') ?></span>
+                        </a>
+                    </li>
+                <?php endforeach; ?>
+            </ul>
+        </li>
+        <?php
+    }
+}
+
+$posLinks = [];
 $inventoryLinks = [];
+$purchasingLinks = [];
+$approvalLinks = [];
+$financeLinks = [];
+$reportLinks = [];
+$systemLinks = [];
 
 if ($isAdmin || $isCashier) {
-    $inventoryLinks[] = [
+    $posLinks[] = [
         'page' => 'pos.php',
         'href' => '/inventory_system/product_management/pos.php',
         'label' => 'POS / Sales',
+        'icon' => 'bi-cart-check',
+    ];
+
+    $posLinks[] = [
+        'page' => 'cashier_sales_history.php',
+        'href' => '/inventory_system/cashier_sales_history.php',
+        'label' => $isCashier ? 'My Sales History' : 'Cashier Sales History',
+        'icon' => 'bi-receipt',
+    ];
+
+    $posLinks[] = [
+        'page' => 'shift_closing.php',
+        'href' => '/inventory_system/shift_closing.php',
+        'label' => 'Shift Management',
+        'icon' => 'bi-journal-check',
+    ];
+}
+
+if ($isCashier) {
+    $posLinks[] = [
+        'page' => 'shift_edit_requests.php',
+        'href' => '/inventory_system/shift_edit_requests.php',
+        'label' => 'Shift Edit Requests',
+        'icon' => 'bi-unlock',
     ];
 }
 
 if ($isAdmin) {
-    $inventoryLinks[] = [
-        'page' => 'manage_product.php',
-        'href' => '/inventory_system/product_management/manage_product.php',
-        'label' => 'Manage Products',
+    $inventoryLinks = [
+        [
+            'page' => 'manage_product.php',
+            'href' => '/inventory_system/product_management/manage_product.php',
+            'label' => 'Manage Products',
+            'icon' => 'bi-box-seam',
+        ],
+        [
+            'page' => 'bulk_upload_products.php',
+            'href' => '/inventory_system/product_management/bulk_upload_products.php',
+            'label' => 'Bulk Create Products',
+            'icon' => 'bi-cloud-upload',
+        ],
+        [
+            'page' => 'manage_category.php',
+            'href' => '/inventory_system/product_management/manage_category.php',
+            'label' => 'Categories',
+            'icon' => 'bi-tags',
+        ],
+        [
+            'page' => 'manage_subcategory.php',
+            'href' => '/inventory_system/product_management/manage_subcategory.php',
+            'label' => 'Subcategories',
+            'icon' => 'bi-tag',
+        ],
+        [
+            'page' => 'manage_supplier.php',
+            'href' => '/inventory_system/supplier_management/manage_supplier.php',
+            'label' => 'Suppliers',
+            'icon' => 'bi-truck',
+        ],
+        [
+            'page' => 'stock_movement_audit.php',
+            'href' => '/inventory_system/admin/stock_movement_audit.php',
+            'label' => 'Stock Movement Audit',
+            'icon' => 'bi-activity',
+        ],
+        [
+            'page' => 'reorder_planner.php',
+            'href' => '/inventory_system/admin/reorder_planner.php',
+            'label' => 'Reorder Intelligence',
+            'icon' => 'bi-box-arrow-in-down',
+        ],
+        [
+            'page' => 'barcode_labels.php',
+            'href' => '/inventory_system/admin/barcode_labels.php',
+            'label' => 'Barcode Labels',
+            'icon' => 'bi-upc-scan',
+        ],
     ];
 
-    $inventoryLinks[] = [
-        'page' => 'bulk_upload_products.php',
-        'href' => '/inventory_system/product_management/bulk_upload_products.php',
-        'label' => 'Bulk Create Products',
+    $purchasingLinks = [
+        [
+            'page' => 'purchase_orders.php',
+            'href' => '/inventory_system/admin/purchase_orders.php',
+            'label' => 'Purchase Orders',
+            'icon' => 'bi-bag-check',
+        ],
+        [
+            'page' => 'purchase_receiving_history.php',
+            'href' => '/inventory_system/admin/purchase_receiving_history.php',
+            'label' => 'Receiving History',
+            'icon' => 'bi-clock-history',
+        ],
     ];
 
-    $inventoryLinks[] = [
-        'page' => 'manage_category.php',
-        'href' => '/inventory_system/product_management/manage_category.php',
-        'label' => 'Manage Categories',
+    $approvalLinks = [
+        [
+            'page' => 'approval_center.php',
+            'href' => '/inventory_system/admin/approval_center.php',
+            'label' => 'Approval Center',
+            'icon' => 'bi-check2-square',
+        ],
+        [
+            'page' => 'stock_adjustment_requests.php',
+            'href' => '/inventory_system/stock_adjustment_requests.php',
+            'label' => 'Stock Requests',
+            'icon' => 'bi-clipboard-plus',
+        ],
+        [
+            'page' => 'sale_action_requests.php',
+            'href' => '/inventory_system/admin/sale_action_requests.php',
+            'label' => 'Sale Requests',
+            'icon' => 'bi-arrow-counterclockwise',
+        ],
+        [
+            'page' => 'shift_edit_requests.php',
+            'href' => '/inventory_system/shift_edit_requests.php',
+            'label' => 'Shift Edit Requests',
+            'icon' => 'bi-unlock',
+        ],
     ];
 
-    $inventoryLinks[] = [
-        'page' => 'manage_subcategory.php',
-        'href' => '/inventory_system/product_management/manage_subcategory.php',
-        'label' => 'Manage Subcategories',
+    $financeLinks = [
+        [
+            'page' => 'expense_tracker.php',
+            'href' => '/inventory_system/admin/expense_tracker.php',
+            'label' => 'Expense Tracker',
+            'icon' => 'bi-wallet2',
+        ],
     ];
 
-    $inventoryLinks[] = [
-        'page' => 'manage_supplier.php',
-        'href' => '/inventory_system/supplier_management/manage_supplier.php',
-        'label' => 'Manage Suppliers',
+    $reportLinks = [
+        [
+            'page' => 'sales_report.php',
+            'href' => '/inventory_system/reports/sales_report.php',
+            'label' => 'Sales Report',
+            'icon' => 'bi-graph-up-arrow',
+        ],
+        [
+            'page' => 'inventory_report.php',
+            'href' => '/inventory_system/reports/inventory_report.php',
+            'label' => 'Inventory Report',
+            'icon' => 'bi-clipboard-data',
+        ],
+    ];
+
+    $systemLinks = [
+        [
+            'page' => 'manage_staff.php',
+            'href' => '/inventory_system/admin/manage_staff.php',
+            'label' => 'Manage Staff',
+            'icon' => 'bi-people',
+        ],
+        [
+            'page' => 'activity_log.php',
+            'href' => '/inventory_system/admin/activity_log.php',
+            'label' => 'Activity Log',
+            'icon' => 'bi-list-check',
+        ],
+        [
+            'page' => 'pos_settings.php',
+            'href' => '/inventory_system/admin/pos_settings.php',
+            'label' => 'POS Settings',
+            'icon' => 'bi-sliders',
+        ],
+        [
+            'page' => 'backup_restore.php',
+            'href' => '/inventory_system/admin/backup_restore.php',
+            'label' => 'Backup & Restore',
+            'icon' => 'bi-database-check',
+        ],
+        [
+            'page' => 'chatbot_test_console.php',
+            'href' => '/inventory_system/admin/chatbot_test_console.php',
+            'label' => 'Chatbot Test Console',
+            'icon' => 'bi-robot',
+        ],
     ];
 }
 
-$showInventoryMenu = $inventoryLinks !== [];
+if ($isCashier || $isStaff) {
+    $inventoryLinks[] = [
+        'page' => 'stock_adjustment_requests.php',
+        'href' => '/inventory_system/stock_adjustment_requests.php',
+        'label' => 'Stock Requests',
+        'icon' => 'bi-clipboard-plus',
+    ];
+}
+
+$showNotifications = $isAdmin || $isCashier;
 ?>
 
 <aside id="sidebar" class="sidebar">
@@ -86,132 +279,21 @@ $showInventoryMenu = $inventoryLinks !== [];
             </a>
         </li>
 
-        <?php if ($isAdmin): ?>
-            <li class="nav-item">
-                <a
-                    class="nav-link <?= in_array($current_page, $adminPages, true) ? '' : 'collapsed' ?>"
-                    data-bs-target="#admin-nav"
-                    data-bs-toggle="collapse"
-                    href="#"
-                >
-                    <i class="bi bi-shield-lock"></i>
-                    <span>Admin</span>
-                    <i class="bi bi-chevron-down ms-auto"></i>
-                </a>
-
-                <ul
-                    id="admin-nav"
-                    class="nav-content collapse <?= in_array($current_page, $adminPages, true) ? 'show' : '' ?>"
-                    data-bs-parent="#sidebar-nav"
-                >
-                    <li>
-                        <a href="/inventory_system/admin/manage_staff.php" class="<?= $current_page === 'manage_staff.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>Manage Staff</span>
-                        </a>
-                    </li>
-
-                    <li>
-                        <a href="/inventory_system/admin/activity_log.php" class="<?= $current_page === 'activity_log.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>Activity Log</span>
-                        </a>
-                    </li>
-
-                    <li>
-                        <a href="/inventory_system/admin/pos_settings.php" class="<?= $current_page === 'pos_settings.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>POS Config</span>
-                        </a>
-                    </li>
-
-                    <li>
-                        <a href="/inventory_system/admin/backup_restore.php" class="<?= $current_page === 'backup_restore.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>Backup &amp; Restore</span>
-                        </a>
-                    </li>
-
-                    <li>
-                        <a href="/inventory_system/admin/reorder_planner.php" class="<?= $current_page === 'reorder_planner.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>Reorder Planner</span>
-                        </a>
-                    </li>
-                </ul>
-            </li>
-        <?php endif; ?>
-
-        <?php if ($showInventoryMenu): ?>
-            <li class="nav-item">
-                <a
-                    class="nav-link <?= in_array($current_page, $productPages, true) ? '' : 'collapsed' ?>"
-                    data-bs-target="#product-nav"
-                    data-bs-toggle="collapse"
-                    href="#"
-                >
-                    <i class="bi bi-box-seam"></i>
-                    <span>Inventory Management</span>
-                    <i class="bi bi-chevron-down ms-auto"></i>
-                </a>
-
-                <ul
-                    id="product-nav"
-                    class="nav-content collapse <?= in_array($current_page, $productPages, true) ? 'show' : '' ?>"
-                    data-bs-parent="#sidebar-nav"
-                >
-                    <?php foreach ($inventoryLinks as $link): ?>
-                        <li>
-                            <a href="<?= htmlspecialchars($link['href'], ENT_QUOTES, 'UTF-8') ?>" class="<?= $current_page === $link['page'] ? 'active' : '' ?>">
-                                <i class="bi bi-circle"></i>
-                                <span><?= htmlspecialchars($link['label'], ENT_QUOTES, 'UTF-8') ?></span>
-                            </a>
-                        </li>
-                    <?php endforeach; ?>
-                </ul>
-            </li>
-        <?php endif; ?>
-
-        <?php if ($isAdmin): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= in_array($current_page, $reportPages, true) ? '' : 'collapsed' ?>" data-bs-target="#reports-nav" data-bs-toggle="collapse" href="#">
-                    <i class="bi bi-bar-chart"></i>
-                    <span>Reports</span>
-                    <i class="bi bi-chevron-down ms-auto"></i>
-                </a>
-
-                <ul id="reports-nav" class="nav-content collapse <?= in_array($current_page, $reportPages, true) ? 'show' : '' ?>" data-bs-parent="#sidebar-nav">
-                    <li>
-                        <a href="/inventory_system/reports/sales_report.php" class="<?= $current_page === 'sales_report.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>Sales Report</span>
-                        </a>
-                    </li>
-
-                    <li>
-                        <a href="/inventory_system/reports/inventory_report.php" class="<?= $current_page === 'inventory_report.php' ? 'active' : '' ?>">
-                            <i class="bi bi-circle"></i>
-                            <span>Inventory Report</span>
-                        </a>
-                    </li>
-                </ul>
-            </li>
-        <?php endif; ?>
+        <?php sidebar_render_group('pos-nav', 'POS & Cashier', 'bi-shop-window', $posLinks, $current_page); ?>
+        <?php sidebar_render_group('inventory-nav', 'Inventory', 'bi-box-seam', $inventoryLinks, $current_page); ?>
+        <?php sidebar_render_group('purchasing-nav', 'Purchasing', 'bi-bag-check', $purchasingLinks, $current_page); ?>
+        <?php sidebar_render_group('approvals-nav', 'Approvals & Requests', 'bi-ui-checks', $approvalLinks, $current_page); ?>
+        <?php sidebar_render_group('finance-nav', 'Finance', 'bi-cash-stack', $financeLinks, $current_page); ?>
+        <?php sidebar_render_group('reports-nav', 'Reports', 'bi-bar-chart', $reportLinks, $current_page); ?>
+        <?php sidebar_render_group('system-nav', 'System Admin', 'bi-shield-lock', $systemLinks, $current_page); ?>
 
         <li class="nav-heading">Account</li>
 
-        <?php if ($isAdmin || $isCashier): ?>
+        <?php if ($showNotifications): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $current_page === 'notifications.php' ? '' : 'collapsed' ?>" href="/inventory_system/notifications.php">
                     <i class="bi bi-bell"></i>
                     <span>Notification Center</span>
-                </a>
-            </li>
-
-            <li class="nav-item">
-                <a class="nav-link <?= $current_page === 'shift_closing.php' ? '' : 'collapsed' ?>" href="/inventory_system/shift_closing.php">
-                    <i class="bi bi-journal-check"></i>
-                    <span>Shift Closing</span>
                 </a>
             </li>
         <?php endif; ?>

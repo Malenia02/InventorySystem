@@ -2,6 +2,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/config/config.php';
+require_once __DIR__ . '/controllers/AuthController.php';
+
+if (session_status() === PHP_SESSION_NONE && php_sapi_name() !== 'cli') {
+    AuthController::configureSessionCookie();
+    session_start();
+}
 
 function media_deny(): never
 {
@@ -20,7 +26,8 @@ function media_secure_uploads_dir(): string
 
 function media_requires_auth(string $asset): bool
 {
-    return str_starts_with($asset, 'staff/');
+    return str_starts_with($asset, 'products/')
+        || str_starts_with($asset, 'staff/');
 }
 
 $asset = trim((string) ($_GET['asset'] ?? ''));
@@ -78,6 +85,6 @@ if (!is_string($mimeType) || !in_array($mimeType, $allowedMimeTypes, true)) {
 
 header('Content-Type: ' . $mimeType);
 header('Content-Length: ' . (string) filesize($absolutePath));
-header('Cache-Control: public, max-age=86400');
+header('Cache-Control: private, max-age=86400');
 readfile($absolutePath);
 exit;

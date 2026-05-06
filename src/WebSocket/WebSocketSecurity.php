@@ -64,18 +64,25 @@ final class WebSocketSecurity
 
     private static function secret(): string
     {
-        $secret = '';
+        if (function_exists('app_secret_value')) {
+            $secret = app_secret_value('WS_SHARED_SECRET', true);
+            if ($secret !== '') {
+                return $secret;
+            }
+
+            $appKey = app_secret_value('APP_KEY', true);
+            if ($appKey !== '') {
+                return $appKey;
+            }
+        }
 
         if (function_exists('env_value')) {
-            $secret = (string) env_value('WS_SHARED_SECRET', env_value('APP_KEY', ''));
+            $secret = trim((string) env_value('WS_SHARED_SECRET', env_value('APP_KEY', '')));
+            if ($secret !== '') {
+                return $secret;
+            }
         }
 
-        if ($secret === '') {
-            $basePath = defined('BASE_PATH') ? (string) BASE_PATH : dirname(__DIR__, 2);
-            $appUrl = function_exists('env_value') ? (string) env_value('APP_URL', '') : '';
-            $secret = hash('sha256', $basePath . '|' . $appUrl . '|websocket-secret');
-        }
-
-        return $secret;
+        throw new \RuntimeException('WS_SHARED_SECRET or APP_KEY is required for websocket token signing.');
     }
 }

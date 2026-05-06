@@ -5,6 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const launcher = document.getElementById("dashboardChatbotLauncher");
     const closeBtn = document.getElementById("dashboardChatbotClose");
     const voiceBtn = document.getElementById("dashboardChatbotVoice");
+    const micBtn = document.getElementById("dashboardChatbotMic");
     const minimizeBtn = document.getElementById("dashboardChatbotMinimize");
     const speakingBadge = document.getElementById("dashboardChatbotSpeaking");
     const form = document.getElementById("dashboardChatbotForm");
@@ -16,9 +17,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const userRole = (shell.dataset.userRole || "admin").toLowerCase();
     const csrfToken = shell.dataset.csrfToken || "";
     const speechSupported = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    const recognitionSupported = Boolean(SpeechRecognition);
     let voiceEnabled = speechSupported && localStorage.getItem("dashboard_chatbot_voice") !== "off";
     let hasSpokenGreeting = false;
     let availableVoices = [];
+    let recognition = null;
+    let isListening = false;
+    let shouldAutoSendVoice = false;
 
     function getTimeGreeting() {
         const hour = new Date().getHours();
@@ -108,6 +114,134 @@ document.addEventListener("DOMContentLoaded", () => {
         window.speechSynthesis.speak(utterance);
     }
 
+    function setListeningState(listening) {
+        isListening = listening;
+        if (!micBtn) return;
+
+        micBtn.classList.toggle("is-listening", listening);
+        micBtn.title = listening ? "Listening... click to stop" : "Speak your question";
+        micBtn.setAttribute("aria-label", listening ? "Stop listening" : "Speak your question");
+        micBtn.innerHTML = listening
+            ? '<i class="bi bi-mic-fill"></i><span class="dashboard-chatbot-mic-wave" aria-hidden="true"></span>'
+            : '<i class="bi bi-mic-fill"></i>';
+    }
+
+    function showVoiceInputHint(message, type = "info") {
+        document.querySelectorAll(".chatbot-voice-hint").forEach((node) => node.remove());
+        const hint = document.createElement("div");
+        hint.className = `chatbot-message bot chatbot-voice-hint is-${type}`;
+        hint.innerHTML = `
+            <div class="chatbot-bubble chatbot-bubble-muted">
+                <div class="chatbot-message-text">${escapeHtml(message)}</div>
+            </div>`;
+        messages.appendChild(hint);
+        scrollToBottom();
+        setTimeout(() => hint.remove(), 3200);
+    }
+
+    function isSecureMicOrigin() {
+        return window.isSecureContext || ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
+    }
+
+    async function microphonePermissionState() {
+        if (!navigator.permissions?.query) {
+            return "unknown";
+        }
+
+        try {
+            const status = await navigator.permissions.query({ name: "microphone" });
+            return status.state || "unknown";
+        } catch (error) {
+            return "unknown";
+        }
+    }
+
+    async function requestMicrophoneAccess() {
+        if (!navigator.mediaDevices?.getUserMedia) {
+            return true;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+        return true;
+    }
+
+    function initSpeechRecognition() {
+        if (!micBtn) return;
+
+        if (!recognitionSupported) {
+            micBtn.disabled = true;
+            micBtn.classList.add("is-disabled");
+            micBtn.title = "Voice input is not supported in this browser";
+            micBtn.setAttribute("aria-label", "Voice input is not supported in this browser");
+            return;
+        }
+
+        recognition = new SpeechRecognition();
+        recognition.lang = "en-PH";
+        recognition.interimResults = true;
+        recognition.continuous = false;
+
+        recognition.onstart = () => {
+            stopSpeaking();
+            setSpeakingState(false);
+            shouldAutoSendVoice = false;
+            setListeningState(true);
+        };
+
+        recognition.onresult = (event) => {
+            let transcript = "";
+            let hasFinalResult = false;
+            for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                transcript += event.results[i][0]?.transcript || "";
+                if (event.results[i].isFinal) {
+                    hasFinalResult = true;
+                }
+            }
+            if (input) {
+                input.value = transcript.trim();
+                input.focus();
+            }
+            shouldAutoSendVoice = hasFinalResult && transcript.trim() !== "";
+        };
+
+        recognition.onerror = (event) => {
+            setListeningState(false);
+            const reason = (() => {
+                if (event.error === "not-allowed") {
+                    return isSecureMicOrigin()
+                        ? "The browser still denied microphone access. Click the address bar site icon, remove this site's microphone permission, refresh, then allow it again."
+                        : "Voice input needs HTTPS or localhost. If you are using a laptop IP from another device, open it with HTTPS or test on localhost.";
+                }
+
+                if (event.error === "no-speech") {
+                    return "I did not hear speech. Try again and speak after the mic starts glowing.";
+                }
+
+                if (event.error === "audio-capture") {
+                    return "No microphone was detected by the browser. Check your Windows input device and browser microphone settings.";
+                }
+
+                if (event.error === "network") {
+                    return "The browser speech service could not connect. Try Chrome or Edge with internet access.";
+                }
+
+                return "I could not hear that clearly. Please try speaking again.";
+            })();
+            showVoiceInputHint(reason, "warning");
+        };
+
+        recognition.onend = () => {
+            setListeningState(false);
+            if (shouldAutoSendVoice && input?.value.trim()) {
+                const voiceQuestion = input.value.trim();
+                input.value = "";
+                shouldAutoSendVoice = false;
+                askQuestion(voiceQuestion);
+            }
+        };
+    }
+
     function buildSpeechText(answer, rows = []) {
         const summary = String(answer || "").replace(/\s+/g, " ").trim();
         if (!summary) return "";
@@ -148,6 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const actionButtons = Array.isArray(actions) && actions.length
             ? `
                 <div class="chatbot-response-controls chatbot-response-actions">
+                    <span class="chatbot-response-actions-label">Open next</span>
                     ${actions.map((action) => `
                         <button type="button" class="chatbot-response-chip is-action" data-chat-action-url="${escapeHtml(action.url || "")}" data-chat-action-label="${escapeHtml(action.label || "")}">
                             ${action.icon ? `<i class="bi ${escapeHtml(action.icon)}"></i>` : ""}
@@ -228,8 +363,49 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
 
+    micBtn?.addEventListener("click", async () => {
+        if (!recognitionSupported || !recognition) {
+            showVoiceInputHint("Voice input is not supported in this browser. Chrome or Edge is recommended.", "warning");
+            return;
+        }
+
+        if (isListening) {
+            recognition.stop();
+            return;
+        }
+
+        if (!isSecureMicOrigin()) {
+            showVoiceInputHint("Voice input needs HTTPS or localhost. Browser mic can be blocked when using a laptop IP like 192.168.x.x.", "warning");
+            return;
+        }
+
+        const permissionState = await microphonePermissionState();
+        if (permissionState === "denied") {
+            console.warn("[chatbot mic] Permission API reports denied. Trying getUserMedia anyway because site settings can be stale.");
+        }
+
+        try {
+            await requestMicrophoneAccess();
+            recognition.start();
+        } catch (error) {
+            const errorName = String(error?.name || "");
+            if (errorName === "NotAllowedError" || errorName === "SecurityError") {
+                showVoiceInputHint("The browser denied microphone access. Open site settings for localhost, reset microphone permission, refresh, then click Allow.", "warning");
+                return;
+            }
+
+            if (errorName === "NotFoundError" || errorName === "DevicesNotFoundError") {
+                showVoiceInputHint("No microphone was found. Check your Windows input device and browser microphone selection.", "warning");
+                return;
+            }
+
+            showVoiceInputHint("Voice input is already starting or unavailable. Please wait a moment and try again.", "warning");
+        }
+    });
+
     updateVoiceButton();
     loadVoices();
+    initSpeechRecognition();
 
     if (speechSupported && typeof window.speechSynthesis.onvoiceschanged !== "undefined") {
         window.speechSynthesis.onvoiceschanged = loadVoices;
@@ -355,7 +531,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const answerText = payload.answer || "Here is what I found.";
-            const resultRows = Array.isArray(payload.rows) ? payload.rows : [];
+        const resultRows = Array.isArray(payload.rows) ? payload.rows : [];
             appendMessage("bot", answerText, resultRows, payload.suggestions || [], payload.actions || []);
             speakText(buildSpeechText(answerText, resultRows));
         } catch (err) {

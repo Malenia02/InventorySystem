@@ -5,6 +5,8 @@ final class PosConfigController
 {
     private const TABLE = 'pos_config';
     private const MAX_LOGO_SIZE = 2097152; // 2MB
+    private const DEFAULT_SHIFT_EDIT_WINDOW_HOURS = 8;
+    private const DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS = 2;
     private const ALLOWED_LOGO_MIME_TYPES = [
         'image/jpeg' => 'jpg',
         'image/png'  => 'png',
@@ -13,6 +15,8 @@ final class PosConfigController
 
     public static function get(PDO $conn): array
     {
+        self::ensureSchema($conn);
+
         $stmt = $conn->query("
             SELECT
                 config_id,
@@ -24,7 +28,9 @@ final class PosConfigController
                 closing_hours,
                 tax_rate,
                 currency,
-                logo
+                logo,
+                shift_edit_window_hours,
+                shift_unlock_window_hours
             FROM " . self::TABLE . "
             ORDER BY config_id ASC
             LIMIT 1
@@ -37,6 +43,8 @@ final class PosConfigController
 
     public static function save(PDO $conn, array $input, array $files = []): array
     {
+        self::ensureSchema($conn);
+
         $payload = self::validate($input);
         $existing = self::existingConfig($conn);
         $existingId = isset($existing['config_id']) ? (int) $existing['config_id'] : null;
@@ -70,7 +78,9 @@ final class PosConfigController
                         closing_hours = :closing_hours,
                         tax_rate = :tax_rate,
                         currency = :currency,
-                        logo = :logo
+                        logo = :logo,
+                        shift_edit_window_hours = :shift_edit_window_hours,
+                        shift_unlock_window_hours = :shift_unlock_window_hours
                     WHERE config_id = :config_id
                 ");
 
@@ -84,6 +94,8 @@ final class PosConfigController
                     ':tax_rate'      => $payload['tax_rate'],
                     ':currency'      => $payload['currency'],
                     ':logo'          => $payload['logo'],
+                    ':shift_edit_window_hours' => $payload['shift_edit_window_hours'],
+                    ':shift_unlock_window_hours' => $payload['shift_unlock_window_hours'],
                     ':config_id'     => $existingId,
                 ]);
             } else {
@@ -97,7 +109,9 @@ final class PosConfigController
                         closing_hours,
                         tax_rate,
                         currency,
-                        logo
+                        logo,
+                        shift_edit_window_hours,
+                        shift_unlock_window_hours
                     ) VALUES (
                         :store_name,
                         :store_address,
@@ -107,7 +121,9 @@ final class PosConfigController
                         :closing_hours,
                         :tax_rate,
                         :currency,
-                        :logo
+                        :logo,
+                        :shift_edit_window_hours,
+                        :shift_unlock_window_hours
                     )
                 ");
 
@@ -121,6 +137,8 @@ final class PosConfigController
                     ':tax_rate'      => $payload['tax_rate'],
                     ':currency'      => $payload['currency'],
                     ':logo'          => $payload['logo'],
+                    ':shift_edit_window_hours' => $payload['shift_edit_window_hours'],
+                    ':shift_unlock_window_hours' => $payload['shift_unlock_window_hours'],
                 ]);
             }
         } catch (Throwable $e) {
@@ -140,6 +158,16 @@ final class PosConfigController
     public static function taxRate(PDO $conn): float
     {
         return (float) (self::get($conn)['tax_rate'] ?? 12.00);
+    }
+
+    public static function shiftEditWindowHours(PDO $conn): int
+    {
+        return self::normalizeHourSetting(self::get($conn)['shift_edit_window_hours'] ?? self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS, self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS);
+    }
+
+    public static function shiftUnlockWindowHours(PDO $conn): int
+    {
+        return self::normalizeHourSetting(self::get($conn)['shift_unlock_window_hours'] ?? self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS, self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS);
     }
 
     public static function logoUrl(?string $logo): ?string
@@ -173,6 +201,8 @@ final class PosConfigController
 
     private static function existingConfig(PDO $conn): ?array
     {
+        self::ensureSchema($conn);
+
         $stmt = $conn->query("
             SELECT
                 config_id,
@@ -184,7 +214,9 @@ final class PosConfigController
                 closing_hours,
                 tax_rate,
                 currency,
-                logo
+                logo,
+                shift_edit_window_hours,
+                shift_unlock_window_hours
             FROM " . self::TABLE . "
             ORDER BY config_id ASC
             LIMIT 1
@@ -206,6 +238,8 @@ final class PosConfigController
         $currency = strtoupper(trim((string) ($input['currency'] ?? 'PHP')));
         $logo = self::nullableTrim($input['logo_current'] ?? $input['logo'] ?? null);
         $taxRate = round((float) ($input['tax_rate'] ?? 12), 2);
+        $shiftEditWindowHours = self::normalizeHourSetting($input['shift_edit_window_hours'] ?? self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS, self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS);
+        $shiftUnlockWindowHours = self::normalizeHourSetting($input['shift_unlock_window_hours'] ?? self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS, self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS);
 
         if ($storeName === '') {
             throw new InvalidArgumentException('Store name is required.');
@@ -237,6 +271,8 @@ final class PosConfigController
             'tax_rate'      => $taxRate,
             'currency'      => $currency,
             'logo'          => $logo,
+            'shift_edit_window_hours' => $shiftEditWindowHours,
+            'shift_unlock_window_hours' => $shiftUnlockWindowHours,
         ];
     }
 
@@ -302,7 +338,53 @@ final class PosConfigController
             'tax_rate'       => 12.00,
             'currency'       => 'PHP',
             'logo'           => null,
+            'shift_edit_window_hours' => self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS,
+            'shift_unlock_window_hours' => self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS,
         ];
+    }
+
+    private static function ensureSchema(PDO $conn): void
+    {
+        self::ensureColumn($conn, 'shift_edit_window_hours', 'shift_edit_window_hours int(11) NOT NULL DEFAULT ' . self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS . ' AFTER logo');
+        self::ensureColumn($conn, 'shift_unlock_window_hours', 'shift_unlock_window_hours int(11) NOT NULL DEFAULT ' . self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS . ' AFTER shift_edit_window_hours');
+    }
+
+    private static function ensureColumn(PDO $conn, string $column, string $definition): void
+    {
+        try {
+            $stmt = $conn->prepare("
+                SELECT COUNT(*)
+                FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = :table_name
+                  AND COLUMN_NAME = :column_name
+            ");
+            $stmt->execute([
+                ':table_name' => self::TABLE,
+                ':column_name' => $column,
+            ]);
+
+            if ((int) $stmt->fetchColumn() > 0) {
+                return;
+            }
+
+            $conn->exec("
+                ALTER TABLE " . self::TABLE . "
+                ADD COLUMN {$definition}
+            ");
+        } catch (Throwable $e) {
+            error_log('[PosConfigController][schema] ' . $e->getMessage());
+        }
+    }
+
+    private static function normalizeHourSetting(mixed $value, int $default): int
+    {
+        $hours = (int) $value;
+        if ($hours < 1 || $hours > 72) {
+            return $default;
+        }
+
+        return $hours;
     }
 
     private static function deleteStoredLogo(?string $logoPath): void

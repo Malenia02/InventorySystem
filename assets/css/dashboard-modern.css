@@ -389,6 +389,64 @@
     bottom: 5.8rem;
 }
 
+.dashboard-modern .dashboard-action-links {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    padding: 18px 20px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(219, 228, 249, 0.9);
+    border-radius: 24px;
+    background:
+        radial-gradient(circle at top left, rgba(65, 84, 241, 0.12), transparent 28%),
+        linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(247,250,255,0.96) 100%);
+    box-shadow: 0 18px 40px rgba(15, 38, 81, 0.08);
+}
+
+.dashboard-modern .dashboard-action-links strong {
+    display: block;
+    color: #012970;
+    font-weight: 900;
+    letter-spacing: -0.03em;
+}
+
+.dashboard-modern .dashboard-action-eyebrow {
+    display: block;
+    color: #8093be;
+    font-size: 0.72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+}
+
+.dashboard-modern .dashboard-action-list {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+.dashboard-modern .dashboard-action-list a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0.65rem 0.9rem;
+    border: 1px solid #dce5fb;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.88);
+    color: #2449bf;
+    font-weight: 800;
+    text-decoration: none;
+    transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+}
+
+.dashboard-modern .dashboard-action-list a:hover {
+    transform: translateY(-1px);
+    border-color: #bfcdf9;
+    box-shadow: 0 12px 26px rgba(65, 84, 241, 0.12);
+}
+
 @media (max-width: 1399px) {
     .dashboard-modern .dashboard-kpi-card .card-body {
         min-height: 176px;
@@ -410,6 +468,15 @@
 
     .dashboard-modern .dashboard-alert-item {
         grid-template-columns: 1fr;
+    }
+
+    .dashboard-modern .dashboard-action-links {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .dashboard-modern .dashboard-action-list {
+        justify-content: flex-start;
     }
 
     .dashboard-modern .dashboard-alert-time {

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../controllers/AuthController.php';
 require_once __DIR__ . '/../../controllers/NotificationController.php';
 require_once __DIR__ . '/../../controllers/PosConfigController.php';
 require_once __DIR__ . '/../../controllers/ProductController.php';
+require_once __DIR__ . '/../../controllers/ShiftClosingController.php';
 
 header('Content-Type: application/json; charset=UTF-8');
 
@@ -37,7 +38,8 @@ function checkout_notify_sale(
     string $title,
     string $message,
     string $icon = 'bi-bell',
-    string $color = 'text-primary'
+    string $color = 'text-primary',
+    ?string $link = null
 ): void {
     if ($userId <= 0) {
         return;
@@ -53,7 +55,7 @@ function checkout_notify_sale(
             $message,
             $icon,
             $color,
-            '/inventory_system/product_management/pos.php'
+            $link !== null && trim($link) !== '' ? $link : '/inventory_system/product_management/pos.php'
         );
     } catch (Throwable $notificationError) {
         error_log('[checkout.php][notification] ' . $notificationError->getMessage());
@@ -227,6 +229,17 @@ try {
             'success' => false,
             'error'   => 'Unauthorized.',
         ], 401);
+    }
+
+    $sessionRole = strtolower((string) ($_SESSION['role'] ?? ''));
+    if ($sessionRole !== 'admin' && !ShiftClosingController::hasOpenShiftForToday($conn, $sessionUserId)) {
+        checkout_failure_response(
+            $conn,
+            $sessionUserId,
+            'sale_failed_shift_not_started',
+            'Start your shift first before saving a sale.',
+            422
+        );
     }
 
     $logConfig = [
@@ -449,7 +462,8 @@ try {
             number_format($grandTotal, 2)
         ),
         'bi-receipt',
-        'text-success'
+        'text-success',
+        '/inventory_system/reports/sales_report.php?sale_id=' . $saleId
     );
 
     checkout_json([

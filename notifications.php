@@ -134,7 +134,7 @@ $csrfToken = Middleware::generateCsrfToken();
 $categoryTabs = [
     'all' => ['label' => 'All', 'icon' => 'bi-grid'],
     'sales' => ['label' => 'Sales', 'icon' => 'bi-receipt'],
-    'shift' => ['label' => 'Shift Closing', 'icon' => 'bi-journal-check'],
+    'shift' => ['label' => 'Shift Management', 'icon' => 'bi-journal-check'],
     'inventory' => ['label' => 'Inventory', 'icon' => 'bi-box-seam'],
     'security' => ['label' => 'Security', 'icon' => 'bi-shield-lock'],
     'system' => ['label' => 'System', 'icon' => 'bi-bell'],
@@ -152,22 +152,29 @@ require __DIR__ . '/components/sidebar.php';
 
 <main id="main" class="main notification-center-page">
     <div class="notification-hero">
-        <div>
+        <div class="notification-hero-main">
             <p class="notification-eyebrow"><?= $isAdmin ? 'Team activity inbox' : 'Personal activity inbox' ?></p>
             <h1>Notification Center</h1>
             <p class="notification-hero-copy">
                 <?= $isAdmin
-                    ? 'Monitor cashier sales, shift closings, inventory activity, and system alerts in one focused workspace.'
-                    : 'Review your own sales, shift closings, and activity without seeing other cashier records.' ?>
+                    ? 'Monitor cashier sales, shift management activity, inventory events, and system alerts in one focused workspace.'
+                    : 'Review your own sales, shift activity, and notifications without seeing other cashier records.' ?>
             </p>
         </div>
-        <form method="POST" class="notification-mark-read-form">
-            <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-            <button type="submit" class="notification-primary-action">
-                <i class="bi bi-check2-circle"></i>
-                Mark all as read
-            </button>
-        </form>
+        <div class="notification-hero-side">
+            <div class="notification-hero-mini">
+                <span class="notification-hero-mini-label">Unread now</span>
+                <strong><?= number_format((int) ($stats['unread'] ?? 0)) ?></strong>
+                <small><?= $isAdmin ? 'alerts across your visible team feed' : 'alerts in your personal activity feed' ?></small>
+            </div>
+            <form method="POST" class="notification-mark-read-form">
+                <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
+                <button type="submit" class="notification-primary-action">
+                    <i class="bi bi-check2-circle"></i>
+                    Mark all as read
+                </button>
+            </form>
+        </div>
     </div>
 
     <?php if ($flashMessage !== null): ?>
@@ -219,7 +226,12 @@ require __DIR__ . '/components/sidebar.php';
     <section class="notification-layout">
         <aside class="notification-filter-panel">
             <div class="notification-filter-card">
-                <h2>Filters</h2>
+                <div class="notification-card-head">
+                    <div>
+                        <p class="notification-card-kicker">Categories</p>
+                        <h2>Filters</h2>
+                    </div>
+                </div>
                 <div class="notification-category-list" id="notificationCategoryList">
                     <?php foreach ($categoryTabs as $key => $tab): ?>
                         <a
@@ -235,7 +247,12 @@ require __DIR__ . '/components/sidebar.php';
             </div>
 
             <form method="GET" class="notification-filter-card notification-filter-form" id="notificationFilterForm">
-                <h2>Refine</h2>
+                <div class="notification-card-head">
+                    <div>
+                        <p class="notification-card-kicker">Search</p>
+                        <h2>Refine</h2>
+                    </div>
+                </div>
                 <label>
                     <span>Search</span>
                     <input type="search" name="q" class="form-control" value="<?= e($filters['search']) ?>" placeholder="Title, message, cashier">
@@ -286,6 +303,7 @@ require __DIR__ . '/components/sidebar.php';
         <div class="notification-feed-panel">
             <div class="notification-feed-head">
                 <div>
+                    <p class="notification-card-kicker">Live feed</p>
                     <h2>Activity Feed</h2>
                     <p id="notificationFeedCount"><?= count($items) ?> item<?= count($items) === 1 ? '' : 's' ?> shown</p>
                 </div>

@@ -22,7 +22,12 @@ final class StaffController
         ");
         $stmt->execute();
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return array_map(
+            static fn(array $staff): array => self::normalizeForView($staff),
+            $rows
+        );
     }
 
     public static function getStaffById(PDO $conn, int $id): ?array
@@ -41,7 +46,7 @@ final class StaffController
 
         $staff = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $staff ?: null;
+        return $staff ? self::normalizeForView($staff) : null;
     }
 
     public static function addStaff(PDO $conn, array $data): int
@@ -220,7 +225,7 @@ final class StaffController
 
     public static function normalizeForView(array $staff): array
     {
-        $photo = !empty($staff['photo']) ? (string) $staff['photo'] : self::DEFAULT_PHOTO;
+        $photo = self::normalizePhotoUrl($staff['photo'] ?? null);
         $status = (string) ($staff['status'] ?? 'inactive');
 
         return [
@@ -235,6 +240,26 @@ final class StaffController
             'status_label' => ucfirst($status),
             'photo'        => $photo,
         ];
+    }
+
+    public static function normalizePhotoUrl(?string $photoPath): string
+    {
+        $photoPath = trim((string) $photoPath);
+        if ($photoPath === '' || $photoPath === self::DEFAULT_PHOTO) {
+            return self::DEFAULT_PHOTO;
+        }
+
+        if (str_starts_with($photoPath, '/inventory_system/media.php')) {
+            return $photoPath;
+        }
+
+        $legacyPrefix = '/inventory_system/uploads/staff/';
+        if (str_starts_with($photoPath, $legacyPrefix)) {
+            $asset = 'staff/' . ltrim(substr($photoPath, strlen($legacyPrefix)), '/');
+            return self::buildMediaUrl($asset);
+        }
+
+        return $photoPath;
     }
 
     private static function deleteStoredPhoto(?string $photoPath): void

@@ -164,6 +164,10 @@ $chatbotQuickQuestions = $isCashier ? [
     'Payments' => 'What payment method is used most this month?',
     'Top category' => 'What category sold best this month?',
     'Out of stock' => 'How many out-of-stock products are there?',
+    'Stock audit' => 'Show latest stock movements',
+    'Expenses' => 'How much did we spend this month?',
+    'Approvals' => 'Any pending approvals?',
+    'Pending POs' => 'What POs are still pending?',
     'Last system error' => 'What was the last system error?',
     'Chatbot errors' => 'Show recent chatbot errors.',
 ];
@@ -378,6 +382,29 @@ require __DIR__ . '/components/head.php';
                 </div>
               </div>
             </div><!-- End Quick Insight Card -->
+
+            <div class="col-12">
+              <div class="dashboard-action-links dashboard-panel">
+                <div>
+                  <span class="dashboard-action-eyebrow">Next actions</span>
+                  <strong><?= $isCashier ? 'Cashier shortcuts' : 'Owner shortcuts' ?></strong>
+                </div>
+                <div class="dashboard-action-list">
+                  <?php if ($isAdmin): ?>
+                    <a href="/inventory_system/admin/stock_movement_audit.php"><i class="bi bi-activity"></i> Stock audit</a>
+                    <a href="/inventory_system/admin/reorder_planner.php"><i class="bi bi-box-arrow-in-down"></i> Reorder planner</a>
+                    <a href="/inventory_system/admin/approval_center.php"><i class="bi bi-check2-square"></i> Approvals</a>
+                    <a href="/inventory_system/admin/barcode_labels.php"><i class="bi bi-upc-scan"></i> Barcode labels</a>
+                    <a href="/inventory_system/notifications.php"><i class="bi bi-bell"></i> Notifications</a>
+                  <?php else: ?>
+                    <a href="/inventory_system/product_management/pos.php"><i class="bi bi-cart3"></i> Open POS</a>
+                    <a href="/inventory_system/cashier_sales_history.php"><i class="bi bi-receipt"></i> My sales</a>
+                    <a href="/inventory_system/stock_adjustment_requests.php"><i class="bi bi-clipboard-plus"></i> Stock request</a>
+                    <a href="/inventory_system/notifications.php"><i class="bi bi-bell"></i> Notifications</a>
+                  <?php endif; ?>
+                </div>
+              </div>
+            </div>
 
             <?php if ($isAdmin) include __DIR__ . '/components/owner_command_center_v2.php'; ?>
             <?php if ($isAdmin || $isCashier): ?>
@@ -695,6 +722,15 @@ require __DIR__ . '/components/head.php';
             placeholder="Ask anything about your inventory..."
             aria-label="Ask the store assistant"
           >
+          <button
+            type="button"
+            class="dashboard-chatbot-mic"
+            id="dashboardChatbotMic"
+            title="Speak your question"
+            aria-label="Speak your question"
+          >
+            <i class="bi bi-mic-fill"></i>
+          </button>
           <button type="submit" class="btn btn-primary" aria-label="Send">
             <i class="bi bi-send-fill" style="font-size:.8rem;"></i>
             Send

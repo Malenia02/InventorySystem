@@ -9,8 +9,8 @@ Options -Indexes
     Require all denied
 </FilesMatch>
 
-# Block sensitive extensions
-<FilesMatch "\.(env|ini|log|json|yml|yaml|xml)$">
+# Block sensitive extensions and env-like leftovers
+<FilesMatch "(^\.envd$|\.(env|ini|log|json|yml|yaml|xml)$)">
     Require all denied
 </FilesMatch>
 

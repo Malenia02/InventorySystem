@@ -9,6 +9,7 @@ require_once __DIR__ . '/../controllers/ProductController.php';
 require_once __DIR__ . '/../controllers/CategoryController.php';
 require_once __DIR__ . '/../controllers/SubcategoryController.php';
 require_once __DIR__ . '/../controllers/SupplierController.php';
+require_once __DIR__ . '/../controllers/StockAdjustmentController.php';
 
 Middleware::auth()->role('admin');
 
@@ -18,6 +19,7 @@ $categories = CategoryController::all($conn);
 $subcategories = SubcategoryController::all($conn);
 $products   = ProductController::allProducts($conn);
 $suppliers  = SupplierController::all($conn);
+$pendingStockRequests = StockAdjustmentController::pendingCount($conn);
 
 function renderSubcategoryOptions(array $subcategories): string
 {
@@ -144,6 +146,12 @@ function renderSubcategoryOptions(array $subcategories): string
                                     data-bs-toggle="modal" data-bs-target="#addProductModal">
                                     <i class="bi bi-plus-circle"></i> Add New Product
                                 </button>
+                                <a href="/inventory_system/stock_adjustment_requests.php" class="btn btn-light border position-relative">
+                                    <i class="bi bi-clipboard-check me-1"></i> Stock Requests
+                                    <?php if ($pendingStockRequests > 0): ?>
+                                        <span class="badge bg-warning text-dark ms-2"><?= (int) $pendingStockRequests ?></span>
+                                    <?php endif; ?>
+                                </a>
                                 <a href="/inventory_system/product_management/bulk_upload_products.php" class="btn btn-outline-primary">
                                     <i class="bi bi-upload"></i> Bulk Create
                                 </a>
@@ -660,6 +668,29 @@ function renderSubcategoryOptions(array $subcategories): string
                                                     <input type="number" name="quantity" class="form-control" required min="1" placeholder="Enter quantity">
                                                 </div>
 
+                                                <div class="mt-3">
+                                                    <label class="form-label">Adjustment Type</label>
+                                                    <select name="adjustment_type" class="form-select" required>
+                                                        <option value="delivery_received">Delivery Received</option>
+                                                        <option value="manual_restock">Manual Restock</option>
+                                                        <option value="count_correction">Count Correction</option>
+                                                        <option value="customer_return">Customer Return</option>
+                                                        <option value="purchase_receive">Purchase Order Receipt</option>
+                                                    </select>
+                                                </div>
+
+                                                <div class="mt-3">
+                                                    <label class="form-label">Supplier (optional)</label>
+                                                    <select name="supplier_id" class="form-select">
+                                                        <option value="">No supplier link</option>
+                                                        <?php foreach ($suppliers as $sup): ?>
+                                                            <option value="<?= (int) ($sup['supplier_id'] ?? 0) ?>">
+                                                                <?= htmlspecialchars((string) ($sup['supplier_name'] ?? 'Supplier'), ENT_QUOTES, 'UTF-8') ?>
+                                                            </option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                </div>
+
                                                 <div class="mt-3 mb-0">
                                                     <label class="form-label">Restock Note (optional)</label>
                                                     <textarea
@@ -715,21 +746,27 @@ function renderSubcategoryOptions(array $subcategories): string
                                                 </div>
 
                                                 <div class="mb-3">
-                                                    <label class="form-label">Reason</label>
-                                                    <select name="reason" class="form-select" required>
-                                                        <option value="">Select reason</option>
+                                                    <label class="form-label">Adjustment Type</label>
+                                                    <select name="adjustment_type" class="form-select" required>
+                                                        <option value="">Select adjustment type</option>
                                                         <option value="Damaged">Damaged</option>
                                                         <option value="Expired">Expired</option>
                                                         <option value="Lost">Lost</option>
                                                         <option value="Returned to supplier">Returned to supplier</option>
                                                         <option value="Broken packaging">Broken packaging</option>
+                                                        <option value="Count correction">Count correction</option>
                                                         <option value="Other">Other</option>
                                                     </select>
                                                 </div>
 
+                                                <div class="mb-3">
+                                                    <label class="form-label">Specific Reason (optional)</label>
+                                                    <input type="text" id="customStockOutReason" class="form-control" maxlength="500" placeholder="Enter a specific reason if needed">
+                                                </div>
+
                                                 <div class="mb-0">
-                                                    <label class="form-label">Custom Reason (optional)</label>
-                                                    <input type="text" id="customStockOutReason" class="form-control" maxlength="500" placeholder="Enter custom reason if needed">
+                                                    <label class="form-label">Notes (optional)</label>
+                                                    <textarea name="notes" class="form-control" rows="3" maxlength="500" placeholder="Add more details for the stock-out record"></textarea>
                                                 </div>
                                             </div>
                                         </div>

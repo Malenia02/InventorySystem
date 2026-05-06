@@ -20,6 +20,10 @@ final class ProductController
     public static function ensureStockMovementSchema(PDO $conn): void
     {
         self::ensureColumn($conn, 'stock_in', 'notes', 'ALTER TABLE stock_in ADD COLUMN notes text DEFAULT NULL AFTER user_id');
+        self::ensureColumn($conn, 'stock_in', 'adjustment_type', 'ALTER TABLE stock_in ADD COLUMN adjustment_type varchar(50) DEFAULT NULL AFTER notes');
+        self::ensureColumn($conn, 'stock_in', 'supplier_id', 'ALTER TABLE stock_in ADD COLUMN supplier_id int(11) DEFAULT NULL AFTER adjustment_type');
+        self::ensureColumn($conn, 'stock_out', 'notes', 'ALTER TABLE stock_out ADD COLUMN notes text DEFAULT NULL AFTER user_id');
+        self::ensureColumn($conn, 'stock_out', 'adjustment_type', 'ALTER TABLE stock_out ADD COLUMN adjustment_type varchar(50) DEFAULT NULL AFTER notes');
         self::ensureColumn($conn, 'stock_audit_log', 'reference_type', 'ALTER TABLE stock_audit_log ADD COLUMN reference_type varchar(50) DEFAULT NULL AFTER action');
         self::ensureColumn($conn, 'stock_audit_log', 'reference_id', 'ALTER TABLE stock_audit_log ADD COLUMN reference_id int(11) DEFAULT NULL AFTER reference_type');
         self::ensureColumn($conn, 'stock_audit_log', 'notes', 'ALTER TABLE stock_audit_log ADD COLUMN notes text DEFAULT NULL AFTER reference_id');
@@ -64,7 +68,12 @@ final class ProductController
         ");
         $stmt->execute();
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return array_map(
+            static fn(array $product): array => self::normalizeProductForView($product),
+            $rows
+        );
     }
 
     public static function getProductById(PDO $conn, int $id): ?array
@@ -113,7 +122,7 @@ final class ProductController
 
         $product = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        return $product ?: null;
+        return $product ? self::normalizeProductForView($product) : null;
     }
 
     public static function activeProductsForPOS(PDO $conn): array
@@ -158,7 +167,12 @@ final class ProductController
         ");
         $stmt->execute();
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return array_map(
+            static fn(array $product): array => self::normalizeProductForView($product),
+            $rows
+        );
     }
 
     public static function handlePhotoUpload(string $fileInputName, string $productName = 'unknown'): ?string
@@ -432,7 +446,7 @@ final class ProductController
         }
     }
 
-    public static function restockProduct(PDO $conn, int $productId, int $quantity, ?int $userId = null, ?string $notes = null): bool
+    public static function restockProduct(PDO $conn, int $productId, int $quantity, ?int $userId = null, ?string $notes = null, array $context = []): bool
     {
         self::ensureStockMovementSchema($conn);
 
@@ -446,19 +460,31 @@ final class ProductController
 
         self::assertProductExists($conn, $productId);
         $notes = self::normalizeMovementNote($notes);
+        $adjustmentType = self::normalizeAdjustmentType((string) ($context['adjustment_type'] ?? 'restock'));
+        $supplierId = isset($context['supplier_id']) && (int) $context['supplier_id'] > 0
+            ? (int) $context['supplier_id']
+            : null;
+        $referenceType = trim((string) ($context['reference_type'] ?? 'stock_in'));
+        $referenceId = isset($context['reference_id']) ? (int) $context['reference_id'] : 0;
+        $startedTransaction = false;
 
         try {
-            $conn->beginTransaction();
+            if (!$conn->inTransaction()) {
+                $conn->beginTransaction();
+                $startedTransaction = true;
+            }
 
             $stmt = $conn->prepare("
-                INSERT INTO stock_in (product_id, quantity, stockin_date, user_id, notes)
-                VALUES (:product_id, :quantity, NOW(), :user_id, :notes)
+                INSERT INTO stock_in (product_id, quantity, stockin_date, user_id, notes, adjustment_type, supplier_id)
+                VALUES (:product_id, :quantity, NOW(), :user_id, :notes, :adjustment_type, :supplier_id)
             ");
             $stmt->execute([
                 ':product_id' => $productId,
                 ':quantity'   => $quantity,
                 ':user_id'    => $userId,
                 ':notes'      => $notes,
+                ':adjustment_type' => $adjustmentType,
+                ':supplier_id' => $supplierId,
             ]);
 
             self::attachStockAuditContext(
@@ -466,22 +492,24 @@ final class ProductController
                 $productId,
                 'stock_in',
                 $userId,
-                'stock_in',
-                (int) $conn->lastInsertId(),
-                $notes
+                $referenceType !== '' ? $referenceType : 'stock_in',
+                $referenceId > 0 ? $referenceId : (int) $conn->lastInsertId(),
+                $notes !== null ? strtoupper($adjustmentType) . ($notes !== '' ? ' | ' . $notes : '') : strtoupper($adjustmentType)
             );
 
-            $conn->commit();
+            if ($startedTransaction && $conn->inTransaction()) {
+                $conn->commit();
+            }
             return true;
         } catch (Throwable $e) {
-            if ($conn->inTransaction()) {
+            if ($startedTransaction && $conn->inTransaction()) {
                 $conn->rollBack();
             }
             throw $e;
         }
     }
 
-    public static function stockOutProduct(PDO $conn, int $productId, int $quantity, string $reason = '', ?int $userId = null): bool
+    public static function stockOutProduct(PDO $conn, int $productId, int $quantity, string $reason = '', ?int $userId = null, array $context = []): bool
     {
         self::ensureStockMovementSchema($conn);
 
@@ -509,19 +537,29 @@ final class ProductController
         }
 
         $reason = self::normalizeMovementNote($reason) ?? 'No reason provided';
+        $notes = self::normalizeMovementNote((string) ($context['notes'] ?? ''));
+        $adjustmentType = self::normalizeAdjustmentType((string) ($context['adjustment_type'] ?? $reason));
+        $referenceType = trim((string) ($context['reference_type'] ?? 'stock_out'));
+        $referenceId = isset($context['reference_id']) ? (int) $context['reference_id'] : 0;
+        $startedTransaction = false;
 
         try {
-            $conn->beginTransaction();
+            if (!$conn->inTransaction()) {
+                $conn->beginTransaction();
+                $startedTransaction = true;
+            }
 
             $stmt = $conn->prepare("
-                INSERT INTO stock_out (product_id, quantity, reason, stockout_date, user_id)
-                VALUES (:product_id, :quantity, :reason, NOW(), :user_id)
+                INSERT INTO stock_out (product_id, quantity, reason, stockout_date, user_id, notes, adjustment_type)
+                VALUES (:product_id, :quantity, :reason, NOW(), :user_id, :notes, :adjustment_type)
             ");
             $stmt->execute([
                 ':product_id' => $productId,
                 ':quantity'   => $quantity,
                 ':reason'     => $reason,
                 ':user_id'    => $userId,
+                ':notes'      => $notes,
+                ':adjustment_type' => $adjustmentType,
             ]);
 
             self::attachStockAuditContext(
@@ -529,15 +567,20 @@ final class ProductController
                 $productId,
                 'stock_out',
                 $userId,
-                'stock_out',
-                (int) $conn->lastInsertId(),
-                $reason
+                $referenceType !== '' ? $referenceType : 'stock_out',
+                $referenceId > 0 ? $referenceId : (int) $conn->lastInsertId(),
+                strtoupper($adjustmentType)
+                    . ' | '
+                    . $reason
+                    . ($notes !== null && $notes !== '' ? ' | ' . $notes : '')
             );
 
-            $conn->commit();
+            if ($startedTransaction && $conn->inTransaction()) {
+                $conn->commit();
+            }
             return true;
         } catch (Throwable $e) {
-            if ($conn->inTransaction()) {
+            if ($startedTransaction && $conn->inTransaction()) {
                 $conn->rollBack();
             }
             throw $e;
@@ -912,6 +955,17 @@ final class ProductController
         ]);
     }
 
+    private static function normalizeAdjustmentType(string $type): string
+    {
+        $type = strtolower(trim($type));
+        if ($type === '') {
+            return 'manual_adjustment';
+        }
+
+        $type = preg_replace('/[^a-z0-9]+/', '_', $type) ?? 'manual_adjustment';
+        return trim($type, '_') !== '' ? trim($type, '_') : 'manual_adjustment';
+    }
+
     public static function cleanupUploadedPhoto(?string $photoPath): void
     {
         self::deleteStoredPhoto($photoPath);
@@ -925,6 +979,32 @@ final class ProductController
         }
 
         @unlink($absolutePath);
+    }
+
+    public static function normalizePhotoUrl(?string $photoPath): string
+    {
+        $photoPath = trim((string) $photoPath);
+        if ($photoPath === '') {
+            return '/inventory_system/assets/img/card.jpg';
+        }
+
+        if (str_starts_with($photoPath, '/inventory_system/media.php')) {
+            return $photoPath;
+        }
+
+        $legacyPrefix = '/inventory_system/uploads/products/';
+        if (str_starts_with($photoPath, $legacyPrefix)) {
+            $asset = 'products/' . ltrim(substr($photoPath, strlen($legacyPrefix)), '/');
+            return self::buildMediaUrl($asset);
+        }
+
+        return $photoPath;
+    }
+
+    private static function normalizeProductForView(array $product): array
+    {
+        $product['photo'] = self::normalizePhotoUrl($product['photo'] ?? null);
+        return $product;
     }
 
     private static function resolveStoredPhotoPath(?string $photoPath): ?string

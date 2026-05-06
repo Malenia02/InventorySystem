@@ -16,14 +16,7 @@ if exist "%PID_FILE%" (
     )
 )
 
-taskkill /F /T /IM php.exe >nul 2>&1
-
-if errorlevel 1 (
-    echo No running WebSocket server was found.
-) else (
-    echo WebSocket server stopped.
-)
-
 if exist "%PID_FILE%" del "%PID_FILE%" >nul 2>&1
+echo No running WebSocket server was found.
 
 pause

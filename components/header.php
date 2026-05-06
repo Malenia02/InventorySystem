@@ -4,6 +4,7 @@
  * Role-based notifications + seen tracking + real session profile.
  */
 require_once __DIR__ . '/../controllers/NotificationController.php';
+require_once __DIR__ . '/../controllers/StaffController.php';
 require_once __DIR__ . '/../middleware/Middleware.php';
 require_once __DIR__ . '/../src/WebSocket/WebSocketSecurity.php';
 require_once __DIR__ . '/branding.php';
@@ -23,7 +24,7 @@ if (empty($sessionFullName)) {
 }
 
 $profilePhoto = !empty($sessionPhoto)
-    ? htmlspecialchars($sessionPhoto)
+    ? htmlspecialchars(StaffController::normalizePhotoUrl((string) $sessionPhoto), ENT_QUOTES, 'UTF-8')
     : '/inventory_system/assets/img/profile-img.jpg';
 $notificationActivityUrl = '/inventory_system/notifications.php';
 
@@ -40,11 +41,11 @@ $webSocketUrl = $sessionUserId > 0
     : '';
 
 if ($sessionUserId && isset($conn)) {
-    $feed = NotificationController::getNotificationFeed($conn, $sessionUserId, $sessionRole, 20);
+    $feed = NotificationController::getNotificationSnapshot($conn, $sessionUserId, $sessionRole, 20);
     $notifications = $feed['all'];
     $unreadNotifications = $feed['unread'];
     $previousNotifications = $feed['previous'];
-    $notifCount    = NotificationController::getUnreadCount($conn, $sessionUserId, $sessionRole);
+    $notifCount    = (int) ($feed['count'] ?? 0);
 }
 
 function renderNotificationItems(array $items, string $emptyTitle, string $emptyText): string
@@ -111,6 +112,12 @@ function renderNotificationItems(array $items, string $emptyTitle, string $empty
             </button>
         </form>
     </div>
+
+    <?php if (app_is_public_demo()): ?>
+        <div class="ms-3 d-none d-md-flex align-items-center">
+            <span class="badge rounded-pill text-bg-warning px-3 py-2">Public Demo</span>
+        </div>
+    <?php endif; ?>
 
     <nav class="header-nav ms-auto">
         <ul class="d-flex align-items-center">

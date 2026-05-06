@@ -136,6 +136,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   const table = document.getElementById("productsTable");
+  let productsDataTable = null;
   const addForm = document.getElementById("addProductForm");
   const editForm = document.getElementById("editProductForm");
   const restockForm = document.getElementById("restockForm");
@@ -208,10 +209,70 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   if (table && window.simpleDatatables && simpleDatatables.DataTable) {
-    new simpleDatatables.DataTable(table, {
+    productsDataTable = new simpleDatatables.DataTable(table, {
       searchable: true,
       fixedHeight: true,
       perPage: 10
+    });
+  }
+
+  function createDataTableRowFromElement(row) {
+    if (!row) return null;
+
+    const attributes = {};
+    if (row.id) attributes.id = row.id;
+    if (row.className) attributes.class = row.className;
+
+    return {
+      attributes,
+      cells: Array.from(row.children).map((cell) => ({
+        data: cell.innerHTML
+      }))
+    };
+  }
+
+  function findDataTableRowIndex(rowId) {
+    if (!productsDataTable?.data?.data || !rowId) return -1;
+
+    return productsDataTable.data.data.findIndex((row) => {
+      return String(row?.attributes?.id || "") === String(rowId);
+    });
+  }
+
+  function syncDataTableRowNumbers() {
+    if (!productsDataTable?.data?.data) return;
+
+    productsDataTable.data.data.forEach((row, index) => {
+      if (row?.cells?.[0]) {
+        row.cells[0].data = String(index + 1);
+      }
+    });
+  }
+
+  function renderDataTablePreservingPage(preferredPage = null) {
+    if (!productsDataTable) {
+      updateRowNumbers();
+      return;
+    }
+
+    const currentPage = preferredPage ?? productsDataTable._currentPage ?? 1;
+    syncDataTableRowNumbers();
+    productsDataTable.update(true);
+
+    const totalPages = Math.max(productsDataTable.totalPages || 1, 1);
+    const targetPage = Math.min(Math.max(currentPage, 1), totalPages);
+    productsDataTable.page(targetPage);
+  }
+
+  function flashRenderedRow(rowId, flashClass) {
+    if (!rowId || !flashClass) return;
+
+    window.requestAnimationFrame(() => {
+      const row = document.getElementById(rowId);
+      if (!row) return;
+
+      row.classList.add(flashClass);
+      window.setTimeout(() => row.classList.remove(flashClass), 3000);
     });
   }
 
@@ -231,8 +292,52 @@ document.addEventListener("DOMContentLoaded", () => {
     const newRow = temp.firstElementChild;
     if (!newRow || !oldRow) return;
 
-    oldRow.innerHTML = newRow.innerHTML;
+    try {
+      if (productsDataTable) {
+        const rowId = oldRow.id || newRow.id;
+        const rowIndex = findDataTableRowIndex(oldRow.id || newRow.id);
+        const rowData = createDataTableRowFromElement(newRow);
+
+        if (rowIndex >= 0 && rowData) {
+          const currentPage = productsDataTable._currentPage ?? 1;
+          productsDataTable.data.data[rowIndex] = rowData;
+          renderDataTablePreservingPage(currentPage);
+          flashRenderedRow(rowId, "table-warning");
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Product table sync failed. Falling back to DOM update.", error);
+    }
+
+    oldRow.replaceWith(newRow);
     updateRowNumbers();
+    flashRenderedRow(newRow.id, "table-warning");
+  }
+
+  function prependRow(newRow) {
+    if (!newRow) return;
+
+    try {
+      if (productsDataTable) {
+        const rowData = createDataTableRowFromElement(newRow);
+        if (rowData) {
+          productsDataTable.data.data.unshift(rowData);
+          renderDataTablePreservingPage(1);
+          flashRenderedRow(newRow.id, "table-success");
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Product table prepend sync failed. Falling back to DOM update.", error);
+    }
+
+    const tbody = table?.querySelector("tbody");
+    if (!tbody) return;
+
+    tbody.prepend(newRow);
+    updateRowNumbers();
+    flashRenderedRow(newRow.id, "table-success");
   }
 
   function showSupplierMessage(message, type = "success") {
@@ -385,14 +490,10 @@ document.addEventListener("DOMContentLoaded", () => {
             temp.innerHTML = res.newRowHtml.trim();
             const newRow = temp.firstElementChild;
 
-            const tbody = table?.querySelector("tbody");
-            if (tbody && newRow) {
-              tbody.prepend(newRow);
-              newRow.classList.add("table-success");
-              setTimeout(() => newRow.classList.remove("table-success"), 3000);
+            if (newRow) {
+              prependRow(newRow);
             }
 
-            updateRowNumbers();
             hideModal("addProductModal");
             addForm.reset();
             showToast(res.message || "Product added successfully", "success");
@@ -596,8 +697,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (oldRow) {
               replaceRow(oldRow, res.newRowHtml);
-              oldRow.classList.add("table-warning");
-              setTimeout(() => oldRow.classList.remove("table-warning"), 3000);
             }
 
             hideModal("editProductModal");
@@ -619,6 +718,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const productId = document.getElementById("restockProductId")?.value || "";
       const quantity = restockForm.querySelector('input[name="quantity"]')?.value || "";
+      const adjustmentType = restockForm.querySelector('select[name="adjustment_type"]')?.value || "";
       const notes = restockForm.querySelector('textarea[name="notes"]')?.value.trim() || "";
 
       if (!productId || parseInt(productId, 10) <= 0) {
@@ -628,6 +728,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!quantity || parseInt(quantity, 10) <= 0) {
         showToast("Invalid quantity", "error");
+        return;
+      }
+
+      if (!adjustmentType) {
+        showToast("Select a restock type", "error");
         return;
       }
 
@@ -678,8 +783,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const productId = document.getElementById("stockOutProductId")?.value || "";
       const quantity = stockOutForm.querySelector('input[name="quantity"]')?.value || "";
-      const reasonSelect = stockOutForm.querySelector('select[name="reason"]')?.value || "";
+      const reasonSelect = stockOutForm.querySelector('select[name="adjustment_type"]')?.value || "";
       const customReason = document.getElementById("customStockOutReason")?.value.trim() || "";
+      const notes = stockOutForm.querySelector('textarea[name="notes"]')?.value.trim() || "";
 
       if (!productId || parseInt(productId, 10) <= 0) {
         showToast("Invalid product ID", "error");
@@ -706,9 +812,15 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (notes.length > 500) {
+        showToast("Notes must be 500 characters or fewer", "error");
+        return;
+      }
+
       const formData = new FormData(stockOutForm);
       formData.set("product_id", productId);
       formData.set("reason", finalReason);
+      formData.set("adjustment_type", reasonSelect);
       formData.append("stockout_product", "1");
 
       postData("/inventory_system/http/ajax/product_actions.php", formData)

@@ -324,246 +324,10 @@ $pageTitle = 'Inventory Report';
 ?>
 <!DOCTYPE html>
 <html lang="en">
+<head>
 <?php require __DIR__ . '/../components/head.php'; ?>
-<style>
-    .inventory-report-panel {
-        border: 1px solid #edf1f7;
-        border-radius: 18px;
-        box-shadow: 0 10px 30px rgba(13, 32, 72, 0.06);
-        overflow: hidden;
-    }
-
-    .inventory-report-panel .card-body {
-        padding: 0;
-    }
-
-    .inventory-report-panel-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-        padding: 16px 18px 14px;
-        border-bottom: 1px solid #edf1f7;
-        background: linear-gradient(180deg, #fbfcff 0%, #f4f7ff 100%);
-    }
-
-    .inventory-report-panel-title {
-        font-size: 1rem;
-        font-weight: 700;
-        color: #19335c;
-        margin: 0;
-    }
-
-    .inventory-report-panel-subtitle {
-        margin: 4px 0 0;
-        font-size: 0.82rem;
-        color: #7b8ba7;
-    }
-
-    .inventory-report-panel-pill {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 78px;
-        padding: 6px 12px;
-        border-radius: 999px;
-        background: #eaf1ff;
-        color: #3151a6;
-        font-size: 0.76rem;
-        font-weight: 700;
-        white-space: nowrap;
-    }
-
-    .inventory-report-feed {
-        padding: 12px 14px 14px;
-        max-height: 420px;
-        overflow-y: auto;
-        background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
-    }
-
-    .inventory-report-feed-item {
-        display: grid;
-        grid-template-columns: 82px 1fr;
-        gap: 12px;
-        padding: 14px;
-        margin-bottom: 12px;
-        border: 1px solid #edf1f7;
-        border-radius: 16px;
-        background: #ffffff;
-        box-shadow: 0 8px 22px rgba(18, 39, 84, 0.04);
-        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-    }
-
-    .inventory-report-feed-item:last-child {
-        margin-bottom: 0;
-    }
-
-    .inventory-report-feed-item:hover {
-        transform: translateY(-1px);
-        border-color: #dfe7fb;
-        box-shadow: 0 12px 26px rgba(18, 39, 84, 0.08);
-    }
-
-    .inventory-report-feed-time {
-        font-size: 0.76rem;
-        font-weight: 700;
-        color: #8a98af;
-        text-transform: uppercase;
-        letter-spacing: 0.02em;
-        padding: 9px 10px;
-        border-radius: 12px;
-        background: #f7f9ff;
-        border: 1px solid #edf1f7;
-        text-align: center;
-        line-height: 1.45;
-        align-self: start;
-    }
-
-    .inventory-report-feed-main {
-        min-width: 0;
-    }
-
-    .inventory-report-feed-top {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        flex-wrap: wrap;
-        margin-bottom: 6px;
-    }
-
-    .inventory-report-feed-product {
-        font-size: 0.95rem;
-        font-weight: 700;
-        color: #17345f;
-        margin: 0;
-        flex: 1 1 160px;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .inventory-report-feed-change {
-        font-size: 0.88rem;
-        font-weight: 700;
-    }
-
-    .inventory-report-feed-meta {
-        font-size: 0.81rem;
-        color: #7f8da5;
-        line-height: 1.55;
-    }
-
-    .inventory-report-feed-note {
-        margin-top: 7px;
-        padding: 9px 11px;
-        border-radius: 12px;
-        background: #f8faff;
-        border: 1px solid #e8eef8;
-        color: #50627f;
-        font-size: 0.79rem;
-        line-height: 1.45;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-
-    .inventory-report-table-wrap {
-        padding: 0 12px 12px;
-        max-height: 340px;
-        overflow: auto;
-        background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%);
-    }
-
-    .inventory-report-table {
-        margin: 0;
-    }
-
-    .inventory-report-table thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-        background: #f8faff;
-        color: #7385a3;
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        border-bottom: 1px solid #e9eef7;
-        white-space: nowrap;
-    }
-
-    .inventory-report-table tbody td {
-        padding-top: 0.8rem;
-        padding-bottom: 0.8rem;
-        vertical-align: top;
-        border-color: #f0f3f8;
-    }
-
-    .inventory-report-table tbody tr:hover td {
-        background: #f9fbff;
-    }
-
-    .inventory-report-note-cell {
-        max-width: 230px;
-        color: #596b88;
-        line-height: 1.45;
-    }
-
-    .inventory-report-note-text {
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-    }
-
-    .inventory-report-ref {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 8px;
-        border-radius: 999px;
-        background: #f4f7ff;
-        border: 1px solid #e2e8fa;
-        font-size: 0.78rem;
-        font-weight: 700;
-        color: #405473;
-    }
-
-    .inventory-report-feed,
-    .inventory-report-table-wrap {
-        scrollbar-width: thin;
-        scrollbar-color: #cad8fd transparent;
-    }
-
-    .inventory-report-feed::-webkit-scrollbar,
-    .inventory-report-table-wrap::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-    }
-
-    .inventory-report-feed::-webkit-scrollbar-thumb,
-    .inventory-report-table-wrap::-webkit-scrollbar-thumb {
-        background: #cad8fd;
-        border-radius: 999px;
-    }
-
-    .inventory-report-feed::-webkit-scrollbar-track,
-    .inventory-report-table-wrap::-webkit-scrollbar-track {
-        background: transparent;
-    }
-
-    @media (max-width: 991px) {
-        .inventory-report-feed-item {
-            grid-template-columns: 1fr;
-            gap: 6px;
-        }
-
-        .inventory-report-feed-time {
-            padding-top: 0;
-            text-align: left;
-        }
-    }
-</style>
+<link rel="stylesheet" href="/inventory_system/assets/css/inventory-report.css">
+</head>
 <body>
 
 <?php
@@ -571,35 +335,57 @@ require __DIR__ . '/../components/header.php';
 require __DIR__ . '/../components/sidebar.php';
 ?>
 
-<main id="main" class="main">
-    <div class="pagetitle">
-        <h1>Inventory Report</h1>
-        <nav>
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/inventory_system/index.php">Home</a></li>
-                <li class="breadcrumb-item active">Inventory Report</li>
-            </ol>
-        </nav>
+<main id="main" class="main inventory-report-page">
+    <div class="inventory-report-hero">
+        <div class="inventory-report-hero-copy">
+            <p class="inventory-report-eyebrow">Stock Intelligence</p>
+            <h1 class="inventory-report-title">Inventory Report</h1>
+            <p class="inventory-report-copy">Review stock health, current valuation, movement signals, and product-level inventory data from one workspace.</p>
+            <nav>
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/inventory_system/index.php">Home</a></li>
+                    <li class="breadcrumb-item active">Inventory Report</li>
+                </ol>
+            </nav>
+        </div>
+        <div class="inventory-report-hero-panel">
+            <div class="inventory-report-hero-stat">
+                <span class="inventory-report-hero-label">Tracked products</span>
+                <strong><?= number_format((int) ($summary['total_products'] ?? 0)) ?></strong>
+                <span class="inventory-report-hero-note">active and inactive catalog items</span>
+            </div>
+            <div class="inventory-report-hero-stat">
+                <span class="inventory-report-hero-label">Current stock value</span>
+                <strong><?= e(formatMoney((float) ($summary['inventory_value'] ?? 0))) ?></strong>
+                <span class="inventory-report-hero-note">estimated value on hand</span>
+            </div>
+        </div>
     </div>
 
     <section class="section dashboard">
         <div class="row">
             <div class="col-12">
-                <div class="card">
+                <div class="card inventory-filter-card">
                     <div class="card-body">
-                        <h5 class="card-title">Filters <span>| Inventory View</span></h5>
+                        <div class="inventory-section-head">
+                            <div>
+                                <p class="inventory-section-kicker">Filter</p>
+                                <h5 class="card-title">Inventory View</h5>
+                                <p class="inventory-section-copy mb-0">Search the catalog and focus the report by category, stock health, and page size.</p>
+                            </div>
+                        </div>
 
                         <?php if ($errorMsg !== null): ?>
-                            <div class="alert alert-danger"><?= e($errorMsg) ?></div>
+                            <div class="alert alert-danger inventory-inline-alert"><?= e($errorMsg) ?></div>
                         <?php endif; ?>
 
-                        <form method="GET" class="row g-3">
+                        <form method="GET" class="row g-3 inventory-filter-form">
                             <div class="col-md-4">
-                                <label class="form-label">Search</label>
+                                <label class="form-label inventory-label">Search</label>
                                 <input type="text" name="search" class="form-control" value="<?= e($search) ?>" placeholder="Product name, SKU, or category">
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">Category</label>
+                                <label class="form-label inventory-label">Category</label>
                                 <select name="category_id" class="form-select">
                                     <option value="0">All categories</option>
                                     <?php foreach ($categories as $category): ?>
@@ -610,7 +396,7 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">Stock Status</label>
+                                <label class="form-label inventory-label">Stock Status</label>
                                 <select name="stock_status" class="form-select">
                                     <option value="all" <?= $stockStatus === 'all' ? 'selected' : '' ?>>All</option>
                                     <option value="in_stock" <?= $stockStatus === 'in_stock' ? 'selected' : '' ?>>In Stock</option>
@@ -620,7 +406,7 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">Rows</label>
+                                <label class="form-label inventory-label">Rows</label>
                                 <select name="per_page" class="form-select">
                                     <?php foreach ($perPageOptions as $size): ?>
                                         <option value="<?= $size ?>" <?= $perPage === $size ? 'selected' : '' ?>><?= $size ?></option>
@@ -628,11 +414,11 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-1 d-flex align-items-end">
-                                <button type="submit" class="btn btn-primary w-100">Apply</button>
+                                <button type="submit" class="btn btn-primary w-100 inventory-apply-btn">Apply</button>
                             </div>
-                            <div class="col-12 d-flex gap-2">
-                                <a href="<?= e(buildQueryUrl(['export' => 'csv', 'page' => 1])) ?>" class="btn btn-success btn-sm">Export CSV</a>
-                                <a href="/inventory_system/reports/inventory_report.php" class="btn btn-outline-secondary btn-sm">Reset</a>
+                            <div class="col-12 d-flex gap-2 inventory-filter-actions">
+                                <a href="<?= e(buildQueryUrl(['export' => 'csv', 'page' => 1])) ?>" class="btn btn-success btn-sm inventory-soft-btn">Export CSV</a>
+                                <a href="/inventory_system/reports/inventory_report.php" class="btn btn-outline-secondary btn-sm inventory-soft-btn">Reset</a>
                             </div>
                         </form>
                     </div>
@@ -640,11 +426,11 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-3 col-md-6">
-                <div class="card info-card sales-card">
+                <div class="card inventory-kpi-card is-indigo">
                     <div class="card-body">
-                        <h5 class="card-title">Products <span>| Total</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="inventory-kpi-head"><p class="inventory-section-kicker">Catalog</p><h5 class="card-title">Products</h5></div>
+                        <div class="d-flex align-items-center inventory-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center inventory-kpi-icon">
                                 <i class="bi bi-box-seam"></i>
                             </div>
                             <div class="ps-3">
@@ -657,11 +443,11 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-3 col-md-6">
-                <div class="card info-card revenue-card">
+                <div class="card inventory-kpi-card is-green">
                     <div class="card-body">
-                        <h5 class="card-title">Inventory Value <span>| Current</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="inventory-kpi-head"><p class="inventory-section-kicker">Value</p><h5 class="card-title">Inventory Value</h5></div>
+                        <div class="d-flex align-items-center inventory-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center inventory-kpi-icon">
                                 <i class="bi bi-cash-coin"></i>
                             </div>
                             <div class="ps-3">
@@ -674,11 +460,11 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-3 col-md-6">
-                <div class="card info-card customers-card">
+                <div class="card inventory-kpi-card is-amber">
                     <div class="card-body">
-                        <h5 class="card-title">Low Stock <span>| Needs Attention</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="inventory-kpi-head"><p class="inventory-section-kicker">Alert</p><h5 class="card-title">Low Stock</h5></div>
+                        <div class="d-flex align-items-center inventory-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center inventory-kpi-icon">
                                 <i class="bi bi-exclamation-triangle"></i>
                             </div>
                             <div class="ps-3">
@@ -691,11 +477,11 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-3 col-md-6">
-                <div class="card info-card customers-card">
+                <div class="card inventory-kpi-card is-slate">
                     <div class="card-body">
-                        <h5 class="card-title">Units On Hand <span>| Current</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="inventory-kpi-head"><p class="inventory-section-kicker">Volume</p><h5 class="card-title">Units On Hand</h5></div>
+                        <div class="d-flex align-items-center inventory-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center inventory-kpi-icon">
                                 <i class="bi bi-archive"></i>
                             </div>
                             <div class="ps-3">
@@ -708,10 +494,17 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-lg-8">
-                <div class="card recent-sales overflow-auto">
+                <div class="card recent-sales overflow-auto inventory-panel">
                     <div class="card-body">
-                        <h5 class="card-title">Inventory Table <span>| Filtered Results</span></h5>
-                        <table class="table table-borderless datatable">
+                        <div class="inventory-section-head">
+                            <div>
+                                <p class="inventory-section-kicker">Ledger</p>
+                                <h5 class="card-title">Inventory Table</h5>
+                                <p class="inventory-section-copy mb-0">Product-level stock, pricing, and current catalog state for the selected filters.</p>
+                            </div>
+                        </div>
+                        <div class="inventory-table-shell">
+                            <table class="table table-borderless datatable inventory-main-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Preview</th>
@@ -735,24 +528,23 @@ require __DIR__ . '/../components/sidebar.php';
                                         ?>
                                         <tr>
                                             <th scope="row">
-                                                <a href="#">
-                                                    <img src="<?= e((string) ($product['photo'] ?: '/inventory_system/assets/uploads/products/images.jpeg')) ?>" alt="" style="width:50px; height:50px; object-fit:cover; border-radius:6px;">
-                                                </a>
+                                                <img src="<?= e((string) ($product['photo'] ?: '/inventory_system/assets/img/card.jpg')) ?>" alt="" class="inventory-thumb">
                                             </th>
                                             <td>
-                                                <a href="#" class="text-primary fw-bold"><?= e((string) $product['product_name']) ?></a>
+                                                <span class="text-primary fw-bold"><?= e((string) $product['product_name']) ?></span>
                                                 <div class="small text-muted">#<?= (int) $product['product_id'] ?> | Reorder <?= number_format($reorderLevel) ?></div>
                                             </td>
                                             <td><?= e((string) ($product['category_name'] ?? 'Uncategorized')) ?></td>
                                             <td><?= e((string) ($product['sku'] ?? '-')) ?></td>
                                             <td><?= e(formatMoney((float) ($product['price'] ?? 0))) ?></td>
                                             <td><?= number_format($qty) ?></td>
-                                            <td><span class="badge <?= e(stockBadgeClass($status, $qty, $reorderLevel)) ?>"><?= e(ucwords(str_replace('_', ' ', $status))) ?></span></td>
+                                            <td><span class="badge inventory-pill <?= e(stockBadgeClass($status, $qty, $reorderLevel)) ?>"><?= e(ucwords(str_replace('_', ' ', $status))) ?></span></td>
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
 
                         <?php if ($totalPages > 1): ?>
                             <nav class="mt-3">
@@ -776,9 +568,14 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-lg-4">
-                <div class="card">
+                <div class="card inventory-panel">
                     <div class="card-body pb-0">
-                        <h5 class="card-title">Stock Health <span>| Current Mix</span></h5>
+                        <div class="inventory-section-head">
+                            <div>
+                                <p class="inventory-section-kicker">Mix</p>
+                                <h5 class="card-title">Stock Health</h5>
+                            </div>
+                        </div>
                         <div id="stockHealthChart" style="min-height: 320px;" class="echart"></div>
 
                         <script>

@@ -54,7 +54,7 @@ try {
             sprintf('%s was voided and %d piece(s) were restored.', $result['transaction_no'], $result['restored_pieces']),
             'bi-arrow-counterclockwise',
             'text-warning',
-            '/inventory_system/reports/sales_report.php'
+            '/inventory_system/reports/sales_report.php?sale_id=' . (int) $result['sale_id']
         );
 
         if ((int) $result['cashier_id'] > 0 && (int) $result['cashier_id'] !== $adminId) {
@@ -67,7 +67,7 @@ try {
                 sprintf('%s from your sales was voided by admin.', $result['transaction_no']),
                 'bi-arrow-counterclockwise',
                 'text-warning',
-                '/inventory_system/reports/sales_report.php'
+                '/inventory_system/reports/sales_report.php?sale_id=' . (int) $result['sale_id']
             );
         }
     } catch (Throwable $notificationError) {

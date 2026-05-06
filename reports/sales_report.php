@@ -6,7 +6,7 @@ require_once __DIR__ . '/../middleware/Middleware.php';
 require_once __DIR__ . '/../controllers/SaleController.php';
 
 Middleware::auth()->role(['admin']);
-SaleController::ensureVoidSchema($conn);
+SaleController::ensureReturnSchema($conn);
 
 function e(?string $value): string
 {
@@ -56,6 +56,17 @@ function paymentBadgeClass(string $paymentMethod): string
         'maya' => 'bg-warning text-dark',
         default => 'bg-secondary',
         };
+}
+
+function saleStatusBadgeClass(string $status): string
+{
+    return match (strtolower(trim($status))) {
+        'completed' => 'bg-success',
+        'partial_returned' => 'bg-warning text-dark',
+        'returned' => 'bg-secondary',
+        'voided' => 'bg-danger',
+        default => 'bg-light text-dark',
+    };
 }
 
 function formatTransactionNumber(int $saleId, string $saleDate): string
@@ -185,7 +196,7 @@ try {
     $summary = $summaryStmt->fetch(PDO::FETCH_ASSOC) ?: $summary;
 
     $itemsSoldSql = "
-        SELECT IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0)
+        SELECT IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_multiplier, 1)), 0)
         FROM sales s
         INNER JOIN sale_items si ON s.sale_id = si.sale_id
         {$salesWhereSql}
@@ -231,8 +242,8 @@ try {
             u.first_name,
             u.last_name,
             u.username,
-            COUNT(si.sale_item_id) AS item_lines,
-            IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
+            SUM(CASE WHEN GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) > 0 THEN 1 ELSE 0 END) AS item_lines,
+            IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
         FROM sales s
         LEFT JOIN users u ON s.user_id = u.user_id
         LEFT JOIN sale_items si ON s.sale_id = si.sale_id
@@ -276,8 +287,8 @@ try {
             p.product_name,
             p.photo,
             p.price,
-            IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_sold,
-            IFNULL(SUM(si.quantity * si.unit_price), 0) AS total_revenue
+            IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_multiplier, 1)), 0) AS total_sold,
+            IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_price, 0)), 0) AS total_revenue
         FROM sales s
         INNER JOIN sale_items si ON s.sale_id = si.sale_id
         INNER JOIN products p ON si.product_id = p.product_id
@@ -306,7 +317,7 @@ try {
         FROM sales s
         LEFT JOIN users u ON s.user_id = u.user_id
         LEFT JOIN (
-            SELECT sale_id, SUM(quantity * COALESCE(unit_multiplier, 1)) AS total_items
+            SELECT sale_id, SUM(GREATEST(COALESCE(quantity, 0) - COALESCE(returned_quantity, 0), 0) * COALESCE(unit_multiplier, 1)) AS total_items
             FROM sale_items
             GROUP BY sale_id
         ) items ON items.sale_id = s.sale_id
@@ -333,7 +344,7 @@ try {
         LEFT JOIN (
             SELECT
                 si.product_id,
-                SUM(si.quantity * COALESCE(si.unit_multiplier, 1)) AS total_sold
+                SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_multiplier, 1)) AS total_sold
             FROM sales s
             INNER JOIN sale_items si ON s.sale_id = si.sale_id
             {$salesWhereSql}
@@ -354,8 +365,8 @@ try {
         SELECT
             COALESCE(c.category_id, 0) AS category_id,
             COALESCE(c.category_name, 'Uncategorized') AS category_name,
-            IFNULL(SUM(si.quantity * COALESCE(si.unit_price, 0)), 0) AS revenue_total,
-            IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
+            IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_price, 0)), 0) AS revenue_total,
+            IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
         FROM sales s
         INNER JOIN sale_items si ON s.sale_id = si.sale_id
         INNER JOIN products p ON si.product_id = p.product_id
@@ -407,8 +418,8 @@ try {
                 u.first_name,
                 u.last_name,
                 u.username,
-                COUNT(si.sale_item_id) AS item_lines,
-                IFNULL(SUM(si.quantity * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
+                SUM(CASE WHEN GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) > 0 THEN 1 ELSE 0 END) AS item_lines,
+                IFNULL(SUM(GREATEST(COALESCE(si.quantity, 0) - COALESCE(si.returned_quantity, 0), 0) * COALESCE(si.unit_multiplier, 1)), 0) AS total_items
             FROM sales s
             LEFT JOIN users u ON s.user_id = u.user_id
             LEFT JOIN sale_items si ON s.sale_id = si.sale_id
@@ -474,39 +485,63 @@ require __DIR__ . '/../components/header.php';
 require __DIR__ . '/../components/sidebar.php';
 ?>
 
-<main id="main" class="main">
-    <div class="pagetitle">
-        <h1>Sales Report</h1>
-        <nav>
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/inventory_system/index.php">Home</a></li>
-                <li class="breadcrumb-item active">Sales Report</li>
-            </ol>
-        </nav>
+<main id="main" class="main sales-report-page">
+    <div class="sales-report-hero">
+        <div class="sales-report-hero-copy">
+            <p class="sales-report-eyebrow">Revenue Intelligence</p>
+            <h1 class="sales-report-title">Sales Report</h1>
+            <p class="sales-report-copy">
+                Review revenue, cashier output, payment mix, and transaction history from one reporting workspace.
+            </p>
+            <nav>
+                <ol class="breadcrumb">
+                    <li class="breadcrumb-item"><a href="/inventory_system/index.php">Home</a></li>
+                    <li class="breadcrumb-item active">Sales Report</li>
+                </ol>
+            </nav>
+        </div>
+        <div class="sales-report-hero-panel">
+            <div class="sales-report-hero-stat">
+                <span class="sales-report-hero-label">Filtered sales</span>
+                <strong><?= number_format((int) ($summary['sale_count'] ?? 0)) ?></strong>
+                <span class="sales-report-hero-note">transactions in the current range</span>
+            </div>
+            <div class="sales-report-hero-stat">
+                <span class="sales-report-hero-label">Revenue snapshot</span>
+                <strong><?= e(formatMoney((float) ($summary['total_revenue'] ?? 0))) ?></strong>
+                <span class="sales-report-hero-note">gross sales including VAT</span>
+            </div>
+        </div>
     </div>
 
     <section class="section dashboard">
         <div class="row">
             <div class="col-12">
-                <div class="card">
+                <div class="card sales-report-filter-card">
                     <div class="card-body">
-                        <h5 class="card-title">Filters <span>| Sales Range</span></h5>
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Filter</p>
+                                <h5 class="card-title">Sales Range</h5>
+                                <p class="sales-report-section-copy mb-0">Slice the report by date, payment method, cashier, category, and row size.</p>
+                            </div>
+                        </div>
 
                         <?php if ($errorMsg !== null): ?>
-                            <div class="alert alert-danger"><?= e($errorMsg) ?></div>
+                            <div class="alert alert-danger sales-report-inline-alert"><?= e($errorMsg) ?></div>
                         <?php endif; ?>
 
-                        <form method="GET" class="row g-3">
+                        <form method="GET" class="row g-3 sales-report-filter-form">
                             <div class="col-md-2">
-                                <label class="form-label">From</label>
+                                <label class="form-label sales-report-label">From</label>
                                 <input type="date" name="date_from" class="form-control" value="<?= e($dateFromRaw) ?>">
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">To</label>
+                                <label class="form-label sales-report-label">To</label>
                                 <input type="date" name="date_to" class="form-control" value="<?= e($dateToRaw) ?>">
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">Payment Method</label>
+                                <label class="form-label sales-report-label">Payment Method</label>
                                 <select name="payment_method" class="form-select">
                                     <option value="">All payment methods</option>
                                     <?php foreach ($paymentOptions as $option): ?>
@@ -517,7 +552,7 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-3">
-                                <label class="form-label">Cashier</label>
+                                <label class="form-label sales-report-label">Cashier</label>
                                 <select name="cashier_id" class="form-select">
                                     <option value="0">All cashiers</option>
                                     <?php foreach ($cashiers as $cashier): ?>
@@ -534,7 +569,7 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">Category</label>
+                                <label class="form-label sales-report-label">Category</label>
                                 <select name="category_id" class="form-select">
                                     <option value="0">All categories</option>
                                     <?php foreach ($categories as $category): ?>
@@ -545,7 +580,7 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-1">
-                                <label class="form-label">Rows</label>
+                                <label class="form-label sales-report-label">Rows</label>
                                 <select name="per_page" class="form-select">
                                     <?php foreach ($perPageOptions as $size): ?>
                                         <option value="<?= $size ?>" <?= $perPage === $size ? 'selected' : '' ?>><?= $size ?></option>
@@ -553,11 +588,11 @@ require __DIR__ . '/../components/sidebar.php';
                                 </select>
                             </div>
                             <div class="col-md-1 d-flex align-items-end">
-                                <button type="submit" class="btn btn-primary w-100">Apply</button>
+                                <button type="submit" class="btn btn-primary w-100 sales-report-apply-btn">Apply</button>
                             </div>
-                            <div class="col-12 d-flex gap-2">
-                                <a href="<?= e(buildQueryUrl(['export' => 'csv', 'page' => 1])) ?>" class="btn btn-success btn-sm">Export CSV</a>
-                                <a href="/inventory_system/reports/sales_report.php" class="btn btn-outline-secondary btn-sm">Reset</a>
+                            <div class="col-12 d-flex gap-2 sales-report-filter-actions">
+                                <a href="<?= e(buildQueryUrl(['export' => 'csv', 'page' => 1])) ?>" class="btn btn-success btn-sm sales-report-soft-btn">Export CSV</a>
+                                <a href="/inventory_system/reports/sales_report.php" class="btn btn-outline-secondary btn-sm sales-report-soft-btn">Reset</a>
                             </div>
                         </form>
                     </div>
@@ -565,11 +600,16 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-4 col-md-6">
-                <div class="card info-card sales-card">
+                <div class="card sales-report-kpi-card is-indigo">
                     <div class="card-body">
-                        <h5 class="card-title">Transactions <span>| Filtered</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="sales-report-kpi-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Transactions</p>
+                                <h5 class="card-title">Filtered Sales</h5>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center sales-report-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center sales-report-kpi-icon">
                                 <i class="bi bi-receipt"></i>
                             </div>
                             <div class="ps-3">
@@ -582,11 +622,16 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-4 col-md-6">
-                <div class="card info-card revenue-card">
+                <div class="card sales-report-kpi-card is-green">
                     <div class="card-body">
-                        <h5 class="card-title">Gross Revenue <span>| Filtered</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="sales-report-kpi-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Revenue</p>
+                                <h5 class="card-title">Gross Revenue</h5>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center sales-report-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center sales-report-kpi-icon">
                                 <i class="bi bi-cash-stack"></i>
                             </div>
                             <div class="ps-3">
@@ -599,11 +644,16 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-4 col-md-6">
-                <div class="card info-card customers-card">
+                <div class="card sales-report-kpi-card is-sky">
                     <div class="card-body">
-                        <h5 class="card-title">Net Sales <span>| Before VAT</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="sales-report-kpi-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Net</p>
+                                <h5 class="card-title">Net Sales</h5>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center sales-report-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center sales-report-kpi-icon">
                                 <i class="bi bi-graph-up-arrow"></i>
                             </div>
                             <div class="ps-3">
@@ -616,11 +666,16 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-4 col-md-6">
-                <div class="card info-card customers-card">
+                <div class="card sales-report-kpi-card is-amber">
                     <div class="card-body">
-                        <h5 class="card-title">Discounts Given <span>| Filtered</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="sales-report-kpi-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Discounts</p>
+                                <h5 class="card-title">Discounts Given</h5>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center sales-report-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center sales-report-kpi-icon">
                                 <i class="bi bi-percent"></i>
                             </div>
                             <div class="ps-3">
@@ -633,11 +688,16 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-4 col-md-6">
-                <div class="card info-card customers-card">
+                <div class="card sales-report-kpi-card is-violet">
                     <div class="card-body">
-                        <h5 class="card-title">VAT Collected <span>| Filtered</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="sales-report-kpi-head">
+                            <div>
+                                <p class="sales-report-section-kicker">VAT</p>
+                                <h5 class="card-title">VAT Collected</h5>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center sales-report-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center sales-report-kpi-icon">
                                 <i class="bi bi-receipt-cutoff"></i>
                             </div>
                             <div class="ps-3">
@@ -650,11 +710,16 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-xxl-4 col-md-6">
-                <div class="card info-card customers-card">
+                <div class="card sales-report-kpi-card is-slate">
                     <div class="card-body">
-                        <h5 class="card-title">Items Sold <span>| Filtered</span></h5>
-                        <div class="d-flex align-items-center">
-                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center">
+                        <div class="sales-report-kpi-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Volume</p>
+                                <h5 class="card-title">Items Sold</h5>
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center sales-report-kpi-body">
+                            <div class="card-icon rounded-circle d-flex align-items-center justify-content-center sales-report-kpi-icon">
                                 <i class="bi bi-box-seam"></i>
                             </div>
                             <div class="ps-3">
@@ -667,9 +732,15 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-lg-8">
-                <div class="card">
+                <div class="card sales-report-panel">
                     <div class="card-body">
-                        <h5 class="card-title">Sales Trend <span>| Daily</span></h5>
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Trend</p>
+                                <h5 class="card-title">Sales Trend</h5>
+                                <p class="sales-report-section-copy mb-0">Daily view of transaction count and gross revenue for the active filter range.</p>
+                            </div>
+                        </div>
                         <div id="salesReportChart"></div>
 
                         <script>
@@ -703,20 +774,26 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card sales-report-panel">
                     <div class="card-body">
-                        <h5 class="card-title">Revenue by Category <span>| Filtered</span></h5>
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Mix</p>
+                                <h5 class="card-title">Revenue by Category</h5>
+                                <p class="sales-report-section-copy mb-0">See which product categories drive the highest share of sales.</p>
+                            </div>
+                        </div>
 
                         <?php if (empty($categoryRevenueBreakdown)): ?>
-                            <div class="alert alert-light border text-muted mb-0">
+                            <div class="alert alert-light border text-muted mb-0 sales-report-empty-state">
                                 No category revenue found for the selected filters.
                             </div>
                         <?php else: ?>
-                            <div class="text-center mb-4">
+                            <div class="text-center mb-4 sales-report-chart-shell">
                                 <div id="salesCategoryChart" style="min-height: 360px; max-width: 420px; margin: 0 auto;" class="echart"></div>
                             </div>
 
-                            <div class="d-flex flex-column gap-3">
+                            <div class="d-flex flex-column gap-3 sales-report-breakdown-list">
                                 <?php foreach ($categoryRevenueBreakdown as $index => $row): ?>
                                     <?php
                                     $categoryName = (string) ($row['category_name'] ?? 'Uncategorized');
@@ -725,7 +802,7 @@ require __DIR__ . '/../components/sidebar.php';
                                     $colorPalette = ['#4154f1', '#2eca6a', '#f0ad4e', '#3f8efc', '#6f42c1', '#e83e8c'];
                                     $dotColor = $colorPalette[$index % count($colorPalette)];
                                     ?>
-                                    <div class="d-flex justify-content-between align-items-center gap-3">
+                                    <div class="d-flex justify-content-between align-items-center gap-3 sales-report-breakdown-row">
                                         <div class="d-flex align-items-center gap-2">
                                             <span class="rounded-circle d-inline-block" style="width:10px;height:10px;background:<?= e($dotColor) ?>;"></span>
                                             <div>
@@ -815,10 +892,17 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 </div>
 
-                <div class="card recent-sales overflow-auto">
+                <div class="card recent-sales overflow-auto sales-report-panel">
                     <div class="card-body">
-                        <h5 class="card-title">Detailed Sales <span>| Filtered Results</span></h5>
-                        <table class="table table-borderless datatable">
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Ledger</p>
+                                <h5 class="card-title">Detailed Sales</h5>
+                                <p class="sales-report-section-copy mb-0">Open a transaction to review line items, print receipts, return items, or void the sale.</p>
+                            </div>
+                        </div>
+                        <div class="sales-report-table-wrap">
+                            <table class="table table-borderless datatable sales-report-table">
                             <thead>
                                 <tr>
                                     <th scope="col">#</th>
@@ -828,13 +912,14 @@ require __DIR__ . '/../components/sidebar.php';
                                     <th scope="col">VAT</th>
                                     <th scope="col">Total</th>
                                     <th scope="col">Payment</th>
+                                    <th scope="col">Status</th>
                                     <th scope="col">Date</th>
                                     <th scope="col">Action</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php if (empty($sales)): ?>
-                                    <tr><td colspan="9" class="text-center text-muted py-3">No sales found for this filter.</td></tr>
+                                    <tr><td colspan="10" class="text-center text-muted py-3">No sales found for this filter.</td></tr>
                                 <?php else: ?>
                                     <?php foreach ($sales as $sale): ?>
                                         <?php
@@ -863,23 +948,34 @@ require __DIR__ . '/../components/sidebar.php';
                                             <td><?= e(formatMoney((float) ($sale['discount'] ?? 0))) ?></td>
                                             <td><?= e(formatMoney((float) ($sale['tax'] ?? 0))) ?></td>
                                             <td><?= e(formatMoney((float) $sale['total_amount'])) ?></td>
-                                            <td><span class="badge <?= e(paymentBadgeClass((string) ($sale['payment_method'] ?? ''))) ?>"><?= e(ucfirst((string) ($sale['payment_method'] ?? 'N/A'))) ?></span></td>
+                                            <td><span class="badge sales-report-pill <?= e(paymentBadgeClass((string) ($sale['payment_method'] ?? ''))) ?>"><?= e(ucfirst((string) ($sale['payment_method'] ?? 'N/A'))) ?></span></td>
+                                            <td><span class="badge sales-report-pill <?= e(saleStatusBadgeClass((string) ($sale['status'] ?? 'completed'))) ?>"><?= e(ucwords(str_replace('_', ' ', (string) ($sale['status'] ?? 'completed')))) ?></span></td>
                                             <td class="text-muted small"><?= e(date('M d, Y h:i A', strtotime((string) $sale['sale_date']))) ?></td>
                                             <td>
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm btn-outline-danger void-sale-btn"
-                                                    data-void-sale-id="<?= (int) $sale['sale_id'] ?>"
-                                                    data-void-sale-no="<?= e(formatTransactionNumber((int) $sale['sale_id'], (string) $sale['sale_date'])) ?>"
-                                                >
-                                                    Void
-                                                </button>
+                                                <div class="sales-report-action-group">
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-sm btn-outline-secondary me-1 sale-print-btn"
+                                                        data-sale-detail-id="<?= (int) $sale['sale_id'] ?>"
+                                                    >
+                                                        <i class="bi bi-printer me-1"></i>Print
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-sm btn-outline-danger void-sale-btn"
+                                                        data-void-sale-id="<?= (int) $sale['sale_id'] ?>"
+                                                        data-void-sale-no="<?= e(formatTransactionNumber((int) $sale['sale_id'], (string) $sale['sale_date'])) ?>"
+                                                    >
+                                                        <i class="bi bi-x-circle me-1"></i>Void
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
 
                         
                     </div>
@@ -887,9 +983,14 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
 
             <div class="col-lg-4">
-                <div class="card">
+                <div class="card sales-report-panel">
                     <div class="card-body pb-0">
-                        <h5 class="card-title">Payment Methods <span>| Breakdown</span></h5>
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Payments</p>
+                                <h5 class="card-title">Payment Methods</h5>
+                            </div>
+                        </div>
                         <div id="salesPaymentChart" style="min-height: 320px;" class="echart"></div>
 
                         <script>
@@ -921,8 +1022,8 @@ require __DIR__ . '/../components/sidebar.php';
                         </script>
 
                         <?php if (!empty($paymentBreakdown)): ?>
-                            <div class="table-responsive mt-3">
-                                <table class="table table-sm align-middle mb-3">
+                            <div class="table-responsive mt-3 sales-report-mini-table-wrap">
+                                <table class="table table-sm align-middle mb-3 sales-report-mini-table">
                                     <thead>
                                         <tr>
                                             <th>Method</th>
@@ -945,11 +1046,16 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card sales-report-panel">
                     <div class="card-body pb-0">
-                        <h5 class="card-title">Cashier Performance <span>| Top performers</span></h5>
-                        <div class="table-responsive">
-                            <table class="table table-sm align-middle mb-3">
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Cashiers</p>
+                                <h5 class="card-title">Cashier Performance</h5>
+                            </div>
+                        </div>
+                        <div class="table-responsive sales-report-mini-table-wrap">
+                            <table class="table table-sm align-middle mb-3 sales-report-mini-table">
                                 <thead>
                                     <tr>
                                         <th>Cashier</th>
@@ -984,10 +1090,16 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 </div>
 
-                <div class="card top-selling overflow-auto">
+                <div class="card top-selling overflow-auto sales-report-panel">
                     <div class="card-body pb-0">
-                        <h5 class="card-title">Top Selling <span>| Top 5</span></h5>
-                        <table class="table table-borderless">
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Products</p>
+                                <h5 class="card-title">Top Selling</h5>
+                            </div>
+                        </div>
+                        <div class="sales-report-mini-table-wrap">
+                            <table class="table table-borderless sales-report-mini-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Preview</th>
@@ -1004,11 +1116,9 @@ require __DIR__ . '/../components/sidebar.php';
                                     <?php foreach ($topProducts as $product): ?>
                                         <tr>
                                             <th scope="row">
-                                                <a href="#">
-                                                    <img src="<?= e((string) ($product['photo'] ?: '/inventory_system/assets/uploads/products/images.jpeg')) ?>" alt="" style="width:50px; height:50px; object-fit:cover; border-radius:6px;">
-                                                </a>
+                                                <img src="<?= e((string) ($product['photo'] ?: '/inventory_system/assets/img/card.jpg')) ?>" alt="" class="sales-report-product-thumb">
                                             </th>
-                                            <td><a href="#" class="text-primary fw-bold"><?= e((string) $product['product_name']) ?></a></td>
+                                            <td><span class="text-primary fw-bold"><?= e((string) $product['product_name']) ?></span></td>
                                             <td><?= e(formatMoney((float) ($product['price'] ?? 0))) ?></td>
                                             <td class="fw-bold"><?= number_format((int) ($product['total_sold'] ?? 0)) ?></td>
                                             <td><?= e(formatMoney((float) ($product['total_revenue'] ?? 0))) ?></td>
@@ -1016,14 +1126,21 @@ require __DIR__ . '/../components/sidebar.php';
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
-                <div class="card overflow-auto">
+                <div class="card overflow-auto sales-report-panel">
                     <div class="card-body pb-0">
-                        <h5 class="card-title">Low Movement <span>| Filtered window</span></h5>
-                        <table class="table table-borderless">
+                        <div class="sales-report-section-head">
+                            <div>
+                                <p class="sales-report-section-kicker">Watchlist</p>
+                                <h5 class="card-title">Low Movement</h5>
+                            </div>
+                        </div>
+                        <div class="sales-report-mini-table-wrap">
+                            <table class="table table-borderless sales-report-mini-table">
                             <thead>
                                 <tr>
                                     <th scope="col">Product</th>
@@ -1047,7 +1164,8 @@ require __DIR__ . '/../components/sidebar.php';
                                     <?php endforeach; ?>
                                 <?php endif; ?>
                             </tbody>
-                        </table>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1074,6 +1192,67 @@ require __DIR__ . '/../components/sidebar.php';
         </div>
     </div>
 </div>
+
+<div class="modal fade sale-action-modal" id="saleActionModal" tabindex="-1" aria-labelledby="saleActionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <p class="sale-action-kicker mb-1" id="saleActionKicker">Inventory action</p>
+                    <h5 class="modal-title" id="saleActionModalLabel">Process transaction action</h5>
+                    <p class="sale-action-subtitle mb-0" id="saleActionSubtitle">Review the action details before confirming.</p>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="saleActionForm">
+                <div class="modal-body">
+                    <div class="sale-action-hero mb-3">
+                        <div class="sale-action-icon" id="saleActionIcon">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </div>
+                        <div class="sale-action-copy">
+                            <strong id="saleActionSubject">Transaction</strong>
+                            <span id="saleActionMeta">Choose what to do with this sale.</span>
+                        </div>
+                    </div>
+
+                    <div class="sale-action-summary mb-3">
+                        <div>
+                            <span>Transaction</span>
+                            <strong id="saleActionSaleNo">-</strong>
+                        </div>
+                        <div id="saleActionQuantityCard">
+                            <span>Available</span>
+                            <strong id="saleActionAvailableQty">-</strong>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-danger d-none" id="saleActionError" role="alert"></div>
+
+                    <div class="sale-action-field mb-3 d-none" id="saleActionQuantityWrap">
+                        <label for="saleActionQuantity" class="form-label">Quantity to return</label>
+                        <input type="number" min="1" step="1" class="form-control" id="saleActionQuantity" name="quantity">
+                        <small class="text-muted">Only the selected quantity will be restored to stock.</small>
+                    </div>
+
+                    <div class="sale-action-field">
+                        <label for="saleActionReason" class="form-label">Reason</label>
+                        <textarea class="form-control" id="saleActionReason" name="reason" rows="4" placeholder="Add a clear reason for this action." required></textarea>
+                        <small class="text-muted">This reason will be stored in the audit trail.</small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-light sale-action-cancel" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary sale-action-submit" id="saleActionSubmitBtn">
+                        <span class="sale-action-submit-label">Confirm</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed top-0 end-0 p-3 sale-toast-stack" id="saleToastStack"></div>
 
 <?php require __DIR__ . '/../components/footer.php'; ?>
 <?php require __DIR__ . '/../components/js_script.php'; ?>

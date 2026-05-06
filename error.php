@@ -3,6 +3,10 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/config/config.php'; // adjust if needed
 
+if (session_status() === PHP_SESSION_NONE && php_sapi_name() !== 'cli') {
+    session_start();
+}
+
 $error_code = 0;
 
 if (isset($_SESSION['error_code'])) {

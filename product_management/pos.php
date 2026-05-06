@@ -9,8 +9,20 @@ require_once __DIR__ . '/../controllers/CategoryController.php';
 require_once __DIR__ . '/../controllers/SubcategoryController.php';
 require_once __DIR__ . '/../controllers/ProductController.php';
 require_once __DIR__ . '/../controllers/PosConfigController.php';
+require_once __DIR__ . '/../controllers/ShiftClosingController.php';
 
 Middleware::auth()->role(['admin','cashier']);
+
+$sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
+$isAdmin = strtolower((string) ($_SESSION['role'] ?? '')) === 'admin';
+
+if (!$isAdmin && !ShiftClosingController::hasOpenShiftForToday($conn, $sessionUserId)) {
+    $_SESSION['shift_closing_flash'] = [
+        'error' => 'Start your shift first before opening POS.',
+    ];
+    header('Location: /inventory_system/shift_closing.php');
+    exit;
+}
 
 $categories = CategoryController::all($conn, 'active');
 $subcategories = SubcategoryController::all($conn, null, 'active');
@@ -76,7 +88,7 @@ require __DIR__ . '/../components/header.php';
 require __DIR__ . '/../components/sidebar.php';
 ?>
 
-<main id="main" class="main">
+<main id="main" class="main pos-page">
 <div class="pos-wrapper">
 
   <!-- ============================================================
@@ -93,10 +105,15 @@ require __DIR__ . '/../components/sidebar.php';
 
       <div class="search-box">
         <i class="bi bi-search search-icon"></i>
-        <input type="text" id="productSearch" placeholder="Search products…">
+        <input type="text" id="productSearch" placeholder="Search products">
       </div>
 
-      <div class="time-pill" id="timePill">Loading…</div>
+      <div class="search-box">
+        <i class="bi bi-upc-scan search-icon"></i>
+        <input type="text" id="barcodeScanInput" placeholder="Scan barcode / SKU and press Enter">
+      </div>
+
+      <div class="time-pill" id="timePill">Loading...</div>
     </div>
 
     <div class="pos-browser">
@@ -180,13 +197,14 @@ require __DIR__ . '/../components/sidebar.php';
           <div class="product-card <?= $stockClass ?>"
                data-id="<?= $p['product_id'] ?>"
                data-name="<?= htmlspecialchars($p['product_name']) ?>"
+               data-sku="<?= htmlspecialchars((string) ($p['sku'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
                data-price="<?= $regularPrice ?>"
                data-box-price="<?= $boxPrice !== null ? $boxPrice : '' ?>"
                data-case-price="<?= $casePrice !== null ? $casePrice : '' ?>"
                data-piece-discount="<?= $pieceDiscount ?>"
                data-box-discount="<?= $boxDiscount ?>"
                data-case-discount="<?= $caseDiscount ?>"
-               data-photo="<?= htmlspecialchars((string) ($p['photo'] ?: '/assets/uploads/products/images.jpeg'), ENT_QUOTES, 'UTF-8') ?>"
+               data-photo="<?= htmlspecialchars((string) ($p['photo'] ?: '/inventory_system/assets/img/card.jpg'), ENT_QUOTES, 'UTF-8') ?>"
                data-vat="<?= $p['vatable'] ?>"
                data-category="<?= $p['category_id'] ?>"
                data-category-name="<?= htmlspecialchars((string) ($p['category_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>"
@@ -207,7 +225,7 @@ require __DIR__ . '/../components/sidebar.php';
             <?php endif; ?>
 
             <div class="card-media">
-              <img src="<?= $p['photo'] ?: '/assets/uploads/products/images.jpeg' ?>"
+              <img src="<?= $p['photo'] ?: '/inventory_system/assets/img/card.jpg' ?>"
                    alt="<?= htmlspecialchars($p['product_name']) ?>">
             </div>
             <div class="card-body">
@@ -501,4 +519,5 @@ window.POS_SUBCATEGORIES = <?= json_encode(array_values(array_map(static functio
 <script src="/inventory_system/assets/js/pos.js"></script>
 </body>
 </html>
+
 

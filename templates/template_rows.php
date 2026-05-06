@@ -20,7 +20,7 @@
 <tr id="productRow<?= $product['product_id'] ?>">
     <td>#</td>
     <td class="text-center">
-        <img src="<?= !empty($product['photo']) ? $product['photo'] : '/inventory_system/assets/uploads/products/images.jpeg' ?>" 
+        <img src="<?= !empty($product['photo']) ? $product['photo'] : '/inventory_system/assets/img/card.jpg' ?>" 
              style="width:50px;height:50px;object-fit:cover;">
     </td>
     <td><?= htmlspecialchars($product['product_name']) ?></td>
@@ -49,7 +49,7 @@
     data-sale_price="<?= $product['sale_price'] ?>"
     data-vatable="<?= $product['vatable'] ?>"
     data-reorder="<?= $product['reorder_level'] ?>"
-    data-photo="<?= !empty($product['photo']) ? $product['photo'] : '/inventory_system/assets/uploads/products/images.jpeg' ?>"
+    data-photo="<?= !empty($product['photo']) ? $product['photo'] : '/inventory_system/assets/img/card.jpg' ?>"
     data-bs-toggle="modal"
     data-bs-target="#editProductModal">
     <i class="bi bi-pencil-square"></i>

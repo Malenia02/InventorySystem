@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/NotificationController.php';
+require_once __DIR__ . '/StaffController.php';
 
 final class AuthController
 {
@@ -10,7 +11,7 @@ final class AuthController
     private const LOGIN_ATTEMPTS_TABLE = 'login_attempts';
 
     private const MAX_ATTEMPTS_COMBO = 5;
-    private const MAX_ATTEMPTS_USERNAME = 8;
+      private const MAX_ATTEMPTS_USERNAME = 8;
     private const MAX_ATTEMPTS_IP = 15;
     private const CAPTCHA_THRESHOLD_COMBO = 3;
     private const CAPTCHA_THRESHOLD_USERNAME = 5;
@@ -21,6 +22,8 @@ final class AuthController
     private const REMEMBER_COOKIE = 'remember_me';
     private const FAILURE_DELAY_MIN_US = 250000;
     private const FAILURE_DELAY_MAX_US = 450000;
+    private const SESSION_ROTATE_INTERVAL = 900;
+    private const STEP_UP_WINDOW = 900;
 
     public static function generateCsrfToken(): string
     {
@@ -34,6 +37,33 @@ final class AuthController
         }
 
         return (string) $_SESSION['csrf_token'];
+    }
+
+    public static function configureSessionCookie(): void
+    {
+        if (php_sapi_name() === 'cli' || session_status() !== PHP_SESSION_NONE) {
+            return;
+        }
+
+        $isHttps = function_exists('app_is_https')
+            ? app_is_https()
+            : (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+
+        ini_set('session.use_strict_mode', '1');
+        ini_set('session.use_only_cookies', '1');
+        ini_set('session.cookie_httponly', '1');
+        ini_set('session.cookie_secure', $isHttps ? '1' : '0');
+        ini_set('session.cookie_samesite', 'Lax');
+
+        session_name('INVSYSSESSID');
+        session_set_cookie_params([
+            'lifetime' => 0,
+            'path' => '/',
+            'domain' => '',
+            'secure' => $isHttps,
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
     }
 
     public static function rotateCsrfToken(): string
@@ -211,8 +241,9 @@ final class AuthController
             $_SESSION['role'] = (string) $user['role'];
             $_SESSION['first_name'] = (string) ($user['first_name'] ?? '');
             $_SESSION['last_name'] = (string) ($user['last_name'] ?? '');
-            $_SESSION['photo'] = (string) ($user['photo'] ?? '');
+            $_SESSION['photo'] = StaffController::normalizePhotoUrl((string) ($user['photo'] ?? ''));
             $_SESSION['last_activity'] = time();
+            self::bindSessionContext();
 
             self::clearLoginAttempts($conn, $normalizedUsername, $ip);
             self::clearCaptchaChallenge();
@@ -247,6 +278,90 @@ final class AuthController
                 'message' => 'A server error occurred. Please try again later.',
             ];
         }
+    }
+
+    public static function verifyCurrentUserPassword(PDO $conn, int $userId, string $password): bool
+    {
+        if ($userId <= 0 || trim($password) === '') {
+            return false;
+        }
+
+        $stmt = $conn->prepare("
+            SELECT password, status
+            FROM " . self::TABLE . "
+            WHERE user_id = :user_id
+            LIMIT 1
+        ");
+        $stmt->execute([':user_id' => $userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$user || ($user['status'] ?? 'inactive') !== 'active') {
+            return false;
+        }
+
+        return password_verify($password, (string) $user['password']);
+    }
+
+    public static function bindSessionContext(): void
+    {
+        $_SESSION['session_fingerprint'] = self::buildSessionFingerprint();
+        $_SESSION['session_fingerprint_set_at'] = time();
+        $_SESSION['session_last_rotated_at'] = time();
+    }
+
+    public static function validateSessionContext(PDO $conn, int $userId): bool
+    {
+        $storedFingerprint = (string) ($_SESSION['session_fingerprint'] ?? '');
+        $currentFingerprint = self::buildSessionFingerprint();
+
+        if ($storedFingerprint === '') {
+            self::bindSessionContext();
+            return true;
+        }
+
+        if (!hash_equals($storedFingerprint, $currentFingerprint)) {
+            self::recordSuspiciousSession($conn, $userId, 'session_fingerprint_mismatch');
+            return false;
+        }
+
+        return true;
+    }
+
+    public static function rotateSessionIdIfDue(): void
+    {
+        $lastRotatedAt = (int) ($_SESSION['session_last_rotated_at'] ?? 0);
+        if ($lastRotatedAt <= 0 || (time() - $lastRotatedAt) >= self::SESSION_ROTATE_INTERVAL) {
+            session_regenerate_id(true);
+            $_SESSION['session_last_rotated_at'] = time();
+        }
+    }
+
+    public static function markStepUpVerified(?int $seconds = null): void
+    {
+        $ttl = $seconds !== null && $seconds > 0 ? $seconds : self::STEP_UP_WINDOW;
+        session_regenerate_id(true);
+        $_SESSION['step_up_verified_at'] = time();
+        $_SESSION['step_up_expires_at'] = time() + $ttl;
+        $_SESSION['session_last_rotated_at'] = time();
+    }
+
+    public static function hasValidStepUp(): bool
+    {
+        $expiresAt = (int) ($_SESSION['step_up_expires_at'] ?? 0);
+        return $expiresAt > time();
+    }
+
+    public static function requireStepUpOrPassword(PDO $conn, int $userId, string $password): void
+    {
+        if (self::hasValidStepUp()) {
+            return;
+        }
+
+        if (!self::verifyCurrentUserPassword($conn, $userId, $password)) {
+            throw new RuntimeException('Step-up authentication required. Please confirm your password.');
+        }
+
+        self::markStepUpVerified();
     }
 
     public static function getLoginSecurityState(PDO $conn, string $username = ''): array
@@ -382,8 +497,9 @@ final class AuthController
         $_SESSION['role'] = (string) $row['role'];
         $_SESSION['first_name'] = (string) ($row['first_name'] ?? '');
         $_SESSION['last_name'] = (string) ($row['last_name'] ?? '');
-        $_SESSION['photo'] = (string) ($row['photo'] ?? '');
+        $_SESSION['photo'] = StaffController::normalizePhotoUrl((string) ($row['photo'] ?? ''));
         $_SESSION['last_activity'] = time();
+        self::bindSessionContext();
 
         self::rotateCsrfToken();
 
@@ -984,5 +1100,79 @@ final class AuthController
     private static function applyFailureDelay(): void
     {
         usleep(random_int(self::FAILURE_DELAY_MIN_US, self::FAILURE_DELAY_MAX_US));
+    }
+
+    private static function buildSessionFingerprint(): string
+    {
+        $userAgent = substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255);
+        $ipPrefix = self::ipPrefix(self::getIpAddress());
+        $appKey = '';
+
+        try {
+            $appKey = app_secret_value('APP_KEY', false);
+        } catch (Throwable $e) {
+            $appKey = '';
+        }
+
+        $key = $appKey !== '' ? $appKey : 'fallback-session-fingerprint-key';
+        return hash_hmac('sha256', strtolower($userAgent) . '|' . $ipPrefix, $key);
+    }
+
+    private static function ipPrefix(string $ip): string
+    {
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            $parts = explode('.', $ip);
+            return count($parts) === 4 ? ($parts[0] . '.' . $parts[1] . '.' . $parts[2]) : $ip;
+        }
+
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+            $segments = explode(':', $ip);
+            return implode(':', array_slice($segments, 0, 4));
+        }
+
+        return 'unknown';
+    }
+
+    private static function recordSuspiciousSession(PDO $conn, int $userId, string $reason): void
+    {
+        try {
+            if ($userId > 0) {
+                NotificationController::create(
+                    $conn,
+                    $userId,
+                    'admin',
+                    'session_anomaly',
+                    'Suspicious session blocked',
+                    'A session anomaly was detected and the session was terminated. Reason: ' . $reason,
+                    'bi-shield-exclamation',
+                    'text-danger',
+                    '/inventory_system/admin/activity_log.php'
+                );
+            }
+
+            if (
+                isset($GLOBALS['table_activity_logs'], $GLOBALS['activity_log_user_id'], $GLOBALS['activity_log_action'], $GLOBALS['activity_log_desc'], $GLOBALS['activity_log_ip'], $GLOBALS['activity_log_created'])
+            ) {
+                self::logActivity(
+                    $conn,
+                    [
+                        'table' => (string) $GLOBALS['table_activity_logs'],
+                        'col_user_id' => (string) $GLOBALS['activity_log_user_id'],
+                        'col_action' => (string) $GLOBALS['activity_log_action'],
+                        'col_desc' => (string) $GLOBALS['activity_log_desc'],
+                        'col_ip' => (string) $GLOBALS['activity_log_ip'],
+                        'col_created' => (string) $GLOBALS['activity_log_created'],
+                    ],
+                    $userId > 0 ? $userId : null,
+                    'session_security_block',
+                    'Session blocked due to ' . $reason,
+                    'auth',
+                    $userId > 0 ? $userId : null,
+                    'security'
+                );
+            }
+        } catch (Throwable $e) {
+            error_log('[AuthController::recordSuspiciousSession] ' . $e->getMessage());
+        }
     }
 }

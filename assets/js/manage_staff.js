@@ -23,6 +23,7 @@ document.addEventListener("DOMContentLoaded", () => {
     editPhotoInput: document.querySelector('#editStaffForm input[name="photo"]'),
     editPhotoPreview: document.getElementById("editStaffPhotoPreview")
   };
+  let staffDataTable = null;
 
   const addModal = page.addModalEl ? bootstrap.Modal.getOrCreateInstance(page.addModalEl) : null;
   const editModal = page.editModalEl ? bootstrap.Modal.getOrCreateInstance(page.editModalEl) : null;
@@ -134,6 +135,66 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  function createDataTableRowFromElement(row) {
+    if (!row) return null;
+
+    const attributes = {};
+    if (row.id) attributes.id = row.id;
+    if (row.className) attributes.class = row.className;
+
+    return {
+      attributes,
+      cells: Array.from(row.children).map((cell) => ({
+        data: cell.innerHTML
+      }))
+    };
+  }
+
+  function findDataTableRowIndex(rowId) {
+    if (!staffDataTable?.data?.data || !rowId) return -1;
+
+    return staffDataTable.data.data.findIndex((row) => {
+      return String(row?.attributes?.id || "") === String(rowId);
+    });
+  }
+
+  function syncDataTableRowNumbers() {
+    if (!staffDataTable?.data?.data) return;
+
+    staffDataTable.data.data.forEach((row, index) => {
+      if (row?.cells?.[0]) {
+        row.cells[0].data = String(index + 1);
+      }
+    });
+  }
+
+  function renderDataTablePreservingPage(preferredPage = null) {
+    if (!staffDataTable) {
+      updateRowNumbers();
+      return;
+    }
+
+    const currentPage = preferredPage ?? staffDataTable._currentPage ?? 1;
+    syncDataTableRowNumbers();
+    staffDataTable.update(true);
+
+    const totalPages = Math.max(staffDataTable.totalPages || 1, 1);
+    const targetPage = Math.min(Math.max(currentPage, 1), totalPages);
+    staffDataTable.page(targetPage);
+  }
+
+  function flashRenderedRow(rowId, flashClass) {
+    if (!rowId || !flashClass) return;
+
+    window.requestAnimationFrame(() => {
+      const row = document.getElementById(rowId);
+      if (!row) return;
+
+      row.classList.add(flashClass);
+      window.setTimeout(() => row.classList.remove(flashClass), 3000);
+    });
+  }
+
   function buildStaffRow(staff) {
     const userId = Number(staff.user_id || 0);
     const fullName = staff.full_name || "";
@@ -205,11 +266,29 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function insertNewRowFromData(staff) {
-    if (!page.tableBody || !staff) return;
+    if (!staff) return;
 
     const newRow = buildStaffRow(staff);
+
+    try {
+      if (staffDataTable) {
+        const rowData = createDataTableRowFromElement(newRow);
+        if (rowData) {
+          staffDataTable.data.data.unshift(rowData);
+          renderDataTablePreservingPage(1);
+          flashRenderedRow(newRow.id, "table-success");
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Staff table prepend sync failed. Falling back to DOM update.", error);
+    }
+
+    if (!page.tableBody) return;
+
     page.tableBody.prepend(newRow);
     updateRowNumbers();
+    flashRenderedRow(newRow.id, "table-success");
   }
 
   function replaceExistingRowFromData(staffId, staff) {
@@ -217,8 +296,27 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!oldRow || !staff) return;
 
     const newRow = buildStaffRow(staff);
+
+    try {
+      if (staffDataTable) {
+        const rowIndex = findDataTableRowIndex(oldRow.id || newRow.id);
+        const rowData = createDataTableRowFromElement(newRow);
+
+        if (rowIndex >= 0 && rowData) {
+          const currentPage = staffDataTable._currentPage ?? 1;
+          staffDataTable.data.data[rowIndex] = rowData;
+          renderDataTablePreservingPage(currentPage);
+          flashRenderedRow(newRow.id, "table-warning");
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Staff table sync failed. Falling back to DOM update.", error);
+    }
+
     oldRow.replaceWith(newRow);
     updateRowNumbers();
+    flashRenderedRow(newRow.id, "table-warning");
   }
 
   function fillEditModalFromButton(button) {
@@ -405,7 +503,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function initDataTable() {
     if (page.table && window.simpleDatatables && simpleDatatables.DataTable) {
-      new simpleDatatables.DataTable(page.table, {
+      staffDataTable = new simpleDatatables.DataTable(page.table, {
         searchable: true,
         fixedHeight: true,
         perPage: 10

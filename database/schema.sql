@@ -112,6 +112,8 @@ CREATE TABLE `pos_config` (
   `tax_rate` decimal(5,2) NOT NULL DEFAULT 5.00,
   `currency` varchar(10) DEFAULT 'PHP',
   `logo` varchar(255) DEFAULT NULL,
+  `shift_edit_window_hours` int(11) NOT NULL DEFAULT 8,
+  `shift_unlock_window_hours` int(11) NOT NULL DEFAULT 2,
   PRIMARY KEY (`config_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
@@ -178,6 +180,7 @@ CREATE TABLE `sale_items` (
   `product_id` int(11) NOT NULL,
   `unit_price` decimal(10,2) NOT NULL DEFAULT 0.00,
   `quantity` int(11) NOT NULL DEFAULT 1,
+  `returned_quantity` int(11) NOT NULL DEFAULT 0,
   `unit_type` enum('piece','box','case') NOT NULL DEFAULT 'piece',
   `unit_multiplier` int(11) NOT NULL DEFAULT 1,
   PRIMARY KEY (`sale_item_id`),
@@ -185,6 +188,31 @@ CREATE TABLE `sale_items` (
   KEY `product_id` (`product_id`),
   CONSTRAINT `sale_items_ibfk_1` FOREIGN KEY (`sale_id`) REFERENCES `sales` (`sale_id`) ON DELETE CASCADE,
   CONSTRAINT `sale_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `sale_item_returns`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `sale_item_returns` (
+  `return_id` int(11) NOT NULL AUTO_INCREMENT,
+  `sale_id` int(11) NOT NULL,
+  `sale_item_id` int(11) NOT NULL,
+  `product_id` int(11) NOT NULL,
+  `quantity` int(11) NOT NULL,
+  `unit_multiplier` int(11) NOT NULL DEFAULT 1,
+  `unit_price` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `tax_amount` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `discount_amount` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `reason` text DEFAULT NULL,
+  `user_id` int(11) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`return_id`),
+  KEY `idx_sale_item_returns_sale_id` (`sale_id`),
+  KEY `idx_sale_item_returns_sale_item_id` (`sale_item_id`),
+  KEY `idx_sale_item_returns_product_id` (`product_id`),
+  CONSTRAINT `sale_item_returns_ibfk_1` FOREIGN KEY (`sale_id`) REFERENCES `sales` (`sale_id`) ON DELETE CASCADE,
+  CONSTRAINT `sale_item_returns_ibfk_2` FOREIGN KEY (`sale_item_id`) REFERENCES `sale_items` (`sale_item_id`) ON DELETE CASCADE,
+  CONSTRAINT `sale_item_returns_ibfk_3` FOREIGN KEY (`product_id`) REFERENCES `products` (`product_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!50003 SET @saved_cs_client      = @@character_set_client */ ;
@@ -261,6 +289,7 @@ CREATE TABLE `shift_closings` (
   `shift_date` date NOT NULL,
   `opened_at` datetime NOT NULL DEFAULT current_timestamp(),
   `closed_at` datetime DEFAULT NULL,
+  `editable_until` datetime DEFAULT NULL,
   `total_transactions` int(11) NOT NULL DEFAULT 0,
   `total_items` int(11) NOT NULL DEFAULT 0,
   `total_sales` decimal(12,2) NOT NULL DEFAULT 0.00,
@@ -271,6 +300,9 @@ CREATE TABLE `shift_closings` (
   `variance` decimal(12,2) NOT NULL DEFAULT 0.00,
   `payment_breakdown_json` longtext DEFAULT NULL,
   `notes` text DEFAULT NULL,
+  `last_updated_by` int(11) DEFAULT NULL,
+  `last_updated_at` datetime DEFAULT NULL,
+  `override_reason` text DEFAULT NULL,
   `status` enum('open','closed') NOT NULL DEFAULT 'closed',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`shift_closing_id`),
@@ -278,6 +310,58 @@ CREATE TABLE `shift_closings` (
   KEY `idx_shift_closings_status` (`status`),
   KEY `idx_shift_closings_closed_at` (`closed_at`),
   CONSTRAINT `shift_closings_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `shift_closing_edit_requests`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `shift_closing_edit_requests` (
+  `request_id` int(11) NOT NULL AUTO_INCREMENT,
+  `shift_closing_id` int(11) NOT NULL,
+  `target_user_id` int(11) NOT NULL,
+  `requested_by` int(11) NOT NULL,
+  `request_reason` text NOT NULL,
+  `status` enum('pending','approved','declined') NOT NULL DEFAULT 'pending',
+  `requested_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `reviewed_at` datetime DEFAULT NULL,
+  `reviewed_by` int(11) DEFAULT NULL,
+  `review_note` text DEFAULT NULL,
+  `approved_until` datetime DEFAULT NULL,
+  PRIMARY KEY (`request_id`),
+  KEY `idx_shift_edit_requests_shift` (`shift_closing_id`),
+  KEY `idx_shift_edit_requests_status` (`status`),
+  KEY `idx_shift_edit_requests_target` (`target_user_id`),
+  CONSTRAINT `fk_shift_edit_requests_shift` FOREIGN KEY (`shift_closing_id`) REFERENCES `shift_closings` (`shift_closing_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `stock_adjustment_requests`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `stock_adjustment_requests` (
+  `request_id` int(11) NOT NULL AUTO_INCREMENT,
+  `product_id` int(11) NOT NULL,
+  `requester_user_id` int(11) NOT NULL,
+  `reviewer_user_id` int(11) DEFAULT NULL,
+  `direction` varchar(20) NOT NULL DEFAULT 'stock_out',
+  `quantity` int(11) NOT NULL,
+  `adjustment_type` varchar(50) NOT NULL,
+  `reason` varchar(500) NOT NULL,
+  `notes` text DEFAULT NULL,
+  `supplier_id` int(11) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'pending',
+  `review_note` text DEFAULT NULL,
+  `before_quantity` int(11) DEFAULT NULL,
+  `after_quantity` int(11) DEFAULT NULL,
+  `requested_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `reviewed_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`request_id`),
+  KEY `idx_stock_adjustment_status` (`status`),
+  KEY `idx_stock_adjustment_requester` (`requester_user_id`),
+  KEY `idx_stock_adjustment_product` (`product_id`),
+  CONSTRAINT `stock_adjustment_requests_ibfk_1` FOREIGN KEY (`product_id`) REFERENCES `products` (`product_id`) ON DELETE CASCADE,
+  CONSTRAINT `stock_adjustment_requests_ibfk_2` FOREIGN KEY (`requester_user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE,
+  CONSTRAINT `stock_adjustment_requests_ibfk_3` FOREIGN KEY (`reviewer_user_id`) REFERENCES `users` (`user_id`) ON DELETE SET NULL,
+  CONSTRAINT `stock_adjustment_requests_ibfk_4` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`supplier_id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `stock_audit_log`;
@@ -311,6 +395,8 @@ CREATE TABLE `stock_in` (
   `stockin_date` timestamp NOT NULL DEFAULT current_timestamp(),
   `user_id` int(11) DEFAULT NULL,
   `notes` text DEFAULT NULL,
+  `adjustment_type` varchar(50) DEFAULT NULL,
+  `supplier_id` int(11) DEFAULT NULL,
   PRIMARY KEY (`stockin_id`),
   KEY `product_id` (`product_id`),
   KEY `user_id` (`user_id`),
@@ -385,6 +471,8 @@ CREATE TABLE `stock_out` (
   `reason` varchar(255) DEFAULT NULL,
   `stockout_date` timestamp NOT NULL DEFAULT current_timestamp(),
   `user_id` int(11) NOT NULL,
+  `notes` text DEFAULT NULL,
+  `adjustment_type` varchar(50) DEFAULT NULL,
   PRIMARY KEY (`stockout_id`),
   KEY `user_id` (`user_id`),
   KEY `stock_out_ibfk_2` (`product_id`),
@@ -544,6 +632,78 @@ CREATE TABLE `users` (
   UNIQUE KEY `email` (`email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchase_order_items`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `purchase_order_items` (
+  `po_item_id` int(11) NOT NULL AUTO_INCREMENT,
+  `po_id` int(11) NOT NULL,
+  `product_id` int(11) NOT NULL,
+  `ordered_quantity` int(11) NOT NULL DEFAULT 0,
+  `received_quantity` int(11) NOT NULL DEFAULT 0,
+  `notes` text DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`po_item_id`),
+  KEY `idx_purchase_order_items_po` (`po_id`),
+  KEY `idx_purchase_order_items_product` (`product_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `expenses`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `expenses` (
+  `expense_id` int(11) NOT NULL AUTO_INCREMENT,
+  `expense_date` date NOT NULL,
+  `category` varchar(100) NOT NULL,
+  `amount` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `notes` text DEFAULT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `payment_status` varchar(20) NOT NULL DEFAULT 'paid',
+  `due_date` date DEFAULT NULL,
+  `paid_at` datetime DEFAULT NULL,
+  `paid_amount` decimal(12,2) NOT NULL DEFAULT 0.00,
+  `payment_method` varchar(50) DEFAULT NULL,
+  `reference_no` varchar(100) DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`expense_id`),
+  KEY `idx_expenses_date` (`expense_date`),
+  KEY `idx_expenses_category` (`category`),
+  KEY `idx_expenses_created_by` (`created_by`),
+  KEY `idx_expenses_status` (`payment_status`),
+  KEY `idx_expenses_due_date` (`due_date`),
+  CONSTRAINT `expenses_ibfk_1` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+DROP TABLE IF EXISTS `purchase_orders`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!40101 SET character_set_client = utf8 */;
+CREATE TABLE `purchase_orders` (
+  `po_id` int(11) NOT NULL AUTO_INCREMENT,
+  `po_number` varchar(40) DEFAULT NULL,
+  `supplier_id` int(11) NOT NULL,
+  `created_by` int(11) DEFAULT NULL,
+  `received_by` int(11) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'ordered',
+  `notes` text DEFAULT NULL,
+  `ordered_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `received_at` datetime DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT current_timestamp(),
+  `updated_at` datetime NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`po_id`),
+  UNIQUE KEY `uniq_purchase_orders_number` (`po_number`),
+  KEY `idx_purchase_orders_supplier` (`supplier_id`),
+  KEY `idx_purchase_orders_status` (`status`),
+  KEY `idx_purchase_orders_created_by` (`created_by`),
+  KEY `idx_purchase_orders_received_by` (`received_by`),
+  CONSTRAINT `purchase_orders_ibfk_1` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`supplier_id`),
+  CONSTRAINT `purchase_orders_ibfk_2` FOREIGN KEY (`created_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL,
+  CONSTRAINT `purchase_orders_ibfk_3` FOREIGN KEY (`received_by`) REFERENCES `users` (`user_id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+ALTER TABLE `purchase_order_items`
+  ADD CONSTRAINT `purchase_order_items_ibfk_1` FOREIGN KEY (`po_id`) REFERENCES `purchase_orders` (`po_id`) ON DELETE CASCADE,
+  ADD CONSTRAINT `purchase_order_items_ibfk_2` FOREIGN KEY (`product_id`) REFERENCES `products` (`product_id`);
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;

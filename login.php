@@ -176,6 +176,11 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                     <div class="col-lg-6 d-flex align-items-center">
                         <div class="login-brand-copy">
                             <span class="eyebrow">Store Access</span>
+                            <?php if (app_is_public_demo()): ?>
+                                <div class="mb-3">
+                                    <span class="badge rounded-pill text-bg-warning px-3 py-2">Public Demo</span>
+                                </div>
+                            <?php endif; ?>
                             <h1>Run your store from one clean dashboard.</h1>
                             <p>Secure login for inventory, sales, and reporting in a light storefront-inspired experience.</p>
                         </div>

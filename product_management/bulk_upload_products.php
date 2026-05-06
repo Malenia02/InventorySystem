@@ -54,152 +54,7 @@ $subcategoryOptions = trim((string) ob_get_clean());
 <html lang="en">
 <head>
     <?php require __DIR__ . '/../components/head.php'; ?>
-    <title>Bulk Create Products</title>
-    <style>
-        .bulk-builder-hero {
-            border: 1px solid #dde7f5;
-            border-radius: 1.2rem;
-            background: linear-gradient(135deg, #f6faff 0%, #eef3ff 100%);
-            padding: 1.5rem;
-        }
-
-        .bulk-builder-layout {
-            display: grid;
-            grid-template-columns: minmax(0, 1.8fr) minmax(280px, .9fr);
-            gap: 1.25rem;
-        }
-
-        .bulk-builder-stack {
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-
-        .bulk-product-card {
-            border: 1px solid #e8edf4;
-            border-radius: 1.1rem;
-            overflow: hidden;
-            box-shadow: 0 .45rem 1.2rem rgba(31, 48, 78, .06);
-        }
-
-        .bulk-product-card .card-header {
-            background: #f8fbff;
-            border-bottom: 1px solid #e8edf4;
-            padding: 1rem 1.25rem;
-        }
-
-        .bulk-product-card .card-body {
-            padding: 1.25rem;
-        }
-
-        .bulk-product-preview {
-            width: 100%;
-            max-width: 220px;
-            height: 220px;
-            object-fit: cover;
-            border-radius: 1rem;
-            border: 1px solid #dde3ec;
-            background: #fff;
-        }
-
-        .bulk-side-note {
-            border: 1px solid #e8edf4;
-            border-radius: 1rem;
-            background: #fff;
-            padding: 1rem 1.1rem;
-        }
-
-        .bulk-side-note h6 {
-            font-weight: 700;
-            margin-bottom: .65rem;
-        }
-
-        .bulk-action-btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: .4rem;
-            min-height: 40px;
-            padding: .5rem .9rem;
-            border-radius: .8rem;
-            font-size: .92rem;
-            font-weight: 600;
-            line-height: 1;
-            box-shadow: none !important;
-        }
-
-        .bulk-action-btn i {
-            font-size: .95rem;
-        }
-
-        .bulk-primary-btn {
-            background: #2563eb;
-            border-color: #2563eb;
-        }
-
-        .bulk-primary-btn:hover,
-        .bulk-primary-btn:focus {
-            background: #1d4ed8;
-            border-color: #1d4ed8;
-        }
-
-        .bulk-success-btn {
-            background: #198754;
-            border-color: #198754;
-        }
-
-        .bulk-success-btn:hover,
-        .bulk-success-btn:focus {
-            background: #157347;
-            border-color: #157347;
-        }
-
-        .bulk-soft-btn {
-            background: #fff;
-            border: 1px solid #d8e1ee;
-            color: #334155;
-        }
-
-        .bulk-soft-btn:hover,
-        .bulk-soft-btn:focus {
-            background: #f8fafc;
-            border-color: #cbd5e1;
-            color: #1e293b;
-        }
-
-        .bulk-outline-btn {
-            border-width: 1px;
-            color: #2563eb;
-            border-color: #bfd2ff;
-            background: #fff;
-        }
-
-        .bulk-outline-btn:hover,
-        .bulk-outline-btn:focus {
-            background: #eff6ff;
-            color: #1d4ed8;
-            border-color: #93c5fd;
-        }
-
-        .bulk-remove-btn {
-            min-height: 34px;
-            padding: .42rem .75rem;
-            border-radius: .7rem;
-            font-size: .84rem;
-            font-weight: 600;
-        }
-
-        .bulk-result-table td,
-        .bulk-result-table th {
-            vertical-align: top;
-        }
-
-        @media (max-width: 991.98px) {
-            .bulk-builder-layout {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="/inventory_system/assets/css/bulk-upload-products.css">
 </head>
 <body>
     <?php
@@ -208,20 +63,34 @@ $subcategoryOptions = trim((string) ob_get_clean());
     require __DIR__ . '/../components/breadcrumb.php';
     ?>
 
-    <main class="main">
+    <main class="main bulk-page">
         <section class="section">
-            <div class="card">
+            <div class="bulk-hero">
+                <div class="bulk-hero-copy">
+                    <p class="bulk-eyebrow">Catalog Builder</p>
+                    <h1 class="bulk-title">Bulk Create Products</h1>
+                    <p class="bulk-copy">Build multiple product records in one session, upload photos per card, and submit them together without opening the single-product modal repeatedly.</p>
+                </div>
+                <div class="bulk-hero-actions">
+                    <a href="/inventory_system/product_management/manage_product.php" class="btn bulk-action-btn bulk-soft-btn">
+                        <i class="bi bi-arrow-left me-1"></i>Back to Products
+                    </a>
+                </div>
+            </div>
+
+            <div class="card bulk-page-card">
                 <div class="card-body">
-                    <div class="bulk-builder-hero mt-4 mb-4">
+                    <div class="bulk-builder-hero mb-4">
                         <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
                             <div>
-                                <h5 class="card-title mb-2">Bulk Create Products</h5>
-                                <p class="text-muted mb-0">Add multiple product forms on one page, fill them out like the normal product modal, then save everything in one submit.</p>
+                                <p class="bulk-section-kicker">Workflow</p>
+                                <h5 class="card-title mb-2">Bulk Product Builder</h5>
+                                <p class="text-muted mb-0">Add as many product cards as needed, complete each form, then submit everything in one save action.</p>
                             </div>
                             <div class="d-flex flex-wrap gap-2">
-                                <a href="/inventory_system/product_management/manage_product.php" class="btn bulk-action-btn bulk-soft-btn">
-                                    <i class="bi bi-arrow-left me-1"></i>Back to Products
-                                </a>
+                                <button type="button" class="btn bulk-action-btn bulk-outline-btn" id="addBulkProductCardBtn">
+                                    <i class="bi bi-plus-lg me-1"></i>Add Product Card
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -290,7 +159,7 @@ $subcategoryOptions = trim((string) ob_get_clean());
             <div class="card-body">
                 <div class="row g-4">
                     <div class="col-lg-4">
-                        <div class="text-center border rounded-4 bg-light p-3 h-100">
+                        <div class="bulk-photo-panel text-center h-100">
                             <h6 class="fw-semibold text-start mb-3">Product Photo</h6>
                             <img src="/inventory_system/assets/img/card.jpg" alt="Preview" class="bulk-product-preview bulk-photo-preview">
                             <div class="mt-3">

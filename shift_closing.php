@@ -5,6 +5,7 @@ require __DIR__ . '/bootstrap/app.php';
 require_once __DIR__ . '/middleware/Middleware.php';
 require_once __DIR__ . '/controllers/AuthController.php';
 require_once __DIR__ . '/controllers/ShiftClosingController.php';
+require_once __DIR__ . '/controllers/PosConfigController.php';
 
 Middleware::auth()->role(['admin', 'cashier']);
 
@@ -29,6 +30,13 @@ $shiftStatus = strtolower((string) ($summary['status'] ?? 'not_started'));
 $isShiftStarted = $shift !== null;
 $isShiftOpen = $shiftStatus === 'open';
 $isShiftClosed = $shiftStatus === 'closed';
+$todayShiftDate = date('Y-m-d');
+$isTodayView = $shiftDate === $todayShiftDate;
+$closingEditMeta = ShiftClosingController::closingEditMeta($shift, $isAdmin);
+$shiftEditLocked = (bool) ($closingEditMeta['is_locked'] ?? false);
+$canEditShiftClosing = (bool) ($closingEditMeta['can_edit'] ?? true);
+$editableUntil = (string) ($closingEditMeta['editable_until'] ?? '');
+$shiftEditWindowHours = PosConfigController::shiftEditWindowHours($conn);
 $cashiers = [];
 $successMessage = null;
 $errorMessage = null;
@@ -104,9 +112,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $saved = ShiftClosingController::closeShift($conn, $targetUserId, $_POST);
 
         $_SESSION['shift_closing_flash'] = [
-            'success' => $saved['was_updated']
-                ? 'Shift closing updated successfully.'
-                : 'Shift closed successfully.',
+            'success' => !empty($saved['was_override'])
+                ? 'Shift closing updated with admin override.'
+                : ($saved['was_updated']
+                    ? 'Shift closing updated successfully.'
+                    : 'Shift closed successfully.'),
             'socket_event' => [
                 'event' => 'notification_update',
                 'type' => $saved['was_updated'] ? 'shift_closing_updated' : 'shift_closing_saved',
@@ -178,7 +188,7 @@ function shiftStatusLabel(string $status): string
 <html lang="en">
 <head>
     <?php require __DIR__ . '/components/head.php'; ?>
-    <title>Shift Closing</title>
+    <title>Shift Management</title>
     <style>
         .shift-session-card {
             position: relative;
@@ -421,13 +431,13 @@ require __DIR__ . '/components/sidebar.php';
     <section class="shift-closing-hero">
         <div>
             <p class="shift-eyebrow">Cashier control room</p>
-            <h1 class="shift-closing-title">Shift Closing</h1>
+            <h1 class="shift-closing-title">Shift Management</h1>
             <p class="shift-closing-copy">
                 Start the cashier session, monitor sales while the shift is active, then close with counted cash and variance notes.
             </p>
         </div>
 
-        <form method="GET" class="shift-filter-card">
+        <form method="GET" class="shift-filter-card" id="shiftFilterForm">
             <div class="shift-filter-grid">
                 <label>
                     <span>Shift Date</span>
@@ -498,7 +508,11 @@ require __DIR__ . '/components/sidebar.php';
                         </div>
 
                         <div class="shift-start-box">
-                            <?php if (!$isShiftStarted): ?>
+                            <?php if (!$isShiftStarted && !$isTodayView): ?>
+                                <div class="alert alert-warning mb-0">
+                                    You can only start a shift for today. Switch the date back to <?= e(date('M d, Y', strtotime($todayShiftDate))) ?> to open a new cashier session.
+                                </div>
+                            <?php elseif (!$isShiftStarted): ?>
                                 <form method="POST" class="row g-3" id="startShiftForm">
                                     <input type="hidden" name="csrf_token" value="<?= e(Middleware::generateCsrfToken()) ?>">
                                     <input type="hidden" name="shift_action" value="start">
@@ -559,13 +573,15 @@ require __DIR__ . '/components/sidebar.php';
                             <span class="badge bg-primary"><?= e(date('M d, Y', strtotime($shiftDate))) ?></span>
                         </div>
 
-                        <?php if ($successMessage !== null): ?>
-                            <div class="alert alert-success mt-3"><?= e($successMessage) ?></div>
-                        <?php endif; ?>
+                        <div id="shiftActionFeedback">
+                            <?php if ($successMessage !== null): ?>
+                                <div class="alert alert-success mt-3"><?= e($successMessage) ?></div>
+                            <?php endif; ?>
 
-                        <?php if ($errorMessage !== null): ?>
-                            <div class="alert alert-danger mt-3"><?= e($errorMessage) ?></div>
-                        <?php endif; ?>
+                            <?php if ($errorMessage !== null): ?>
+                                <div class="alert alert-danger mt-3"><?= e($errorMessage) ?></div>
+                            <?php endif; ?>
+                        </div>
 
                         <div class="shift-metric-grid">
                             <div class="shift-metric-card">
@@ -589,6 +605,22 @@ require __DIR__ . '/components/sidebar.php';
                                 <strong><?= e(currency((float) ($summary['cash_sales'] ?? 0))) ?></strong>
                             </div>
                         </div>
+
+                        <?php if ($isShiftStarted): ?>
+                            <div class="shift-drilldown-bar mt-3">
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-primary"
+                                    id="viewShiftSalesBtn"
+                                    data-shift-date="<?= e($shiftDate) ?>"
+                                    data-user-id="<?= (int) $viewUserId ?>"
+                                >
+                                    <i class="bi bi-list-ul me-1"></i>
+                                    View Shift Sales Breakdown
+                                </button>
+                                <span class="text-muted small">Open all transactions included in this shift window.</span>
+                            </div>
+                        <?php endif; ?>
 
                         <div class="shift-work-grid mt-3">
                             <div class="shift-action-panel">
@@ -625,11 +657,31 @@ require __DIR__ . '/components/sidebar.php';
                                         <div class="alert alert-warning mb-0">
                                             Start the shift first so the system can save the opening time before closing.
                                         </div>
+                                    <?php elseif ($isShiftClosed && !$canEditShiftClosing): ?>
+                                        <div class="alert alert-warning mb-0">
+                                            This shift is locked. The cashier update window has ended.
+                                            <?php if ($editableUntil !== ''): ?>
+                                                It was editable until <?= e(date('M d, g:i A', strtotime($editableUntil))) ?>.
+                                            <?php endif; ?>
+                                            Ask the owner/admin to approve any further correction.
+                                            <?php if (!$isAdmin && !empty($shift['shift_closing_id'])): ?>
+                                                <div class="mt-3">
+                                                    <a
+                                                        href="/inventory_system/shift_edit_requests.php?shift_closing_id=<?= (int) $shift['shift_closing_id'] ?>"
+                                                        class="btn btn-sm btn-outline-primary"
+                                                    >
+                                                        Request Edit Access
+                                                    </a>
+                                                </div>
+                                            <?php endif; ?>
+                                        </div>
                                     <?php else: ?>
-                                        <form method="POST" class="row g-3">
+                                        <form method="POST" class="row g-3" id="closeShiftForm">
                                             <input type="hidden" name="csrf_token" value="<?= e(Middleware::generateCsrfToken()) ?>">
                                             <input type="hidden" name="shift_action" value="close">
                                             <input type="hidden" name="shift_date" value="<?= e($shiftDate) ?>">
+                                            <input type="hidden" name="_actor_user_id" value="<?= (int) $sessionUserId ?>">
+                                            <input type="hidden" name="_actor_role" value="<?= e($isAdmin ? 'admin' : 'cashier') ?>">
                                             <?php if ($isAdmin): ?>
                                                 <div class="col-12">
                                                     <label class="form-label">Cashier</label>
@@ -661,6 +713,19 @@ require __DIR__ . '/components/sidebar.php';
                                                 <label class="form-label">Notes</label>
                                                 <textarea name="notes" class="form-control" rows="3" placeholder="Optional shift notes"><?= e((string) ($shift['notes'] ?? '')) ?></textarea>
                                             </div>
+
+                                            <?php if ($isShiftClosed && $shiftEditLocked && $isAdmin): ?>
+                                                <div class="col-12">
+                                                    <div class="alert alert-info mb-0">
+                                                        This closing is outside the <?= (int) $shiftEditWindowHours ?>-hour cashier edit window.
+                                                        Admin override is required for this update.
+                                                    </div>
+                                                </div>
+                                                <div class="col-12">
+                                                    <label class="form-label">Override Reason</label>
+                                                    <textarea name="override_reason" class="form-control" rows="3" placeholder="Explain why this locked shift needs to be updated." required></textarea>
+                                                </div>
+                                            <?php endif; ?>
 
                                             <div class="col-12">
                                                 <button type="submit" class="btn btn-primary w-100 shift-close-btn">
@@ -742,10 +807,12 @@ require __DIR__ . '/components/sidebar.php';
                             <li><span>Status</span><strong><?= e(shiftStatusLabel($shiftStatus)) ?></strong></li>
                             <li><span>Opened</span><strong><?= e(dateTimeLabel($summary['opened_at'] ?? null)) ?></strong></li>
                             <li><span>Closed</span><strong><?= e(dateTimeLabel($summary['closed_at'] ?? null)) ?></strong></li>
+                            <li><span>Edit Window</span><strong><?= $editableUntil !== '' ? e(date('M d, g:i A', strtotime($editableUntil))) : '-' ?></strong></li>
                             <li><span>Starting cash</span><strong><?= e(currency((float) ($summary['starting_cash'] ?? 0))) ?></strong></li>
                             <li><span>Total items sold</span><strong><?= number_format((int) ($summary['total_items'] ?? 0)) ?></strong></li>
                             <li><span>Total tax</span><strong><?= e(currency((float) ($summary['total_tax'] ?? 0))) ?></strong></li>
                             <li><span>Total discount</span><strong><?= e(currency((float) ($summary['total_discount'] ?? 0))) ?></strong></li>
+                            <li><span>Lock State</span><strong><?= $shiftEditLocked ? 'Locked' : 'Editable' ?></strong></li>
                             <li><span>Last sale</span><strong><?= !empty($summary['last_sale_at']) ? e(date('M d, g:i A', strtotime((string) $summary['last_sale_at']))) : 'No sales yet' ?></strong></li>
                         </ul>
                     </div>
@@ -759,6 +826,46 @@ require __DIR__ . '/components/sidebar.php';
         </div>
     </section>
 </main>
+
+<div class="modal fade" id="shiftSalesModal" tabindex="-1" aria-labelledby="shiftSalesModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content shift-sales-modal">
+            <div class="modal-header">
+                <div>
+                    <p class="shift-eyebrow mb-1">Shift drill-down</p>
+                    <h5 class="modal-title" id="shiftSalesModalLabel">Shift Sales Breakdown</h5>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="shiftSalesModalBody">
+                <div class="sale-details-state">
+                    <span class="spinner-border text-primary" role="status" aria-hidden="true"></span>
+                    <strong>Loading shift sales...</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="shiftSaleDetailsModal" tabindex="-1" aria-labelledby="shiftSaleDetailsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content shift-sales-modal">
+            <div class="modal-header">
+                <div>
+                    <p class="shift-eyebrow mb-1">Transaction view</p>
+                    <h5 class="modal-title" id="shiftSaleDetailsModalLabel">Sale Details</h5>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="shiftSaleDetailsModalBody">
+                <div class="sale-details-state">
+                    <span class="spinner-border text-primary" role="status" aria-hidden="true"></span>
+                    <strong>Loading sale details...</strong>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 
 <?php require __DIR__ . '/components/footer.php'; ?>
 <?php require __DIR__ . '/components/js_script.php'; ?>

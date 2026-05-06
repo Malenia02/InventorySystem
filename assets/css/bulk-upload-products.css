@@ -1,0 +1,214 @@
+.bulk-page {
+    --bulk-title: #0d3472;
+    --bulk-text: #657998;
+    --bulk-border: #dfe8f7;
+    --bulk-soft-border: #eaf0fb;
+    --bulk-shadow: 0 20px 48px rgba(15, 37, 80, 0.08);
+    padding-bottom: 96px;
+}
+
+.bulk-hero {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    margin-bottom: 22px;
+    padding: 28px 30px;
+    border: 1px solid var(--bulk-border);
+    border-radius: 30px;
+    background:
+        radial-gradient(circle at 10% 0%, rgba(65, 84, 241, 0.18), transparent 28%),
+        radial-gradient(circle at 92% 18%, rgba(46, 202, 106, 0.12), transparent 26%),
+        linear-gradient(135deg, #ffffff 0%, #f7faff 100%);
+    box-shadow: var(--bulk-shadow);
+}
+
+.bulk-eyebrow,
+.bulk-section-kicker {
+    margin: 0 0 8px;
+    color: #4a68ca;
+    font-size: 0.76rem;
+    font-weight: 900;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+}
+
+.bulk-title {
+    margin: 0;
+    color: var(--bulk-title);
+    font-size: clamp(2rem, 3vw, 3rem);
+    font-weight: 900;
+    letter-spacing: -0.055em;
+}
+
+.bulk-copy {
+    max-width: 780px;
+    margin: 12px 0 0;
+    color: var(--bulk-text);
+    font-size: 1rem;
+    line-height: 1.75;
+}
+
+.bulk-page-card,
+.bulk-product-card,
+.bulk-side-note {
+    border: 1px solid var(--bulk-border) !important;
+    border-radius: 28px !important;
+    background: linear-gradient(180deg, #ffffff 0%, #fbfcff 100%) !important;
+    box-shadow: var(--bulk-shadow) !important;
+}
+
+.bulk-page-card .card-body {
+    padding: 24px;
+}
+
+.bulk-builder-hero {
+    border: 1px solid #dde7f5;
+    border-radius: 24px;
+    background: linear-gradient(135deg, #f6faff 0%, #eef3ff 100%);
+    padding: 22px 24px;
+}
+
+.bulk-builder-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1.8fr) minmax(280px, .9fr);
+    gap: 1.25rem;
+}
+
+.bulk-builder-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.bulk-product-card {
+    overflow: hidden;
+}
+
+.bulk-product-card .card-header {
+    background: #f8fbff;
+    border-bottom: 1px solid #e8edf4;
+    padding: 1rem 1.25rem;
+}
+
+.bulk-product-card .card-body {
+    padding: 1.25rem;
+}
+
+.bulk-photo-panel {
+    padding: 1rem;
+    border: 1px solid var(--bulk-soft-border);
+    border-radius: 24px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.bulk-product-preview {
+    width: 100%;
+    max-width: 220px;
+    height: 220px;
+    object-fit: cover;
+    border-radius: 18px;
+    border: 1px solid #dde3ec;
+    background: #fff;
+}
+
+.bulk-side-note {
+    padding: 1rem 1.1rem;
+}
+
+.bulk-side-note h6 {
+    font-weight: 800;
+    margin-bottom: .65rem;
+    color: #17345f;
+}
+
+.bulk-side-note p {
+    color: var(--bulk-text);
+    line-height: 1.65;
+}
+
+.bulk-action-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .4rem;
+    min-height: 42px;
+    padding: .55rem 1rem;
+    border-radius: 14px;
+    font-size: .92rem;
+    font-weight: 700;
+    line-height: 1;
+    box-shadow: none !important;
+}
+
+.bulk-action-btn i {
+    font-size: .95rem;
+}
+
+.bulk-success-btn {
+    background: #198754;
+    border-color: #198754;
+}
+
+.bulk-success-btn:hover,
+.bulk-success-btn:focus {
+    background: #157347;
+    border-color: #157347;
+}
+
+.bulk-soft-btn {
+    background: #fff;
+    border: 1px solid #d8e1ee;
+    color: #334155;
+}
+
+.bulk-soft-btn:hover,
+.bulk-soft-btn:focus {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    color: #1e293b;
+}
+
+.bulk-outline-btn {
+    border-width: 1px;
+    color: #2563eb;
+    border-color: #bfd2ff;
+    background: #fff;
+}
+
+.bulk-outline-btn:hover,
+.bulk-outline-btn:focus {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border-color: #93c5fd;
+}
+
+.bulk-remove-btn {
+    min-height: 34px;
+    padding: .42rem .75rem;
+    border-radius: 12px;
+    font-size: .84rem;
+    font-weight: 700;
+}
+
+.bulk-result-table td,
+.bulk-result-table th {
+    vertical-align: top;
+}
+
+#bulkUploadResults .alert,
+#bulkUploadResults .card {
+    border-radius: 22px;
+    overflow: hidden;
+}
+
+@media (max-width: 991.98px) {
+    .bulk-hero {
+        flex-direction: column;
+        padding: 22px;
+    }
+
+    .bulk-builder-layout {
+        grid-template-columns: 1fr;
+    }
+}

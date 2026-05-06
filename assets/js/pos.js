@@ -32,6 +32,63 @@ function formatTransactionNo(saleId, dateValue = null) {
     return `SALE-${year}${month}${day}-${String(numericSaleId).padStart(6, '0')}`;
 }
 
+function formatUnitLabel(unitType, quantity = 1) {
+    const normalized = String(unitType || 'piece').toLowerCase();
+    const qty = Number(quantity || 0);
+
+    if (normalized === 'box') {
+        return qty === 1 ? 'Box' : 'Boxes';
+    }
+    if (normalized === 'case') {
+        return qty === 1 ? 'Case' : 'Cases';
+    }
+    return qty === 1 ? 'Piece' : 'Pieces';
+}
+
+function packagingDetailText(item) {
+    const unitType = String(item?.unit_type || 'piece').toLowerCase();
+    const multiplier = Number(item?.unit_multiplier || 1);
+
+    if (unitType === 'case' && multiplier > 1) {
+        return `(1 Case = ${multiplier.toLocaleString()} pcs)`;
+    }
+
+    if (unitType === 'box' && multiplier > 1) {
+        return `(1 Box = ${multiplier.toLocaleString()} pcs)`;
+    }
+
+    return '';
+}
+
+function saleBreakdownPackagingText(item) {
+    const unitType = String(item?.unit_type || 'piece').toLowerCase();
+    const multiplier = Number(item?.unit_multiplier || 1);
+    const qty = Number(item?.qty || 0);
+    const totalPieces = qty * multiplier;
+
+    if (unitType === 'case' && multiplier > 1) {
+        return {
+            primary: `${qty} ${formatUnitLabel(unitType, qty)}`,
+            secondary: `1 Case = ${multiplier.toLocaleString()} pcs`,
+            total: `Total: ${totalPieces.toLocaleString()} pcs`,
+        };
+    }
+
+    if (unitType === 'box' && multiplier > 1) {
+        return {
+            primary: `${qty} ${formatUnitLabel(unitType, qty)}`,
+            secondary: `1 Box = ${multiplier.toLocaleString()} pcs`,
+            total: `Total: ${totalPieces.toLocaleString()} pcs`,
+        };
+    }
+
+    return {
+        primary: `${qty} ${formatUnitLabel(unitType, qty)}`,
+        secondary: '',
+        total: `Total: ${totalPieces.toLocaleString()} pcs`,
+    };
+}
+
 function updateClock() {
     const now = new Date();
     const opts = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
@@ -60,6 +117,7 @@ function sendCheckoutNotificationUpdate(type = 'sale_success') {
 }
 
 const productCards = Array.from(document.querySelectorAll('.product-card'));
+const barcodeInput = document.getElementById('barcodeScanInput');
 const cartItemsEl = document.getElementById('cart-items');
 const cartRecoveryNoteEl = document.getElementById('cartRecoveryNote');
 const cart = {};
@@ -102,6 +160,8 @@ function buildCartLineItem(data, unit, qty) {
         unit_type: unit.unitType,
         unit_label: unit.unitLabel,
         unit_multiplier: unit.multiplier,
+        pieces_per_box: data.piecesPerBox || 1,
+        boxes_per_case: data.boxesPerCase || 1,
     };
 }
 
@@ -235,6 +295,8 @@ function getCardData(card) {
         name: card.dataset.name || '',
         vatable: Number(card.dataset.vat || '0') === 1,
         maxStock: parseInt(card.dataset.stock || '0', 10) || 0,
+        piecesPerBox: piecesPerBox,
+        boxesPerCase: boxesPerCase,
         units: {
             piece: {
                 unitType: 'piece',
@@ -765,6 +827,57 @@ document.getElementById('productSearch')?.addEventListener('input', (event) => {
     applyFilters();
 });
 
+barcodeInput?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') {
+        return;
+    }
+
+    event.preventDefault();
+    const scannedValue = String(barcodeInput.value || '').trim().toLowerCase();
+    if (scannedValue === '') {
+        return;
+    }
+
+    const matchedCard = productCards.find((card) => String(card.dataset.sku || '').trim().toLowerCase() === scannedValue);
+    if (!matchedCard) {
+        barcodeInput.classList.add('is-invalid');
+        barcodeInput.value = '';
+        barcodeInput.placeholder = 'No product matched that barcode / SKU';
+        window.setTimeout(() => {
+            barcodeInput.classList.remove('is-invalid');
+            barcodeInput.placeholder = 'Scan barcode / SKU and press Enter';
+        }, 1800);
+        return;
+    }
+
+    currentPage = 1;
+    activeCategoryId = normalizeFilterId(matchedCard.dataset.category);
+    activeSubcategoryId = normalizeFilterId(matchedCard.dataset.subcategory);
+    searchTerm = '';
+    const productSearchInput = document.getElementById('productSearch');
+    if (productSearchInput) {
+        productSearchInput.value = '';
+    }
+    setActiveButton(categoryBar, '.cat-btn', activeCategoryId);
+    renderSubcategoryBar();
+    setActiveButton(subcategoryBar, '.subcat-btn', activeSubcategoryId);
+    applyFilters();
+
+    matchedCard.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    matchedCard.classList.add('ring-focus');
+    window.setTimeout(() => matchedCard.classList.remove('ring-focus'), 1400);
+
+    const cardData = getCardData(matchedCard);
+    const unitKeys = Object.keys(cardData.units);
+    if (unitKeys.length > 1) {
+        openProductUnitModal(matchedCard);
+    } else {
+        applyCartQuantity(matchedCard, unitKeys[0] || 'piece', 1);
+    }
+
+    barcodeInput.value = '';
+});
+
 function buildPagination(active, total) {
     const bar = document.getElementById('productPagination');
     if (!bar) return;
@@ -797,7 +910,9 @@ function applyFilters() {
         const subcategoryId = normalizeFilterId(card.dataset.subcategory);
         const categoryMatch = activeCategoryId === 'all' || categoryId === activeCategoryId;
         const subcategoryMatch = activeSubcategoryId === 'all' || subcategoryId === activeSubcategoryId;
-        const searchMatch = searchTerm === '' || (card.dataset.name || '').toLowerCase().includes(searchTerm);
+        const searchMatch = searchTerm === ''
+            || (card.dataset.name || '').toLowerCase().includes(searchTerm)
+            || (card.dataset.sku || '').toLowerCase().includes(searchTerm);
         return categoryMatch && subcategoryMatch && searchMatch;
     });
 
@@ -855,7 +970,7 @@ function setPrintStatus(type, msg) {
     printStatusText.textContent = msg;
 }
 
-function buildReceiptHtml({ title, itemsHtml, subtotal, discount, vat, grandTotal, paymentLabel = '', change = '', date }) {
+function buildReceiptHtml({ title, transactionNo = '', itemsHtml, subtotal, discount, vat, grandTotal, paymentLabel = '', change = '', date }) {
     const storeName = document.getElementById('pStoreName').value || 'MY STORE';
     const address = document.getElementById('pAddress').value || '';
     const phone = document.getElementById('pPhone').value || '';
@@ -873,6 +988,7 @@ function buildReceiptHtml({ title, itemsHtml, subtotal, discount, vat, grandTota
 <body>
 <div class="receipt">
 <div class="sale-no">${escapeHtml(title)}</div>
+${transactionNo ? `<div class="sale-no">Transaction No: ${escapeHtml(transactionNo)}</div>` : ''}
 ${logo ? `<div class="r-logo"><img src="${escapeHtml(logo)}" alt="Store logo"></div>` : ''}
 <div class="r-store">${escapeHtml(storeName)}</div>
 <div class="r-info">${address ? `${escapeHtml(address)}<br>` : ''}${phone ? `Tel: ${escapeHtml(phone)}` : ''}</div>
@@ -937,11 +1053,13 @@ printNowBtn?.addEventListener('click', () => {
     const itemsHtml = keys.map((key) => {
         const item = cart[key];
         const discountedUnitPrice = item.price * (1 - item.discount / 100);
-        return `<tr><td class="item-name">${escapeHtml(item.name)} (${escapeHtml(item.unit_label)})${item.discount > 0 ? ` <span class="disc-tag">-${item.discount}%</span>` : ''}</td><td class="item-qty">${item.qty}</td><td class="item-price">${peso(discountedUnitPrice)}</td><td class="item-total">${peso(discountedUnitPrice * item.qty)}</td></tr>`;
+        const packagingNote = packagingDetailText(item);
+        return `<tr><td class="item-name">${escapeHtml(item.name)} (${escapeHtml(item.unit_label)})${item.discount > 0 ? ` <span class="disc-tag">-${item.discount}%</span>` : ''}${packagingNote ? `<div style="font-size:9px;color:#555;">${escapeHtml(packagingNote)}</div>` : ''}</td><td class="item-qty">${item.qty}</td><td class="item-price">${peso(discountedUnitPrice)}</td><td class="item-total">${peso(discountedUnitPrice * item.qty)}</td></tr>`;
     }).join('');
 
     const receiptHtml = buildReceiptHtml({
         title: 'POS Receipt',
+        transactionNo: '',
         itemsHtml,
         subtotal: document.getElementById('subtotal').textContent,
         discount: document.getElementById('total-discount').textContent,
@@ -1015,11 +1133,15 @@ function renderSaleBreakdown(sale) {
     const rows = sale.items.map((item) => {
         const discountedUnitPrice = Number(item.price || 0) * (1 - Number(item.discount || 0) / 100);
         const lineTotal = discountedUnitPrice * Number(item.qty || 0);
+        const packaging = saleBreakdownPackagingText(item);
         return `
             <tr>
                 <td>
                     <strong>${escapeHtml(item.name)}</strong>
                     <span style="display:block;color:var(--text-secondary);font-size:12px;">${escapeHtml(item.unit_label || 'piece')}${Number(item.discount || 0) > 0 ? ` | ${Number(item.discount)}% discount` : ''}</span>
+                    <span style="display:block;color:var(--text-secondary);font-size:11px;">${escapeHtml(packaging.primary || '')}</span>
+                    ${packaging.secondary ? `<span style="display:block;color:var(--text-secondary);font-size:11px;">${escapeHtml(packaging.secondary)}</span>` : ''}
+                    <span style="display:block;color:var(--text-secondary);font-size:11px;font-weight:700;">${escapeHtml(packaging.total || '')}</span>
                 </td>
                 <td style="text-align:right;">${Number(item.qty || 0).toLocaleString()}</td>
                 <td style="text-align:right;">${peso(discountedUnitPrice)}</td>
@@ -1181,7 +1303,9 @@ confirmCheckoutBtn?.addEventListener('click', async () => {
                 qty: item.qty,
                 discount: item.discount,
                 price: item.price,
+                unit_type: item.unit_type,
                 unit_label: item.unit_label,
+                unit_multiplier: item.unit_multiplier,
             })),
             subtotal: document.getElementById('subtotal').textContent,
             discount: document.getElementById('total-discount').textContent,
@@ -1208,7 +1332,8 @@ confirmCheckoutBtn?.addEventListener('click', async () => {
 function printReceipt(sale) {
     const itemsHtml = sale.items.map((item) => {
         const discountedUnitPrice = item.price * (1 - item.discount / 100);
-        return `<tr><td class="item-name">${escapeHtml(item.name)} (${escapeHtml(item.unit_label)})${item.discount > 0 ? ` <span class="disc-tag">-${item.discount}%</span>` : ''}</td><td class="item-qty">${item.qty}</td><td class="item-price">${peso(discountedUnitPrice)}</td><td class="item-total">${peso(discountedUnitPrice * item.qty)}</td></tr>`;
+        const packagingNote = packagingDetailText(item);
+        return `<tr><td class="item-name">${escapeHtml(item.name)} (${escapeHtml(item.unit_label)})${item.discount > 0 ? ` <span class="disc-tag">-${item.discount}%</span>` : ''}${packagingNote ? `<div style="font-size:9px;color:#555;">${escapeHtml(packagingNote)}</div>` : ''}</td><td class="item-qty">${item.qty}</td><td class="item-price">${peso(discountedUnitPrice)}</td><td class="item-total">${peso(discountedUnitPrice * item.qty)}</td></tr>`;
     }).join('');
 
     const paymentLabel = {
@@ -1219,7 +1344,8 @@ function printReceipt(sale) {
     }[sale.payment] || sale.payment;
 
     const receiptHtml = buildReceiptHtml({
-        title: sale.transaction_no || formatTransactionNo(sale.sale_id, sale.date),
+        title: 'POS Receipt',
+        transactionNo: sale.transaction_no || formatTransactionNo(sale.sale_id, sale.date),
         itemsHtml,
         subtotal: sale.subtotal,
         discount: sale.discount,

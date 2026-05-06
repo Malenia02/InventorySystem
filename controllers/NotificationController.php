@@ -161,6 +161,86 @@ final class NotificationController
         ];
     }
 
+    public static function getNotificationSnapshot(PDO $conn, int $userId, string $role, int $limit = 20): array
+    {
+        if ($userId <= 0) {
+            throw new InvalidArgumentException('Invalid user ID.');
+        }
+
+        $role = trim($role);
+        $limit = self::normalizeLimit($limit);
+        $lastSeen = self::getLastSeen($conn, $userId);
+        $since = $lastSeen ?? '1970-01-01 00:00:00';
+        $visibilitySql = self::visibilitySql($role);
+
+        $stmt = $conn->prepare("
+            SELECT
+                n.notification_id,
+                n.user_id,
+                n.role_target,
+                n.type,
+                n.title,
+                n.message,
+                n.icon,
+                n.color,
+                n.link,
+                n.created_at AS time,
+                CASE WHEN n.created_at > :since THEN 1 ELSE 0 END AS is_unread
+            FROM " . self::TABLE . " n
+            WHERE {$visibilitySql}
+            ORDER BY n.created_at DESC, n.notification_id DESC
+            LIMIT :limit
+        ");
+
+        if (strtolower($role) === 'admin') {
+            $stmt->bindValue(':role', $role, PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':uid', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':since', $since, PDO::PARAM_STR);
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $all = [];
+        $unread = [];
+        $previous = [];
+
+        foreach ($rows as $row) {
+            $row['time_ago'] = self::timeAgo($row['time'] ?? null);
+            $isUnread = (int) ($row['is_unread'] ?? 0) === 1;
+            unset($row['is_unread']);
+
+            $all[] = $row;
+            if ($isUnread) {
+                $unread[] = $row;
+            } else {
+                $previous[] = $row;
+            }
+        }
+
+        $countStmt = $conn->prepare("
+            SELECT COUNT(*) AS total
+            FROM " . self::TABLE . " n
+            WHERE {$visibilitySql}
+              AND n.created_at > :since
+        ");
+
+        if (strtolower($role) === 'admin') {
+            $countStmt->bindValue(':role', $role, PDO::PARAM_STR);
+        }
+        $countStmt->bindValue(':uid', $userId, PDO::PARAM_INT);
+        $countStmt->bindValue(':since', $since, PDO::PARAM_STR);
+        $countStmt->execute();
+
+        return [
+            'all' => $all,
+            'unread' => $unread,
+            'previous' => $previous,
+            'last_seen' => $lastSeen,
+            'count' => min(99, (int) $countStmt->fetchColumn()),
+        ];
+    }
+
     public static function getUnreadCount(PDO $conn, int $userId, string $role): int
     {
         if ($userId <= 0) {

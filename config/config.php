@@ -115,6 +115,26 @@ if (!function_exists('app_should_force_https')) {
     }
 }
 
+if (!function_exists('app_is_public_demo')) {
+    function app_is_public_demo(): bool
+    {
+        return filter_var(env_value('APP_PUBLIC_DEMO', false), FILTER_VALIDATE_BOOL);
+    }
+}
+
+if (!function_exists('app_secret_value')) {
+    function app_secret_value(string $key, bool $requiredInProduction = true): string
+    {
+        $value = trim((string) env_value($key, ''));
+
+        if ($value === '' && $requiredInProduction && (string) env_value('APP_ENV', 'production') === 'production') {
+            throw new RuntimeException($key . ' is required in production.');
+        }
+
+        return $value;
+    }
+}
+
 // ==========================
 // PATH CONSTANTS
 // ==========================
@@ -178,7 +198,7 @@ if (!headers_sent()) {
     header('X-Frame-Options: SAMEORIGIN');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: strict-origin-when-cross-origin');
-    header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+    header('Permissions-Policy: geolocation=(), microphone=(self), camera=()');
     header(
         "Content-Security-Policy: "
         . "default-src 'self'; "
@@ -186,11 +206,11 @@ if (!headers_sent()) {
         . "form-action 'self'; "
         . "frame-ancestors 'self'; "
         . "object-src 'none'; "
-        . "img-src 'self' data: blob: https:; "
+        . "img-src 'self' data: blob:; "
         . "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https:; "
         . "font-src 'self' data: https://fonts.gstatic.com https:; "
-        . "script-src 'self' 'unsafe-inline' https:; "
-        . "connect-src 'self' ws: wss: https:;"
+        . "script-src 'self' 'unsafe-inline'; "
+        . "connect-src 'self' ws: wss:;"
     );
 
     if (app_is_https()) {
@@ -208,78 +228,10 @@ if ($appEnv === 'production' && app_should_force_https()) {
 }
 
 // ==========================
-// SESSION HARDENING
-// ==========================
-if (session_status() === PHP_SESSION_NONE && php_sapi_name() !== 'cli') {
-    $isHttps = app_is_https();
-
-    ini_set('session.use_strict_mode', '1');
-    ini_set('session.use_only_cookies', '1');
-    ini_set('session.cookie_httponly', '1');
-    ini_set('session.cookie_secure', $isHttps ? '1' : '0');
-    ini_set('session.cookie_samesite', 'Lax');
-
-    session_name('INVSYSSESSID');
-    session_set_cookie_params([
-        'lifetime' => 0,
-        'path'     => '/',
-        'domain'   => '',
-        'secure'   => $isHttps,
-        'httponly' => true,
-        'samesite' => 'Lax',
-    ]);
-
-    session_start();
-}
-
-// ==========================
 // SESSION TIMEOUT
 // ==========================
 if (!defined('SESSION_TIMEOUT')) {
     define('SESSION_TIMEOUT', (int) env_value('SESSION_TIMEOUT', 1800));
-}
-
-if (php_sapi_name() !== 'cli' && isset($_SESSION['user_id'])) {
-    $lastActivity = $_SESSION['last_activity'] ?? null;
-
-    if ($lastActivity !== null && (time() - (int) $lastActivity) > SESSION_TIMEOUT) {
-        $_SESSION = [];
-        session_unset();
-
-        if (ini_get('session.use_cookies')) {
-            $params = session_get_cookie_params();
-            setcookie(
-                session_name(),
-                '',
-                time() - 42000,
-                $params['path'],
-                $params['domain'],
-                (bool) $params['secure'],
-                (bool) $params['httponly']
-            );
-        }
-
-        session_destroy();
-
-        if (app_is_ajax_or_json()) {
-            http_response_code(401);
-            header('Content-Type: application/json; charset=UTF-8');
-            echo json_encode([
-                'success'  => false,
-                'error'    => 'Session expired. Please log in again.',
-                'redirect' => '/inventory_system/login.php'
-            ]);
-            exit;
-        }
-
-        safe_redirect('/inventory_system/login.php?reason=timeout');
-    }
-
-    $_SESSION['last_activity'] = time();
-
-    header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-    header('Pragma: no-cache');
-    header('Expires: 0');
 }
 
 // ==========================

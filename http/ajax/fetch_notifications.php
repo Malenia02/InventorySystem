@@ -31,12 +31,11 @@ try {
         ], 401);
     }
 
-    $feed = NotificationController::getNotificationFeed($conn, $userId, $role, 20);
-    $count = NotificationController::getUnreadCount($conn, $userId, $role);
+    $feed = NotificationController::getNotificationSnapshot($conn, $userId, $role, 20);
 
     jsonResponse([
         'success'       => true,
-        'count'         => $count,
+        'count'         => (int) ($feed['count'] ?? 0),
         'notifications' => $feed['all'],
         'unread'        => $feed['unread'],
         'previous'      => $feed['previous'],

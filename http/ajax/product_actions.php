@@ -384,9 +384,14 @@ try {
     if (isset($_POST['restock_product'])) {
         $productId = (int) ($_POST['product_id'] ?? 0);
         $quantity  = (int) ($_POST['quantity'] ?? 0);
+        $adjustmentType = trim((string) ($_POST['adjustment_type'] ?? 'manual_restock'));
+        $supplierId = !empty($_POST['supplier_id']) ? (int) $_POST['supplier_id'] : null;
         $notes = trim((string) ($_POST['notes'] ?? ''));
 
-        ProductController::restockProduct($conn, $productId, $quantity, $sessionUserId, $notes);
+        ProductController::restockProduct($conn, $productId, $quantity, $sessionUserId, $notes, [
+            'adjustment_type' => $adjustmentType,
+            'supplier_id' => $supplierId,
+        ]);
         $updated = ProductController::getProductById($conn, $productId);
 
         safeCreateProductNotification(
@@ -407,6 +412,7 @@ try {
             $sessionUserId,
             'product_restock',
             $updated['product_name'] . " restocked by {$quantity} unit(s)"
+                . " | Type: " . str_replace('_', ' ', $adjustmentType)
                 . ($notes !== '' ? " | Note: {$notes}" : '')
                 . ". New quantity: {$updated['quantity']}",
             'product',
@@ -427,8 +433,13 @@ try {
         $productId = (int) ($_POST['product_id'] ?? 0);
         $quantity  = (int) ($_POST['quantity'] ?? 0);
         $reason    = trim((string) ($_POST['reason'] ?? ''));
+        $adjustmentType = trim((string) ($_POST['adjustment_type'] ?? $reason));
+        $notes = trim((string) ($_POST['notes'] ?? ''));
 
-        ProductController::stockOutProduct($conn, $productId, $quantity, $reason, $sessionUserId);
+        ProductController::stockOutProduct($conn, $productId, $quantity, $reason, $sessionUserId, [
+            'adjustment_type' => $adjustmentType,
+            'notes' => $notes,
+        ]);
         $updated = ProductController::getProductById($conn, $productId);
 
         safeCreateProductNotification(
@@ -448,7 +459,11 @@ try {
             $logConfig,
             $sessionUserId,
             'product_stock_out',
-            $updated['product_name'] . " stock-out by {$quantity} unit(s)" . ($reason !== '' ? " | Reason: {$reason}" : '') . ". New quantity: {$updated['quantity']}",
+            $updated['product_name'] . " stock-out by {$quantity} unit(s)"
+                . ($adjustmentType !== '' ? " | Type: {$adjustmentType}" : '')
+                . ($reason !== '' ? " | Reason: {$reason}" : '')
+                . ($notes !== '' ? " | Note: {$notes}" : '')
+                . ". New quantity: {$updated['quantity']}",
             'product',
             $productId
         );
