@@ -10,7 +10,35 @@ Middleware::auth()->role(['admin']);
 
 $csrfToken = Middleware::generateCsrfToken();
 $categories = CategoryController::all($conn);
-$subcategories = SubcategoryController::all($conn);
+$subcategoryFilters = [
+    'search' => trim((string) ($_GET['search'] ?? '')),
+    'status' => strtolower(trim((string) ($_GET['status'] ?? 'all'))),
+    'category_id' => (int) ($_GET['category_id'] ?? 0),
+    'page' => max(1, (int) ($_GET['page'] ?? 1)),
+    'per_page' => (int) ($_GET['per_page'] ?? 25),
+];
+$subcategoryPage = SubcategoryController::paginate($conn, $subcategoryFilters);
+$subcategories = $subcategoryPage['items'];
+$subcategoryFilters = [
+    'search' => (string) $subcategoryPage['search'],
+    'status' => (string) $subcategoryPage['status'],
+    'category_id' => (int) $subcategoryPage['category_id'],
+    'page' => (int) $subcategoryPage['page'],
+    'per_page' => (int) $subcategoryPage['per_page'],
+];
+$subcategoryRowStart = $subcategoryPage['total'] > 0 ? (($subcategoryPage['page'] - 1) * $subcategoryPage['per_page']) + 1 : 0;
+
+function subcategoryListUrl(array $filters, array $overrides = []): string
+{
+    $params = array_merge($filters, $overrides);
+    if (($params['page'] ?? 1) <= 1) unset($params['page']);
+    if (($params['search'] ?? '') === '') unset($params['search']);
+    if (($params['status'] ?? 'all') === 'all') unset($params['status']);
+    if (($params['category_id'] ?? 0) <= 0) unset($params['category_id']);
+    if (($params['per_page'] ?? 25) === 25) unset($params['per_page']);
+    $query = http_build_query($params);
+    return '/inventory_system/product_management/manage_subcategory.php' . ($query !== '' ? '?' . $query : '');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -91,6 +119,43 @@ require __DIR__ . '/../components/breadcrumb.php';
                         <i class="bi bi-plus-circle"></i> Add New Subcategory
                     </button>
 
+                    <form method="get" class="row g-3 align-items-end mb-3">
+                        <div class="col-lg-4">
+                            <label class="form-label">Search</label>
+                            <input type="text" name="search" class="form-control" value="<?= htmlspecialchars($subcategoryFilters['search'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Subcategory, category, description">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Category</label>
+                            <select name="category_id" class="form-select">
+                                <option value="0">All</option>
+                                <?php foreach ($categories as $category): ?>
+                                    <option value="<?= (int) ($category['category_id'] ?? 0) ?>" <?= $subcategoryFilters['category_id'] === (int) ($category['category_id'] ?? 0) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars((string) ($category['category_name'] ?? '-'), ENT_QUOTES, 'UTF-8') ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="all" <?= $subcategoryFilters['status'] === 'all' ? 'selected' : '' ?>>All</option>
+                                <option value="active" <?= $subcategoryFilters['status'] === 'active' ? 'selected' : '' ?>>Active</option>
+                                <option value="inactive" <?= $subcategoryFilters['status'] === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Per page</label>
+                            <select name="per_page" class="form-select">
+                                <?php foreach ([10, 25, 50, 100] as $size): ?>
+                                    <option value="<?= $size ?>" <?= $subcategoryFilters['per_page'] === $size ? 'selected' : '' ?>><?= $size ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-1">
+                            <button type="submit" class="btn btn-primary w-100">Apply</button>
+                        </div>
+                    </form>
+
                     <div class="table-responsive">
                         <table class="table table-striped table-bordered" id="subcategoryTable">
                             <thead>
@@ -105,11 +170,40 @@ require __DIR__ . '/../components/breadcrumb.php';
                             </thead>
                             <tbody>
                                 <?php foreach ($subcategories as $index => $subcategory): ?>
-                                    <?php $rowNumber = $index + 1; ?>
+                                    <?php $rowNumber = $subcategoryRowStart + $index; ?>
                                     <?php include __DIR__ . '/../templates/subcategory_row.php'; ?>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+                        <div class="text-muted small">
+                            <?php if ($subcategoryPage['total'] > 0): ?>
+                                Showing <?= $subcategoryRowStart ?> to <?= min($subcategoryRowStart + count($subcategories) - 1, $subcategoryPage['total']) ?> of <?= $subcategoryPage['total'] ?> subcategories
+                            <?php else: ?>
+                                No subcategories found
+                            <?php endif; ?>
+                        </div>
+                        <nav aria-label="Subcategory pagination">
+                            <ul class="pagination pagination-sm mb-0">
+                                <li class="page-item <?= $subcategoryPage['page'] <= 1 ? 'disabled' : '' ?>">
+                                    <a class="page-link" href="<?= htmlspecialchars(subcategoryListUrl($subcategoryFilters, ['page' => $subcategoryPage['page'] - 1]), ENT_QUOTES, 'UTF-8') ?>">Previous</a>
+                                </li>
+                                <?php
+                                $subcategoryStartPage = max(1, $subcategoryPage['page'] - 2);
+                                $subcategoryEndPage = min($subcategoryPage['total_pages'], $subcategoryPage['page'] + 2);
+                                for ($pageNumber = $subcategoryStartPage; $pageNumber <= $subcategoryEndPage; $pageNumber++):
+                                ?>
+                                    <li class="page-item <?= $pageNumber === $subcategoryPage['page'] ? 'active' : '' ?>">
+                                        <a class="page-link" href="<?= htmlspecialchars(subcategoryListUrl($subcategoryFilters, ['page' => $pageNumber]), ENT_QUOTES, 'UTF-8') ?>"><?= $pageNumber ?></a>
+                                    </li>
+                                <?php endfor; ?>
+                                <li class="page-item <?= $subcategoryPage['page'] >= $subcategoryPage['total_pages'] ? 'disabled' : '' ?>">
+                                    <a class="page-link" href="<?= htmlspecialchars(subcategoryListUrl($subcategoryFilters, ['page' => $subcategoryPage['page'] + 1]), ENT_QUOTES, 'UTF-8') ?>">Next</a>
+                                </li>
+                            </ul>
+                        </nav>
                     </div>
 
                     <div class="modal fade modal-modern" id="addSubcategoryModal" tabindex="-1">

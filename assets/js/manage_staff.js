@@ -23,7 +23,6 @@ document.addEventListener("DOMContentLoaded", () => {
     editPhotoInput: document.querySelector('#editStaffForm input[name="photo"]'),
     editPhotoPreview: document.getElementById("editStaffPhotoPreview")
   };
-  let staffDataTable = null;
 
   const addModal = page.addModalEl ? bootstrap.Modal.getOrCreateInstance(page.addModalEl) : null;
   const editModal = page.editModalEl ? bootstrap.Modal.getOrCreateInstance(page.editModalEl) : null;
@@ -36,6 +35,34 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const endpoint = "/inventory_system/http/ajax/staff_actions.php";
   const fallbackPhoto = "/inventory_system/assets/img/default-user.png";
+
+  function queueReloadToast(message, icon = "success") {
+    try {
+      sessionStorage.setItem("manageStaffFlash", JSON.stringify({ message, icon }));
+    } catch (error) {
+      console.warn("Unable to persist staff flash message.", error);
+    }
+  }
+
+  function flushQueuedToast() {
+    try {
+      const raw = sessionStorage.getItem("manageStaffFlash");
+      if (!raw) return;
+
+      sessionStorage.removeItem("manageStaffFlash");
+      const payload = JSON.parse(raw);
+      if (payload?.message) {
+        showToast(payload.message, payload.icon || "success");
+      }
+    } catch (error) {
+      console.warn("Unable to restore staff flash message.", error);
+    }
+  }
+
+  function reloadCurrentPage(message, icon = "success") {
+    queueReloadToast(message, icon);
+    window.location.assign(window.location.pathname + window.location.search);
+  }
 
   function showToast(message, icon = "success") {
     Toast.fire({ icon, title: message });
@@ -135,54 +162,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function createDataTableRowFromElement(row) {
-    if (!row) return null;
-
-    const attributes = {};
-    if (row.id) attributes.id = row.id;
-    if (row.className) attributes.class = row.className;
-
-    return {
-      attributes,
-      cells: Array.from(row.children).map((cell) => ({
-        data: cell.innerHTML
-      }))
-    };
-  }
-
-  function findDataTableRowIndex(rowId) {
-    if (!staffDataTable?.data?.data || !rowId) return -1;
-
-    return staffDataTable.data.data.findIndex((row) => {
-      return String(row?.attributes?.id || "") === String(rowId);
-    });
-  }
-
-  function syncDataTableRowNumbers() {
-    if (!staffDataTable?.data?.data) return;
-
-    staffDataTable.data.data.forEach((row, index) => {
-      if (row?.cells?.[0]) {
-        row.cells[0].data = String(index + 1);
-      }
-    });
-  }
-
-  function renderDataTablePreservingPage(preferredPage = null) {
-    if (!staffDataTable) {
-      updateRowNumbers();
-      return;
-    }
-
-    const currentPage = preferredPage ?? staffDataTable._currentPage ?? 1;
-    syncDataTableRowNumbers();
-    staffDataTable.update(true);
-
-    const totalPages = Math.max(staffDataTable.totalPages || 1, 1);
-    const targetPage = Math.min(Math.max(currentPage, 1), totalPages);
-    staffDataTable.page(targetPage);
-  }
-
   function flashRenderedRow(rowId, flashClass) {
     if (!rowId || !flashClass) return;
 
@@ -265,60 +244,6 @@ document.addEventListener("DOMContentLoaded", () => {
     return tr;
   }
 
-  function insertNewRowFromData(staff) {
-    if (!staff) return;
-
-    const newRow = buildStaffRow(staff);
-
-    try {
-      if (staffDataTable) {
-        const rowData = createDataTableRowFromElement(newRow);
-        if (rowData) {
-          staffDataTable.data.data.unshift(rowData);
-          renderDataTablePreservingPage(1);
-          flashRenderedRow(newRow.id, "table-success");
-          return;
-        }
-      }
-    } catch (error) {
-      console.error("Staff table prepend sync failed. Falling back to DOM update.", error);
-    }
-
-    if (!page.tableBody) return;
-
-    page.tableBody.prepend(newRow);
-    updateRowNumbers();
-    flashRenderedRow(newRow.id, "table-success");
-  }
-
-  function replaceExistingRowFromData(staffId, staff) {
-    const oldRow = document.getElementById(`staffRow${staffId}`);
-    if (!oldRow || !staff) return;
-
-    const newRow = buildStaffRow(staff);
-
-    try {
-      if (staffDataTable) {
-        const rowIndex = findDataTableRowIndex(oldRow.id || newRow.id);
-        const rowData = createDataTableRowFromElement(newRow);
-
-        if (rowIndex >= 0 && rowData) {
-          const currentPage = staffDataTable._currentPage ?? 1;
-          staffDataTable.data.data[rowIndex] = rowData;
-          renderDataTablePreservingPage(currentPage);
-          flashRenderedRow(newRow.id, "table-warning");
-          return;
-        }
-      }
-    } catch (error) {
-      console.error("Staff table sync failed. Falling back to DOM update.", error);
-    }
-
-    oldRow.replaceWith(newRow);
-    updateRowNumbers();
-    flashRenderedRow(newRow.id, "table-warning");
-  }
-
   function fillEditModalFromButton(button) {
     if (!button || !page.editForm) return;
 
@@ -368,14 +293,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.success) {
         const successMessage = data.message || "Nice work! The staff record was saved.";
         showMessage("success", successMessage);
-        showToast(successMessage, "success");
-
-        if (data.staff) {
-          insertNewRowFromData(data.staff);
-        }
-
         resetAddForm();
         if (addModal) addModal.hide();
+        reloadCurrentPage(successMessage, "success");
       }
     } catch (error) {
       console.error(error);
@@ -408,14 +328,9 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.success) {
         const successMessage = data.message || "Sweet update. Staff details are saved.";
         showMessage("success", successMessage);
-        showToast(successMessage, "success");
-
-        if (data.staff && data.staff_id) {
-          replaceExistingRowFromData(data.staff_id, data.staff);
-        }
-
         if (editModal) editModal.hide();
         resetEditForm();
+        reloadCurrentPage(successMessage, "success");
       }
     } catch (error) {
       console.error(error);
@@ -469,11 +384,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (data.success) {
         const successMessage = data.message || `${staffName} is all set.`;
         showMessage("success", successMessage);
-        showToast(`All set. ${successMessage}`, "success");
-
-        if (data.staff && data.staff_id) {
-          replaceExistingRowFromData(data.staff_id, data.staff);
-        }
+        reloadCurrentPage(`All set. ${successMessage}`, "success");
       }
     } catch (error) {
       console.error(error);
@@ -501,16 +412,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function initDataTable() {
-    if (page.table && window.simpleDatatables && simpleDatatables.DataTable) {
-      staffDataTable = new simpleDatatables.DataTable(page.table, {
-        searchable: true,
-        fixedHeight: true,
-        perPage: 10
-      });
-    }
-  }
-
   function initModalCleanup() {
     page.addModalEl?.addEventListener("hidden.bs.modal", () => {
       resetAddForm();
@@ -523,7 +424,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   previewImage(page.addPhotoInput, page.addPhotoPreview);
   previewImage(page.editPhotoInput, page.editPhotoPreview);
-  initDataTable();
+  flushQueuedToast();
   initModalCleanup();
   bindTableEvents();
 

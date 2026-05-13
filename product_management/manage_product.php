@@ -17,9 +17,55 @@ $csrf_token = Middleware::generateCsrfToken();
 
 $categories = CategoryController::all($conn);
 $subcategories = SubcategoryController::all($conn);
-$products   = ProductController::allProducts($conn);
 $suppliers  = SupplierController::all($conn);
 $pendingStockRequests = StockAdjustmentController::pendingCount($conn);
+
+$productFilters = [
+    'search' => trim((string) ($_GET['search'] ?? '')),
+    'status' => strtolower(trim((string) ($_GET['status'] ?? 'all'))),
+    'category_id' => (int) ($_GET['category_id'] ?? 0),
+    'supplier_id' => (int) ($_GET['supplier_id'] ?? 0),
+    'page' => max(1, (int) ($_GET['page'] ?? 1)),
+    'per_page' => (int) ($_GET['per_page'] ?? 25),
+];
+$productPage = ProductController::paginate($conn, $productFilters);
+$products = $productPage['items'];
+$productFilters = [
+    'search' => (string) $productPage['search'],
+    'status' => (string) $productPage['status'],
+    'category_id' => (int) $productPage['category_id'],
+    'supplier_id' => (int) $productPage['supplier_id'],
+    'page' => (int) $productPage['page'],
+    'per_page' => (int) $productPage['per_page'],
+];
+$productRowStart = $productPage['total'] > 0 ? (($productPage['page'] - 1) * $productPage['per_page']) + 1 : 0;
+
+function productListUrl(array $filters, array $overrides = []): string
+{
+    $params = array_merge($filters, $overrides);
+
+    if (($params['page'] ?? 1) <= 1) {
+        unset($params['page']);
+    }
+    if (($params['status'] ?? 'all') === 'all') {
+        unset($params['status']);
+    }
+    if (($params['category_id'] ?? 0) <= 0) {
+        unset($params['category_id']);
+    }
+    if (($params['supplier_id'] ?? 0) <= 0) {
+        unset($params['supplier_id']);
+    }
+    if (($params['search'] ?? '') === '') {
+        unset($params['search']);
+    }
+    if (($params['per_page'] ?? 25) === 25) {
+        unset($params['per_page']);
+    }
+
+    $query = http_build_query($params);
+    return '/inventory_system/product_management/manage_product.php' . ($query !== '' ? '?' . $query : '');
+}
 
 function renderSubcategoryOptions(array $subcategories): string
 {
@@ -157,6 +203,54 @@ function renderSubcategoryOptions(array $subcategories): string
                                 </a>
                             </div>
 
+                            <form method="get" class="row g-3 align-items-end mb-3">
+                                <div class="col-lg-4">
+                                    <label class="form-label">Search</label>
+                                    <input type="text" name="search" class="form-control" value="<?= htmlspecialchars($productFilters['search'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Product, SKU, category, supplier">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Status</label>
+                                    <select name="status" class="form-select">
+                                        <option value="all" <?= $productFilters['status'] === 'all' ? 'selected' : '' ?>>All</option>
+                                        <option value="active" <?= $productFilters['status'] === 'active' ? 'selected' : '' ?>>Active</option>
+                                        <option value="inactive" <?= $productFilters['status'] === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Category</label>
+                                    <select name="category_id" class="form-select">
+                                        <option value="0">All</option>
+                                        <?php foreach ($categories as $cat): ?>
+                                            <option value="<?= (int) $cat['category_id'] ?>" <?= $productFilters['category_id'] === (int) $cat['category_id'] ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars((string) $cat['category_name'], ENT_QUOTES, 'UTF-8') ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Supplier</label>
+                                    <select name="supplier_id" class="form-select">
+                                        <option value="0">All</option>
+                                        <?php foreach ($suppliers as $sup): ?>
+                                            <option value="<?= (int) $sup['supplier_id'] ?>" <?= $productFilters['supplier_id'] === (int) $sup['supplier_id'] ? 'selected' : '' ?>>
+                                                <?= htmlspecialchars((string) $sup['supplier_name'], ENT_QUOTES, 'UTF-8') ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-1">
+                                    <label class="form-label">Per page</label>
+                                    <select name="per_page" class="form-select">
+                                        <?php foreach ([10, 25, 50, 100] as $size): ?>
+                                            <option value="<?= $size ?>" <?= $productFilters['per_page'] === $size ? 'selected' : '' ?>><?= $size ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                                <div class="col-md-1 d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary w-100">Apply</button>
+                                </div>
+                            </form>
+
                             <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
                                 <table id="productsTable" class="table table-striped table-bordered">
                                     <thead>
@@ -188,7 +282,7 @@ function renderSubcategoryOptions(array $subcategories): string
                                             if (!empty($p['case_sale_price'])) $discountParts[] = 'Case: ' . rtrim(rtrim(number_format((float)$p['case_sale_price'], 2), '0'), '.') . '%';
                                         ?>
                                             <tr id="productRow<?= (int)$p['product_id'] ?>">
-                                                <td><?= $index + 1 ?></td>
+                                                <td><?= $productRowStart + $index ?></td>
                                                 <td class="text-center">
                                                     <img src="<?= $photo ?>" alt="Photo"
                                                         style="width:50px;height:50px;object-fit:cover;">
@@ -259,6 +353,36 @@ function renderSubcategoryOptions(array $subcategories): string
                                         <?php endforeach; ?>
                                     </tbody>
                                 </table>
+                            </div>
+
+                            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+                                <div class="text-muted small">
+                                    <?php if ($productPage['total'] > 0): ?>
+                                        Showing <?= $productRowStart ?> to <?= min($productRowStart + count($products) - 1, $productPage['total']) ?> of <?= $productPage['total'] ?> products
+                                    <?php else: ?>
+                                        No products found
+                                    <?php endif; ?>
+                                </div>
+
+                                <nav aria-label="Products pagination">
+                                    <ul class="pagination pagination-sm mb-0">
+                                        <li class="page-item <?= $productPage['page'] <= 1 ? 'disabled' : '' ?>">
+                                            <a class="page-link" href="<?= htmlspecialchars(productListUrl($productFilters, ['page' => $productPage['page'] - 1]), ENT_QUOTES, 'UTF-8') ?>">Previous</a>
+                                        </li>
+                                        <?php
+                                        $productStartPage = max(1, $productPage['page'] - 2);
+                                        $productEndPage = min($productPage['total_pages'], $productPage['page'] + 2);
+                                        for ($pageNumber = $productStartPage; $pageNumber <= $productEndPage; $pageNumber++):
+                                        ?>
+                                            <li class="page-item <?= $pageNumber === $productPage['page'] ? 'active' : '' ?>">
+                                                <a class="page-link" href="<?= htmlspecialchars(productListUrl($productFilters, ['page' => $pageNumber]), ENT_QUOTES, 'UTF-8') ?>"><?= $pageNumber ?></a>
+                                            </li>
+                                        <?php endfor; ?>
+                                        <li class="page-item <?= $productPage['page'] >= $productPage['total_pages'] ? 'disabled' : '' ?>">
+                                            <a class="page-link" href="<?= htmlspecialchars(productListUrl($productFilters, ['page' => $productPage['page'] + 1]), ENT_QUOTES, 'UTF-8') ?>">Next</a>
+                                        </li>
+                                    </ul>
+                                </nav>
                             </div>
 
                         </div>

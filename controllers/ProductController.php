@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/SubcategoryController.php';
+require_once __DIR__ . '/ListQueryHelper.php';
 
 final class ProductController
 {
@@ -16,6 +17,7 @@ final class ProductController
         'image/webp' => 'webp',
     ];
     private const ALLOWED_PRODUCT_STATUSES = ['active', 'inactive'];
+    private static bool $paginationIndexesChecked = false;
 
     public static function ensureStockMovementSchema(PDO $conn): void
     {
@@ -74,6 +76,135 @@ final class ProductController
             static fn(array $product): array => self::normalizeProductForView($product),
             $rows
         );
+    }
+
+    public static function paginate(PDO $conn, array $filters = []): array
+    {
+        SubcategoryController::ensureSchema($conn);
+        self::ensurePaginationIndexes($conn);
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $allowedPerPage = [10, 25, 50, 100];
+        $perPage = in_array($perPage, $allowedPerPage, true) ? $perPage : 25;
+        $search = trim((string) ($filters['search'] ?? ''));
+        $status = strtolower(trim((string) ($filters['status'] ?? 'all')));
+        $categoryId = (int) ($filters['category_id'] ?? 0);
+        $supplierId = (int) ($filters['supplier_id'] ?? 0);
+
+        $where = [];
+        $params = [];
+
+        if ($search !== '') {
+            $where = array_merge($where, ListQueryHelper::buildTokenizedLikeFilters(
+                [
+                    'p.product_name',
+                    "IFNULL(p.sku, '')",
+                    "IFNULL(c.category_name, '')",
+                    "IFNULL(sc.subcategory_name, '')",
+                    "IFNULL(s.supplier_name, '')",
+                ],
+                ListQueryHelper::extractSearchTerms($search),
+                $params,
+                'product_search'
+            ));
+        }
+
+        if (in_array($status, self::ALLOWED_PRODUCT_STATUSES, true)) {
+            $where[] = 'p.status = :status';
+            $params[':status'] = $status;
+        } else {
+            $status = 'all';
+        }
+
+        if ($categoryId > 0) {
+            $where[] = 'p.category_id = :category_id';
+            $params[':category_id'] = $categoryId;
+        } else {
+            $categoryId = 0;
+        }
+
+        if ($supplierId > 0) {
+            $where[] = 'p.supplier_id = :supplier_id';
+            $params[':supplier_id'] = $supplierId;
+        } else {
+            $supplierId = 0;
+        }
+
+        $whereSql = $where !== [] ? ' WHERE ' . implode(' AND ', $where) : '';
+        $fromSql = "
+            FROM " . self::TABLE . " p
+            LEFT JOIN categories c ON p.category_id = c.category_id
+            LEFT JOIN subcategories sc
+                ON p.subcategory_id = sc.subcategory_id
+               AND sc.category_id = p.category_id
+            LEFT JOIN suppliers s ON p.supplier_id = s.supplier_id
+        ";
+
+        $countStmt = $conn->prepare('SELECT COUNT(*) ' . $fromSql . $whereSql);
+        foreach ($params as $key => $value) {
+            $countStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $countStmt->execute();
+        $total = (int) $countStmt->fetchColumn();
+
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+
+        $dataSql = "
+            SELECT
+                p.product_id,
+                p.product_name,
+                p.category_id,
+                p.subcategory_id,
+                p.supplier_id,
+                p.sku,
+                p.price,
+                p.box_price,
+                p.case_price,
+                p.sale_price,
+                p.box_sale_price,
+                p.case_sale_price,
+                p.on_sale,
+                p.vatable,
+                p.quantity,
+                p.pieces_per_box,
+                p.boxes_per_case,
+                p.photo,
+                p.reorder_level,
+                p.status,
+                p.created_at,
+                c.category_name,
+                sc.subcategory_name,
+                s.supplier_name
+            {$fromSql}
+            {$whereSql}
+            ORDER BY p.created_at DESC, p.product_id DESC
+            LIMIT :limit OFFSET :offset
+        ";
+        $dataStmt = $conn->prepare($dataSql);
+        foreach ($params as $key => $value) {
+            $dataStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $dataStmt->execute();
+
+        return [
+            'items' => array_map(
+                static fn(array $product): array => self::normalizeProductForView($product),
+                $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: []
+            ),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+            'search' => $search,
+            'status' => $status,
+            'category_id' => $categoryId,
+            'supplier_id' => $supplierId,
+        ];
     }
 
     public static function getProductById(PDO $conn, int $id): ?array
@@ -1159,6 +1290,40 @@ final class ProductController
         }
 
         $conn->exec($alterSql);
+    }
+
+    private static function ensurePaginationIndexes(PDO $conn): void
+    {
+        if (self::$paginationIndexesChecked) {
+            return;
+        }
+
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_products_status_created',
+            'CREATE INDEX idx_products_status_created ON products (status, created_at, product_id)'
+        );
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_products_category_status_created',
+            'CREATE INDEX idx_products_category_status_created ON products (category_id, status, created_at, product_id)'
+        );
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_products_supplier_status_created',
+            'CREATE INDEX idx_products_supplier_status_created ON products (supplier_id, status, created_at, product_id)'
+        );
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_products_name',
+            'CREATE INDEX idx_products_name ON products (product_name)'
+        );
+
+        self::$paginationIndexesChecked = true;
     }
 
     private static function isBlankCsvRow(array $row): bool

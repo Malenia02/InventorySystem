@@ -8,8 +8,33 @@ require_once __DIR__ . '/../controllers/SupplierController.php';
 Middleware::auth()->role(['admin']);
 
 $csrf_token = Middleware::generateCsrfToken();
-$suppliers  = SupplierController::all($conn);
+$supplierFilters = [
+    'search' => trim((string) ($_GET['search'] ?? '')),
+    'status' => strtolower(trim((string) ($_GET['status'] ?? 'all'))),
+    'page' => max(1, (int) ($_GET['page'] ?? 1)),
+    'per_page' => (int) ($_GET['per_page'] ?? 25),
+];
+$supplierPage = SupplierController::paginate($conn, $supplierFilters);
+$suppliers  = $supplierPage['items'];
+$supplierFilters = [
+    'search' => (string) $supplierPage['search'],
+    'status' => (string) $supplierPage['status'],
+    'page' => (int) $supplierPage['page'],
+    'per_page' => (int) $supplierPage['per_page'],
+];
+$supplierRowStart = $supplierPage['total'] > 0 ? (($supplierPage['page'] - 1) * $supplierPage['per_page']) + 1 : 0;
 $pageTitle = 'Supplier Management';
+
+function supplierListUrl(array $filters, array $overrides = []): string
+{
+    $params = array_merge($filters, $overrides);
+    if (($params['page'] ?? 1) <= 1) unset($params['page']);
+    if (($params['search'] ?? '') === '') unset($params['search']);
+    if (($params['status'] ?? 'all') === 'all') unset($params['status']);
+    if (($params['per_page'] ?? 25) === 25) unset($params['per_page']);
+    $query = http_build_query($params);
+    return '/inventory_system/supplier_management/manage_supplier.php' . ($query !== '' ? '?' . $query : '');
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -124,6 +149,32 @@ require __DIR__ . '/../components/sidebar.php';
     </button>
 </div>
 
+                        <form method="get" class="row g-3 align-items-end mb-3">
+                            <div class="col-lg-6">
+                                <label class="form-label">Search</label>
+                                <input type="text" name="search" class="form-control" value="<?= htmlspecialchars($supplierFilters['search'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Supplier, contact, phone, email">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Status</label>
+                                <select name="status" class="form-select">
+                                    <option value="all" <?= $supplierFilters['status'] === 'all' ? 'selected' : '' ?>>All</option>
+                                    <option value="active" <?= $supplierFilters['status'] === 'active' ? 'selected' : '' ?>>Active</option>
+                                    <option value="inactive" <?= $supplierFilters['status'] === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Per page</label>
+                                <select name="per_page" class="form-select">
+                                    <?php foreach ([10, 25, 50, 100] as $size): ?>
+                                        <option value="<?= $size ?>" <?= $supplierFilters['per_page'] === $size ? 'selected' : '' ?>><?= $size ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <button type="submit" class="btn btn-primary w-100">Apply</button>
+                            </div>
+                        </form>
+
                         <div class="table-responsive mt-3" style="max-height:500px; overflow-y:auto;">
                             <div id="suppliersTableShell">
                                 <table class="table table-striped table-bordered" id="suppliersTable">
@@ -143,7 +194,7 @@ require __DIR__ . '/../components/sidebar.php';
                                         <?php if (!empty($suppliers)): ?>
                                             <?php foreach ($suppliers as $index => $supplier): ?>
                                                 <?php
-                                                $rowNumber = $index + 1;
+                                                $rowNumber = $supplierRowStart + $index;
                                                 require __DIR__ . '/../templates/supplier_row.php';
                                                 ?>
                                             <?php endforeach; ?>
@@ -155,6 +206,34 @@ require __DIR__ . '/../components/sidebar.php';
                                     </tbody>
                                 </table>
                             </div>
+                        </div>
+                        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+                            <div class="text-muted small">
+                                <?php if ($supplierPage['total'] > 0): ?>
+                                    Showing <?= $supplierRowStart ?> to <?= min($supplierRowStart + count($suppliers) - 1, $supplierPage['total']) ?> of <?= $supplierPage['total'] ?> suppliers
+                                <?php else: ?>
+                                    No suppliers found
+                                <?php endif; ?>
+                            </div>
+                            <nav aria-label="Supplier pagination">
+                                <ul class="pagination pagination-sm mb-0">
+                                    <li class="page-item <?= $supplierPage['page'] <= 1 ? 'disabled' : '' ?>">
+                                        <a class="page-link" href="<?= htmlspecialchars(supplierListUrl($supplierFilters, ['page' => $supplierPage['page'] - 1]), ENT_QUOTES, 'UTF-8') ?>">Previous</a>
+                                    </li>
+                                    <?php
+                                    $supplierStartPage = max(1, $supplierPage['page'] - 2);
+                                    $supplierEndPage = min($supplierPage['total_pages'], $supplierPage['page'] + 2);
+                                    for ($pageNumber = $supplierStartPage; $pageNumber <= $supplierEndPage; $pageNumber++):
+                                    ?>
+                                        <li class="page-item <?= $pageNumber === $supplierPage['page'] ? 'active' : '' ?>">
+                                            <a class="page-link" href="<?= htmlspecialchars(supplierListUrl($supplierFilters, ['page' => $pageNumber]), ENT_QUOTES, 'UTF-8') ?>"><?= $pageNumber ?></a>
+                                        </li>
+                                    <?php endfor; ?>
+                                    <li class="page-item <?= $supplierPage['page'] >= $supplierPage['total_pages'] ? 'disabled' : '' ?>">
+                                        <a class="page-link" href="<?= htmlspecialchars(supplierListUrl($supplierFilters, ['page' => $supplierPage['page'] + 1]), ENT_QUOTES, 'UTF-8') ?>">Next</a>
+                                    </li>
+                                </ul>
+                            </nav>
                         </div>
                     </div>
                 </div>
@@ -298,55 +377,13 @@ require __DIR__ . '/../components/sidebar.php';
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-    const tableShell = document.getElementById("suppliersTableShell");
-    let table = document.getElementById("suppliersTable");
+    const table = document.getElementById("suppliersTable");
     const supplierForm = document.getElementById("supplierForm");
     const editSupplierForm = document.getElementById("editSupplierForm");
-    let dataTable = null;
-
     const supplierMessage = document.getElementById("supplierMessage");
     const editSupplierMessage = document.getElementById("editSupplierMessage");
-
     const saveSupplierBtn = document.getElementById("saveSupplierBtn");
     const updateSupplierBtn = document.getElementById("updateSupplierBtn");
-
-    function initializeDataTable() {
-        table = document.getElementById("suppliersTable");
-
-        if (!window.simpleDatatables || !simpleDatatables.DataTable || !table) {
-            return;
-        }
-
-        if (dataTable) {
-            try {
-                dataTable.destroy();
-            } catch (error) {
-                console.warn("Failed to destroy existing supplier DataTable instance.", error);
-            }
-        }
-
-        dataTable = new simpleDatatables.DataTable(table, {
-            searchable: true,
-            fixedHeight: false,
-            perPage: 10
-        });
-    }
-
-    initializeDataTable();
-
-    function destroyDataTable() {
-        if (!dataTable) {
-            return;
-        }
-
-        try {
-            dataTable.destroy();
-        } catch (error) {
-            console.warn("Failed to destroy existing supplier DataTable instance.", error);
-        }
-
-        dataTable = null;
-    }
 
     const Toast = Swal.mixin({
         toast: true,
@@ -360,28 +397,38 @@ document.addEventListener("DOMContentLoaded", () => {
         Toast.fire({ icon, title: message });
     }
 
-    function showDetailedToast(title, html, icon = "success") {
-        Toast.fire({
-            icon,
-            title,
-            html,
-            timer: 4500
-        });
-    }
-
     function escapeHtml(value) {
         const div = document.createElement("div");
         div.textContent = value ?? "";
         return div.innerHTML;
     }
 
-    function showSweetMessage(title, html, icon = "success") {
-        return Swal.fire({
-            title,
-            html,
-            icon,
-            confirmButtonColor: "#0d6efd"
-        });
+    function queueReloadToast(message, icon = "success") {
+        try {
+            sessionStorage.setItem("manageSupplierFlash", JSON.stringify({ message, icon }));
+        } catch (error) {
+            console.warn("Unable to persist supplier flash message.", error);
+        }
+    }
+
+    function flushQueuedToast() {
+        try {
+            const raw = sessionStorage.getItem("manageSupplierFlash");
+            if (!raw) return;
+
+            sessionStorage.removeItem("manageSupplierFlash");
+            const payload = JSON.parse(raw);
+            if (payload?.message) {
+                showToast(payload.message, payload.icon || "success");
+            }
+        } catch (error) {
+            console.warn("Unable to restore supplier flash message.", error);
+        }
+    }
+
+    function reloadCurrentPage(message, icon = "success") {
+        queueReloadToast(message, icon);
+        window.location.assign(window.location.pathname + window.location.search);
     }
 
     function clearMessage(el) {
@@ -425,175 +472,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
-    function setCellText(cell, value, fallback = "-") {
-        if (!cell) return;
-        cell.textContent = value && String(value).trim() !== "" ? value : fallback;
-    }
-
-    function createIcon(iconClass) {
-        const icon = document.createElement("i");
-        icon.className = iconClass;
-        return icon;
-    }
-
-    function updateRowNumbers() {
-        const tbody = table?.querySelector("tbody");
-        if (!tbody) return;
-
-        tbody.querySelectorAll("tr").forEach((row, index) => {
-            const firstCell = row.querySelector("td:first-child");
-            if (firstCell) {
-                firstCell.textContent = String(index + 1);
-            }
-        });
-    }
-
-    function refreshTableUi() {
-        updateRowNumbers();
-        setTimeout(() => {
-            initializeDataTable();
-        }, 0);
-    }
-
-    function replaceTableBody(tableBodyHtml) {
-        destroyDataTable();
-
-        table = document.getElementById("suppliersTable");
-
-        const tbody = table?.querySelector("tbody");
-        if (!tbody) return false;
-
-        tbody.innerHTML = String(tableBodyHtml || "").trim();
-        refreshTableUi();
-        return true;
-    }
-
-    function replaceTableMarkup(tableHtml) {
-        destroyDataTable();
-
-        if (!tableShell) return false;
-
-        tableShell.innerHTML = String(tableHtml || "").trim();
-        table = document.getElementById("suppliersTable");
-        initializeDataTable();
-        return true;
-    }
-
-    function createRowFromHtml(rowHtml) {
-        const temp = document.createElement("tbody");
-        temp.innerHTML = String(rowHtml || "").trim();
-        return temp.firstElementChild;
-    }
-
-    function prependRow(rowHtml) {
-        destroyDataTable();
-
-        const tbody = table?.querySelector("tbody");
-        const row = createRowFromHtml(rowHtml);
-        if (!tbody || !row) return false;
-
-        const emptyRow = Array.from(tbody.querySelectorAll("tr")).find((existingRow) => {
-            const onlyCell = existingRow.children.length === 1 ? existingRow.children[0] : null;
-            return onlyCell && /No suppliers found/i.test(onlyCell.textContent || "");
-        });
-
-        if (emptyRow) {
-            emptyRow.remove();
-        }
-
-        tbody.prepend(row);
-        refreshTableUi();
-        return true;
-    }
-
-    function replaceRow(rowId, rowHtml) {
-        destroyDataTable();
-
-        const existingRow = document.getElementById(rowId);
-        const newRow = createRowFromHtml(rowHtml);
-        if (!existingRow || !newRow) return false;
-
-        existingRow.replaceWith(newRow);
-        refreshTableUi();
-        return true;
-    }
-
-    function addSupplierRow(supplier) {
-        destroyDataTable();
-
-        const tbody = table?.querySelector("tbody");
-        if (!tbody) return;
-
-        const emptyRow = Array.from(tbody.querySelectorAll("tr")).find((row) => {
-            const onlyCell = row.children.length === 1 ? row.children[0] : null;
-            return onlyCell && /No suppliers found/i.test(onlyCell.textContent || "");
-        });
-
-        if (emptyRow) {
-            emptyRow.remove();
-        }
-
-        const rowCount = tbody.querySelectorAll("tr").length;
-        const status = supplier.status || "active";
-
-        const tr = document.createElement("tr");
-        tr.id = `supplierRow${supplier.supplier_id}`;
-
-        const indexCell = document.createElement("td");
-        indexCell.textContent = String(rowCount + 1);
-
-        const nameCell = document.createElement("td");
-        nameCell.className = "supplier-name";
-        nameCell.textContent = supplier.supplier_name || "-";
-
-        const contactCell = document.createElement("td");
-        setCellText(contactCell, supplier.contact_person);
-
-        const phoneCell = document.createElement("td");
-        setCellText(phoneCell, supplier.phone);
-
-        const emailCell = document.createElement("td");
-        setCellText(emailCell, supplier.email);
-
-        const addressCell = document.createElement("td");
-        setCellText(addressCell, supplier.address);
-
-        const statusCell = document.createElement("td");
-        const badge = document.createElement("span");
-        badge.className = `badge supplier-status-badge ${status === "active" ? "bg-success" : "bg-secondary"}`;
-        badge.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-        statusCell.appendChild(badge);
-
-        const actionsCell = document.createElement("td");
-
-        const editBtn = document.createElement("button");
-        editBtn.type = "button";
-        editBtn.className = "btn btn-sm btn-warning editSupplierBtn";
-        editBtn.dataset.id = String(supplier.supplier_id);
-        editBtn.dataset.name = supplier.supplier_name || "";
-        editBtn.dataset.contact = supplier.contact_person || "";
-        editBtn.dataset.phone = supplier.phone || "";
-        editBtn.dataset.email = supplier.email || "";
-        editBtn.dataset.address = supplier.address || "";
-        editBtn.dataset.status = status;
-        editBtn.title = "Edit Supplier";
-        editBtn.appendChild(createIcon("bi bi-pencil-square"));
-
-        const toggleBtn = document.createElement("button");
-        toggleBtn.type = "button";
-        toggleBtn.className = `btn btn-sm ${status === "active" ? "btn-danger" : "btn-success"} toggleSupplierStatusBtn`;
-        toggleBtn.dataset.id = String(supplier.supplier_id);
-        toggleBtn.dataset.name = supplier.supplier_name || "";
-        toggleBtn.dataset.status = status;
-        toggleBtn.title = status === "active" ? "Deactivate Supplier" : "Activate Supplier";
-        toggleBtn.appendChild(createIcon(`bi ${status === "active" ? "bi-slash-circle" : "bi-check-circle"}`));
-
-        actionsCell.append(editBtn, document.createTextNode(" "), toggleBtn);
-        tr.append(indexCell, nameCell, contactCell, phoneCell, emailCell, addressCell, statusCell, actionsCell);
-
-        tbody.prepend(tr);
-        refreshTableUi();
-    }
+    flushQueuedToast();
 
     if (supplierForm) {
         supplierForm.addEventListener("submit", (e) => {
@@ -613,50 +492,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         showToast(res.error || "Failed to add supplier.", "error");
                         return;
                     }
-
-                    const contactPerson = formData.get("contact_person") || "Not provided";
-                    const phone = formData.get("phone") || "Not provided";
-                    const email = formData.get("email") || "Not provided";
-                    const address = formData.get("address") || "Not provided";
-
-                    if (res.tableHtml) {
-                        replaceTableMarkup(res.tableHtml);
-                    } else if (res.tableBodyHtml) {
-                        replaceTableBody(res.tableBodyHtml);
-                    } else if (res.newRowHtml) {
-                        prependRow(res.newRowHtml);
-                    } else {
-                        addSupplierRow({
-                            supplier_id: res.supplier_id,
-                            supplier_name: res.supplier_name,
-                            contact_person: formData.get("contact_person"),
-                            phone: formData.get("phone"),
-                            email: formData.get("email"),
-                            address: formData.get("address"),
-                            status: "active"
-                        });
-                    }
-
-                    showToast(res.message || "Supplier added successfully.", "success");
                     supplierForm.reset();
-
                     const modal = bootstrap.Modal.getInstance(document.getElementById("supplierModal"));
                     if (modal) modal.hide();
-
-                    showSweetMessage(
-                        "Supplier Added",
-                        `
-                            <p class="mb-2"><strong>${escapeHtml(res.supplier_name || "New supplier")}</strong> has been added successfully.</p>
-                            <div class="text-start small">
-                                <div><strong>Contact Person:</strong> ${escapeHtml(contactPerson)}</div>
-                                <div><strong>Phone:</strong> ${escapeHtml(phone)}</div>
-                                <div><strong>Email:</strong> ${escapeHtml(email)}</div>
-                                <div><strong>Address:</strong> ${escapeHtml(address)}</div>
-                                <div><strong>Status:</strong> Active</div>
-                            </div>
-                        `,
-                        "success"
-                    );
+                    reloadCurrentPage(res.message || "Supplier added successfully.", "success");
                 })
                 .catch((error) => {
                     const message = error?.message || "Server error.";
@@ -724,26 +563,7 @@ document.addEventListener("DOMContentLoaded", () => {
                                 showToast(res.error || "Failed to update status.", "error");
                                 return;
                             }
-
-                            if (res.tableHtml) {
-                                replaceTableMarkup(res.tableHtml);
-                            } else if (res.tableBodyHtml) {
-                                replaceTableBody(res.tableBodyHtml);
-                            } else if (res.newRowHtml) {
-                                replaceRow(`supplierRow${supplierId}`, res.newRowHtml);
-                            }
-
-                            showDetailedToast(
-                                "Status Updated",
-                                `
-                                    <div class="text-start">
-                                        <div><strong>Supplier:</strong> ${escapeHtml(res.supplier_name || supplierName)}</div>
-                                        <div><strong>New Status:</strong> ${escapeHtml((res.new_status || "updated").charAt(0).toUpperCase() + (res.new_status || "updated").slice(1))}</div>
-                                        
-                                    </div>
-                                `,
-                                "success"
-                            );
+                            reloadCurrentPage(res.message || "Supplier status updated.", "success");
                         })
                         .catch((error) => {
                             showToast(error?.message || "Server error.", "error");
@@ -773,39 +593,9 @@ document.addEventListener("DOMContentLoaded", () => {
                         return;
                     }
 
-                    const supplierId = formData.get("supplier_id");
-                    const supplierName = formData.get("supplier_name") || "";
-                    const contactPerson = formData.get("contact_person") || "Not provided";
-                    const phone = formData.get("phone") || "Not provided";
-                    const email = formData.get("email") || "Not provided";
-                    const address = formData.get("address") || "Not provided";
-
-                    if (res.tableHtml) {
-                        replaceTableMarkup(res.tableHtml);
-                    } else if (res.tableBodyHtml) {
-                        replaceTableBody(res.tableBodyHtml);
-                    } else if (res.newRowHtml) {
-                        replaceRow(`supplierRow${supplierId}`, res.newRowHtml);
-                    }
-
-                    showToast(res.message || "Supplier updated successfully.", "success");
-
                     const modal = bootstrap.Modal.getInstance(document.getElementById("editSupplierModal"));
                     if (modal) modal.hide();
-
-                    showSweetMessage(
-                        "Supplier Updated",
-                        `
-                            <p class="mb-2"><strong>${escapeHtml(supplierName)}</strong> has been updated successfully.</p>
-                            <div class="text-start small">
-                                <div><strong>Contact Person:</strong> ${escapeHtml(contactPerson)}</div>
-                                <div><strong>Phone:</strong> ${escapeHtml(phone)}</div>
-                                <div><strong>Email:</strong> ${escapeHtml(email)}</div>
-                                <div><strong>Address:</strong> ${escapeHtml(address)}</div>
-                            </div>
-                        `,
-                        "success"
-                    );
+                    reloadCurrentPage(res.message || "Supplier updated successfully.", "success");
                 })
                 .catch((error) => {
                     const message = error?.message || "Server error.";

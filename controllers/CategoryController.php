@@ -1,12 +1,15 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ListQueryHelper.php';
+
 final class CategoryController
 {
     private const TABLE = 'categories';
     private const VALID_STATUSES = ['active', 'inactive'];
     private const MAX_NAME_LENGTH = 100;
     private const MAX_DESCRIPTION_LENGTH = 1000;
+    private static bool $paginationIndexesChecked = false;
 
     public static function all(PDO $conn, ?string $status = null): array
     {
@@ -33,6 +36,78 @@ final class CategoryController
         $stmt->execute($params);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function paginate(PDO $conn, array $filters = []): array
+    {
+        self::ensurePaginationIndexes($conn);
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $allowedPerPage = [10, 25, 50, 100];
+        $perPage = in_array($perPage, $allowedPerPage, true) ? $perPage : 25;
+        $search = trim((string) ($filters['search'] ?? ''));
+        $status = trim((string) ($filters['status'] ?? 'all'));
+
+        $where = [];
+        $params = [];
+
+        if ($search !== '') {
+            $where = array_merge($where, ListQueryHelper::buildTokenizedLikeFilters(
+                ['category_name', "IFNULL(description, '')"],
+                ListQueryHelper::extractSearchTerms($search),
+                $params,
+                'category_search'
+            ));
+        }
+
+        if ($status !== '' && $status !== 'all') {
+            $status = self::validateStatus($status);
+            $where[] = 'status = :status';
+            $params[':status'] = $status;
+        } else {
+            $status = 'all';
+        }
+
+        $whereSql = $where !== [] ? ' WHERE ' . implode(' AND ', $where) : '';
+
+        $countStmt = $conn->prepare('SELECT COUNT(*) FROM ' . self::TABLE . $whereSql);
+        $countStmt->execute($params);
+        $total = (int) $countStmt->fetchColumn();
+
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+
+        $dataSql = "
+            SELECT
+                category_id,
+                category_name,
+                description,
+                status,
+                created_at
+            FROM " . self::TABLE . "
+            {$whereSql}
+            ORDER BY category_name ASC, category_id DESC
+            LIMIT :limit OFFSET :offset
+        ";
+        $dataStmt = $conn->prepare($dataSql);
+        foreach ($params as $key => $value) {
+            $dataStmt->bindValue($key, $value, PDO::PARAM_STR);
+        }
+        $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $dataStmt->execute();
+
+        return [
+            'items' => $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+            'search' => $search,
+            'status' => $status,
+        ];
     }
 
     public static function getCategoryById(PDO $conn, int $id): ?array
@@ -225,5 +300,21 @@ final class CategoryController
     {
         $value = trim((string) $value);
         return $value === '' ? null : $value;
+    }
+
+    private static function ensurePaginationIndexes(PDO $conn): void
+    {
+        if (self::$paginationIndexesChecked) {
+            return;
+        }
+
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_categories_status_name',
+            'CREATE INDEX idx_categories_status_name ON categories (status, category_name, category_id)'
+        );
+
+        self::$paginationIndexesChecked = true;
     }
 }

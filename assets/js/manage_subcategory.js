@@ -4,10 +4,37 @@ document.addEventListener("DOMContentLoaded", () => {
   const table = document.getElementById("subcategoryTable");
   const addForm = document.getElementById("addSubcategoryForm");
   const editForm = document.getElementById("editSubcategoryForm");
-  let dataTable = null;
 
   if (!table || !addForm || !editForm) {
     return;
+  }
+
+  function queueReloadToast(message, icon = "success") {
+    try {
+      sessionStorage.setItem("manageSubcategoryFlash", JSON.stringify({ message, icon }));
+    } catch (error) {
+      console.warn("Unable to persist subcategory flash message.", error);
+    }
+  }
+
+  function flushQueuedToast() {
+    try {
+      const raw = sessionStorage.getItem("manageSubcategoryFlash");
+      if (!raw) return;
+
+      sessionStorage.removeItem("manageSubcategoryFlash");
+      const payload = JSON.parse(raw);
+      if (payload?.message) {
+        showToast(payload.message, payload.icon || "success");
+      }
+    } catch (error) {
+      console.warn("Unable to restore subcategory flash message.", error);
+    }
+  }
+
+  function reloadCurrentPage(message, icon = "success") {
+    queueReloadToast(message, icon);
+    window.location.assign(window.location.pathname + window.location.search);
   }
 
   const Toast = Swal.mixin({
@@ -49,26 +76,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function initializeDataTable() {
-    if (typeof simpleDatatables === "undefined" || !simpleDatatables.DataTable) {
-      return;
-    }
-
-    if (dataTable) {
-      try {
-        dataTable.destroy();
-      } catch (error) {
-        console.warn("Failed to destroy existing subcategory DataTable instance.", error);
-      }
-    }
-
-    dataTable = new simpleDatatables.DataTable(table, {
-      searchable: true,
-      fixedHeight: false,
-      perPage: 10
-    });
-  }
-
   function createRowFromHtml(html) {
     const temp = document.createElement("tbody");
     temp.innerHTML = html.trim();
@@ -91,7 +98,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   updateRowNumbers();
-  initializeDataTable();
+  flushQueuedToast();
 
   addForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -100,10 +107,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     postData(formData)
       .then((result) => {
-        prependRow(result.newRowHtml || "");
         addForm.reset();
         bootstrap.Modal.getInstance(document.getElementById("addSubcategoryModal"))?.hide();
-        showToast(result.message || "Subcategory added successfully.");
+        reloadCurrentPage(result.message || "Subcategory added successfully.", "success");
       })
       .catch((error) => showToast(error.message || "Failed to add subcategory.", "error"));
   });
@@ -115,10 +121,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     postData(formData)
       .then((result) => {
-        const id = document.getElementById("editSubcategoryId")?.value || "";
-        replaceRow(id, result.newRowHtml || "");
         bootstrap.Modal.getInstance(document.getElementById("editSubcategoryModal"))?.hide();
-        showToast(result.message || "Subcategory updated successfully.");
+        reloadCurrentPage(result.message || "Subcategory updated successfully.", "success");
       })
       .catch((error) => showToast(error.message || "Failed to update subcategory.", "error"));
   });
@@ -162,8 +166,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         postData(formData)
           .then((result) => {
-            replaceRow(subcategoryId, result.newRowHtml || "");
-            showToast(result.message || "Subcategory status updated.");
+            reloadCurrentPage(result.message || "Subcategory status updated.", "success");
           })
           .catch((error) => showToast(error.message || "Failed to update subcategory status.", "error"));
       });

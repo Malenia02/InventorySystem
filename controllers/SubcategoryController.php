@@ -1,11 +1,14 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ListQueryHelper.php';
+
 final class SubcategoryController
 {
     private const TABLE = 'subcategories';
     private const VALID_STATUSES = ['active', 'inactive'];
     private static bool $schemaChecked = false;
+    private static bool $paginationIndexesChecked = false;
 
     public static function ensureSchema(PDO $conn): void
     {
@@ -70,6 +73,100 @@ final class SubcategoryController
         $stmt->execute($params);
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function paginate(PDO $conn, array $filters = []): array
+    {
+        self::ensureSchema($conn);
+        self::ensurePaginationIndexes($conn);
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $allowedPerPage = [10, 25, 50, 100];
+        $perPage = in_array($perPage, $allowedPerPage, true) ? $perPage : 25;
+        $search = trim((string) ($filters['search'] ?? ''));
+        $status = trim((string) ($filters['status'] ?? 'all'));
+        $categoryId = (int) ($filters['category_id'] ?? 0);
+
+        $where = [];
+        $params = [];
+
+        if ($search !== '') {
+            $where = array_merge($where, ListQueryHelper::buildTokenizedLikeFilters(
+                ['sc.subcategory_name', "IFNULL(sc.description, '')", 'c.category_name'],
+                ListQueryHelper::extractSearchTerms($search),
+                $params,
+                'subcategory_search'
+            ));
+        }
+
+        if ($status !== '' && $status !== 'all') {
+            $status = self::validateStatus($status);
+            $where[] = 'sc.status = :status';
+            $params[':status'] = $status;
+        } else {
+            $status = 'all';
+        }
+
+        if ($categoryId > 0) {
+            $where[] = 'sc.category_id = :category_id';
+            $params[':category_id'] = $categoryId;
+        } else {
+            $categoryId = 0;
+        }
+
+        $whereSql = $where !== [] ? ' WHERE ' . implode(' AND ', $where) : '';
+
+        $countSql = "
+            SELECT COUNT(*)
+            FROM " . self::TABLE . " sc
+            INNER JOIN categories c ON sc.category_id = c.category_id
+            {$whereSql}
+        ";
+        $countStmt = $conn->prepare($countSql);
+        foreach ($params as $key => $value) {
+            $countStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $countStmt->execute();
+        $total = (int) $countStmt->fetchColumn();
+
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+
+        $dataSql = "
+            SELECT
+                sc.subcategory_id,
+                sc.category_id,
+                sc.subcategory_name,
+                sc.description,
+                sc.status,
+                sc.created_at,
+                c.category_name
+            FROM " . self::TABLE . " sc
+            INNER JOIN categories c ON sc.category_id = c.category_id
+            {$whereSql}
+            ORDER BY c.category_name ASC, sc.subcategory_name ASC, sc.subcategory_id DESC
+            LIMIT :limit OFFSET :offset
+        ";
+        $dataStmt = $conn->prepare($dataSql);
+        foreach ($params as $key => $value) {
+            $dataStmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $dataStmt->execute();
+
+        return [
+            'items' => $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+            'search' => $search,
+            'status' => $status,
+            'category_id' => $categoryId,
+        ];
     }
 
     public static function getById(PDO $conn, int $id): ?array
@@ -293,5 +390,21 @@ final class SubcategoryController
         }
 
         return $status;
+    }
+
+    private static function ensurePaginationIndexes(PDO $conn): void
+    {
+        if (self::$paginationIndexesChecked) {
+            return;
+        }
+
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_subcategories_status_category_name',
+            'CREATE INDEX idx_subcategories_status_category_name ON subcategories (status, category_id, subcategory_name, subcategory_id)'
+        );
+
+        self::$paginationIndexesChecked = true;
     }
 }

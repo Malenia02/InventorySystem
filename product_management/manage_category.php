@@ -7,7 +7,32 @@ require_once __DIR__ . '/../controllers/CategoryController.php';
 
 Middleware::auth()->role(['admin']);
 
-$categories = CategoryController::all($conn);
+$categoryFilters = [
+    'search' => trim((string) ($_GET['search'] ?? '')),
+    'status' => strtolower(trim((string) ($_GET['status'] ?? 'all'))),
+    'page' => max(1, (int) ($_GET['page'] ?? 1)),
+    'per_page' => (int) ($_GET['per_page'] ?? 25),
+];
+$categoryPage = CategoryController::paginate($conn, $categoryFilters);
+$categories = $categoryPage['items'];
+$categoryFilters = [
+    'search' => (string) $categoryPage['search'],
+    'status' => (string) $categoryPage['status'],
+    'page' => (int) $categoryPage['page'],
+    'per_page' => (int) $categoryPage['per_page'],
+];
+$categoryRowStart = $categoryPage['total'] > 0 ? (($categoryPage['page'] - 1) * $categoryPage['per_page']) + 1 : 0;
+
+function categoryListUrl(array $filters, array $overrides = []): string
+{
+    $params = array_merge($filters, $overrides);
+    if (($params['page'] ?? 1) <= 1) unset($params['page']);
+    if (($params['search'] ?? '') === '') unset($params['search']);
+    if (($params['status'] ?? 'all') === 'all') unset($params['status']);
+    if (($params['per_page'] ?? 25) === 25) unset($params['per_page']);
+    $query = http_build_query($params);
+    return '/inventory_system/product_management/manage_category.php' . ($query !== '' ? '?' . $query : '');
+}
 ?>
 
 <!DOCTYPE html>
@@ -89,6 +114,32 @@ require __DIR__ . '/../components/breadcrumb.php';
                         <i class="bi bi-plus-circle"></i> Add New Category
                     </button>
 
+                    <form method="get" class="row g-3 align-items-end mb-3">
+                        <div class="col-lg-6">
+                            <label class="form-label">Search</label>
+                            <input type="text" name="search" class="form-control" value="<?= htmlspecialchars($categoryFilters['search'], ENT_QUOTES, 'UTF-8') ?>" placeholder="Category name or description">
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Status</label>
+                            <select name="status" class="form-select">
+                                <option value="all" <?= $categoryFilters['status'] === 'all' ? 'selected' : '' ?>>All</option>
+                                <option value="active" <?= $categoryFilters['status'] === 'active' ? 'selected' : '' ?>>Active</option>
+                                <option value="inactive" <?= $categoryFilters['status'] === 'inactive' ? 'selected' : '' ?>>Inactive</option>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label">Per page</label>
+                            <select name="per_page" class="form-select">
+                                <?php foreach ([10, 25, 50, 100] as $size): ?>
+                                    <option value="<?= $size ?>" <?= $categoryFilters['per_page'] === $size ? 'selected' : '' ?>><?= $size ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">Apply</button>
+                        </div>
+                    </form>
+
                     <!-- Category Table -->
                     <div class="table-responsive">
                         <table class="table table-striped table-bordered" id="categoryTable">
@@ -103,7 +154,7 @@ require __DIR__ . '/../components/breadcrumb.php';
                             <tbody>
                                 <?php foreach($categories as $index => $cat): ?>
                                 <tr id="categoryRow<?= $cat['category_id'] ?>">
-                                    <td><?= $index + 1 ?></td>
+                                    <td><?= $categoryRowStart + $index ?></td>
                                     <td><?= htmlspecialchars($cat['category_name']) ?></td>
                                     <td>
                                         <span class="badge <?= $cat['status'] === 'active' ? 'bg-success' : 'bg-secondary' ?>">
@@ -133,6 +184,35 @@ require __DIR__ . '/../components/breadcrumb.php';
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
+                    </div>
+
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mt-3">
+                        <div class="text-muted small">
+                            <?php if ($categoryPage['total'] > 0): ?>
+                                Showing <?= $categoryRowStart ?> to <?= min($categoryRowStart + count($categories) - 1, $categoryPage['total']) ?> of <?= $categoryPage['total'] ?> categories
+                            <?php else: ?>
+                                No categories found
+                            <?php endif; ?>
+                        </div>
+                        <nav aria-label="Category pagination">
+                            <ul class="pagination pagination-sm mb-0">
+                                <li class="page-item <?= $categoryPage['page'] <= 1 ? 'disabled' : '' ?>">
+                                    <a class="page-link" href="<?= htmlspecialchars(categoryListUrl($categoryFilters, ['page' => $categoryPage['page'] - 1]), ENT_QUOTES, 'UTF-8') ?>">Previous</a>
+                                </li>
+                                <?php
+                                $categoryStartPage = max(1, $categoryPage['page'] - 2);
+                                $categoryEndPage = min($categoryPage['total_pages'], $categoryPage['page'] + 2);
+                                for ($pageNumber = $categoryStartPage; $pageNumber <= $categoryEndPage; $pageNumber++):
+                                ?>
+                                    <li class="page-item <?= $pageNumber === $categoryPage['page'] ? 'active' : '' ?>">
+                                        <a class="page-link" href="<?= htmlspecialchars(categoryListUrl($categoryFilters, ['page' => $pageNumber]), ENT_QUOTES, 'UTF-8') ?>"><?= $pageNumber ?></a>
+                                    </li>
+                                <?php endfor; ?>
+                                <li class="page-item <?= $categoryPage['page'] >= $categoryPage['total_pages'] ? 'disabled' : '' ?>">
+                                    <a class="page-link" href="<?= htmlspecialchars(categoryListUrl($categoryFilters, ['page' => $categoryPage['page'] + 1]), ENT_QUOTES, 'UTF-8') ?>">Next</a>
+                                </li>
+                            </ul>
+                        </nav>
                     </div>
 
                     <!-- ADD CATEGORY MODAL -->
@@ -212,7 +292,6 @@ require __DIR__ . '/../components/breadcrumb.php';
 
 <?php require __DIR__ . '/../components/js_script.php'; ?>
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet">
-<script src="/inventory_system/assets/vendor/simple-datatables/simple-datatables.js"></script>
 <script src="/inventory_system/assets/js/manage_category.js"></script>
 </body>
 </html>

@@ -17,6 +17,34 @@ document.addEventListener("DOMContentLoaded", () => {
     return;
   }
 
+  function queueReloadToast(message, icon = "success") {
+    try {
+      sessionStorage.setItem("manageCategoryFlash", JSON.stringify({ message, icon }));
+    } catch (error) {
+      console.warn("Unable to persist category flash message.", error);
+    }
+  }
+
+  function flushQueuedToast() {
+    try {
+      const raw = sessionStorage.getItem("manageCategoryFlash");
+      if (!raw) return;
+
+      sessionStorage.removeItem("manageCategoryFlash");
+      const payload = JSON.parse(raw);
+      if (payload?.message) {
+        showToast(payload.message, payload.icon || "success");
+      }
+    } catch (error) {
+      console.warn("Unable to restore category flash message.", error);
+    }
+  }
+
+  function reloadCurrentPage(message, icon = "success") {
+    queueReloadToast(message, icon);
+    window.location.assign(window.location.pathname + window.location.search);
+  }
+
   // ------------------------------
   // SweetAlert Toast
   // ------------------------------
@@ -49,35 +77,6 @@ document.addEventListener("DOMContentLoaded", () => {
     div.textContent = value ?? "";
     return div.innerHTML;
   }
-
-  // ------------------------------
-  // DataTable Helpers
-  // ------------------------------
-  let dataTable = null;
-
-  function initializeDataTable() {
-    if (!table) return;
-
-    if (dataTable) {
-      try {
-        dataTable.destroy();
-      } catch (error) {
-        console.warn("Failed to destroy existing DataTable instance.", error);
-      }
-    }
-
-    dataTable = new simpleDatatables.DataTable(table, {
-      searchable: true,
-      fixedHeight: false,
-      perPage: 10
-    });
-  }
-
-  function refreshDataTable() {
-    updateRowNumbers();
-  }
-
-  initializeDataTable();
 
   // ------------------------------
   // UI Helpers
@@ -225,25 +224,12 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await postData(CATEGORY_ACTION_URL, formData);
 
       if (res.success && res.newRowHtml) {
-        prependRow(res.newRowHtml);
-
         const modal = getBootstrapModalInstance(addModalEl);
         modal?.hide();
 
         const categoryName = formData.get("category_name") || "New category";
         addForm.reset();
-
-        showDetailedToast(
-          "Category Added",
-          `
-            <div class="text-start">
-              <div><strong>Category:</strong> ${escapeHtml(categoryName)}</div>
-              <div><strong>Status:</strong> Active</div>
-              <div class="small mt-1">The new category was created successfully.</div>
-            </div>
-          `,
-          "success"
-        );
+        reloadCurrentPage(`${categoryName} was created successfully.`, "success");
       } else {
         showToast(res.error || "Failed to add category.", "error");
       }
@@ -287,25 +273,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (res.success && res.newRowHtml) {
         const id = document.getElementById("editCategoryId")?.value || "";
-        replaceRow(`categoryRow${id}`, res.newRowHtml);
-
         const modal = getBootstrapModalInstance(editModalEl);
         modal?.hide();
 
         const categoryName = formData.get("category_name") || "Category";
         editForm.reset();
-
-        showDetailedToast(
-          "Category Updated",
-          `
-            <div class="text-start">
-              <div><strong>Category:</strong> ${escapeHtml(categoryName)}</div>
-              <div><strong>Status:</strong> Changes saved</div>
-              <div class="small mt-1">The category details were updated successfully.</div>
-            </div>
-          `,
-          "success"
-        );
+        reloadCurrentPage(`${categoryName} was updated successfully.`, "success");
       } else {
         showToast(res.error || "Failed to update category.", "error");
       }
@@ -354,19 +327,8 @@ document.addEventListener("DOMContentLoaded", () => {
       const res = await postData(CATEGORY_ACTION_URL, formData);
 
       if (res.success && res.newRowHtml) {
-        replaceRow(`categoryRow${id}`, res.newRowHtml);
-
-        showDetailedToast(
-          "Status Updated",
-          `
-            <div class="text-start">
-              <div><strong>Category:</strong> ${escapeHtml(categoryName)}</div>
-              <div><strong>New Status:</strong> ${escapeHtml(
-                res.new_status ? res.new_status.charAt(0).toUpperCase() + res.new_status.slice(1) : "Updated"
-              )}</div>
-              <div class="small mt-1">The category status was updated successfully.</div>
-            </div>
-          `,
+        reloadCurrentPage(
+          `${categoryName} is now ${res.new_status ? res.new_status.toLowerCase() : "updated"}.`,
           "success"
         );
       } else {
@@ -393,4 +355,6 @@ document.addEventListener("DOMContentLoaded", () => {
       editForm.reset();
     });
   }
+
+  flushQueuedToast();
 });

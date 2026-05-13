@@ -1,10 +1,13 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ListQueryHelper.php';
+
 final class SupplierController
 {
     private const TABLE = 'suppliers';
     private const ID_FIELD = 'supplier_id';
+    private static bool $paginationIndexesChecked = false;
 
     public static function all(PDO $pdo): array
     {
@@ -16,6 +19,80 @@ final class SupplierController
         $stmt->execute();
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public static function paginate(PDO $pdo, array $filters = []): array
+    {
+        self::ensurePaginationIndexes($pdo);
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $allowedPerPage = [10, 25, 50, 100];
+        $perPage = in_array($perPage, $allowedPerPage, true) ? $perPage : 25;
+        $search = trim((string) ($filters['search'] ?? ''));
+        $status = strtolower(trim((string) ($filters['status'] ?? 'all')));
+
+        $where = [];
+        $params = [];
+
+        if ($search !== '') {
+            $where = array_merge($where, ListQueryHelper::buildTokenizedLikeFilters(
+                [
+                    'supplier_name',
+                    "IFNULL(contact_person, '')",
+                    "IFNULL(phone, '')",
+                    "IFNULL(email, '')",
+                    "IFNULL(address, '')",
+                ],
+                ListQueryHelper::extractSearchTerms($search),
+                $params,
+                'supplier_search'
+            ));
+        }
+
+        if (in_array($status, ['active', 'inactive'], true)) {
+            $where[] = 'status = :status';
+            $params[':status'] = $status;
+        } else {
+            $status = 'all';
+        }
+
+        $whereSql = $where !== [] ? ' WHERE ' . implode(' AND ', $where) : '';
+
+        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM ' . self::TABLE . $whereSql);
+        foreach ($params as $key => $value) {
+            $countStmt->bindValue($key, $value, PDO::PARAM_STR);
+        }
+        $countStmt->execute();
+        $total = (int) $countStmt->fetchColumn();
+
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+
+        $dataStmt = $pdo->prepare("
+            SELECT supplier_id, supplier_name, contact_person, phone, email, address, status
+            FROM " . self::TABLE . "
+            {$whereSql}
+            ORDER BY supplier_name ASC, supplier_id DESC
+            LIMIT :limit OFFSET :offset
+        ");
+        foreach ($params as $key => $value) {
+            $dataStmt->bindValue($key, $value, PDO::PARAM_STR);
+        }
+        $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $dataStmt->execute();
+
+        return [
+            'items' => $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+            'search' => $search,
+            'status' => $status,
+        ];
     }
 
     public static function getById(PDO $pdo, int $id): ?array
@@ -286,5 +363,27 @@ final class SupplierController
     {
         $value = trim((string) $value);
         return $value === '' ? null : $value;
+    }
+
+    private static function ensurePaginationIndexes(PDO $conn): void
+    {
+        if (self::$paginationIndexesChecked) {
+            return;
+        }
+
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_suppliers_status_name',
+            'CREATE INDEX idx_suppliers_status_name ON suppliers (status, supplier_name, supplier_id)'
+        );
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_suppliers_contact_person',
+            'CREATE INDEX idx_suppliers_contact_person ON suppliers (contact_person)'
+        );
+
+        self::$paginationIndexesChecked = true;
     }
 }

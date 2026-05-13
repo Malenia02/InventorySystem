@@ -12,28 +12,3 @@
 
 <!-- Template Main JS File -->
 <script src="/inventory_system/assets/js/main.js"></script>
-
-<!-- Simple-DataTables Init for Staff Table -->
-<script>
-document.addEventListener("DOMContentLoaded", function() {
-    // Initialize Simple-DataTables
-    const staffTableEl = document.querySelector("#staffTable");
-    if(staffTableEl) {
-        const staffDataTable = new simpleDatatables.DataTable(staffTableEl, {
-            searchable: true,
-            fixedHeight: false,
-            perPage: 10,
-            perPageSelect: [5, 10, 25, 50, 100],
-            columns: [
-                { select: [1, 6], sortable: false } // Disable sorting for Photo & Actions
-            ],
-            labels: {
-                placeholder: "Search staff...",
-                perPage: "{select} entries per page",
-                noRows: "No matching staff found",
-                info: "Showing {start} to {end} of {rows} staff"
-            }
-        });
-    }
-});
-</script>

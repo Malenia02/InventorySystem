@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ListQueryHelper.php';
+
 final class StaffController
 {
     private const TABLE = 'users';
@@ -12,6 +14,7 @@ final class StaffController
         'image/png'  => 'png',
         'image/webp' => 'webp',
     ];
+    private static bool $paginationIndexesChecked = false;
 
     public static function getAllStaff(PDO $conn): array
     {
@@ -28,6 +31,86 @@ final class StaffController
             static fn(array $staff): array => self::normalizeForView($staff),
             $rows
         );
+    }
+
+    public static function paginate(PDO $conn, array $filters = []): array
+    {
+        self::ensurePaginationIndexes($conn);
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = (int) ($filters['per_page'] ?? 25);
+        $allowedPerPage = [10, 25, 50, 100];
+        $perPage = in_array($perPage, $allowedPerPage, true) ? $perPage : 25;
+        $search = trim((string) ($filters['search'] ?? ''));
+        $status = strtolower(trim((string) ($filters['status'] ?? 'all')));
+        $role = strtolower(trim((string) ($filters['role'] ?? 'all')));
+
+        $where = [];
+        $params = [];
+
+        if ($search !== '') {
+            $where = array_merge($where, ListQueryHelper::buildTokenizedLikeFilters(
+                ['first_name', 'last_name', 'email', 'username'],
+                ListQueryHelper::extractSearchTerms($search),
+                $params,
+                'staff_search'
+            ));
+        }
+
+        if (in_array($status, ['active', 'inactive'], true)) {
+            $where[] = 'status = :status';
+            $params[':status'] = $status;
+        } else {
+            $status = 'all';
+        }
+
+        if (in_array($role, self::ALLOWED_ROLES, true)) {
+            $where[] = 'role = :role';
+            $params[':role'] = $role;
+        } else {
+            $role = 'all';
+        }
+
+        $whereSql = $where !== [] ? ' WHERE ' . implode(' AND ', $where) : '';
+
+        $countStmt = $conn->prepare('SELECT COUNT(*) FROM ' . self::TABLE . $whereSql);
+        foreach ($params as $key => $value) {
+            $countStmt->bindValue($key, $value, PDO::PARAM_STR);
+        }
+        $countStmt->execute();
+        $total = (int) $countStmt->fetchColumn();
+
+        $totalPages = max(1, (int) ceil($total / $perPage));
+        $page = min($page, $totalPages);
+        $offset = ($page - 1) * $perPage;
+
+        $dataStmt = $conn->prepare("
+            SELECT user_id, first_name, last_name, email, username, role, status, photo, deactivated_at
+            FROM " . self::TABLE . "
+            {$whereSql}
+            ORDER BY status ASC, role ASC, user_id DESC
+            LIMIT :limit OFFSET :offset
+        ");
+        foreach ($params as $key => $value) {
+            $dataStmt->bindValue($key, $value, PDO::PARAM_STR);
+        }
+        $dataStmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $dataStmt->execute();
+
+        return [
+            'items' => array_map(
+                static fn(array $staff): array => self::normalizeForView($staff),
+                $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: []
+            ),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'total_pages' => $totalPages,
+            'search' => $search,
+            'status' => $status,
+            'role' => $role,
+        ];
     }
 
     public static function getStaffById(PDO $conn, int $id): ?array
@@ -47,6 +130,29 @@ final class StaffController
         $staff = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $staff ? self::normalizeForView($staff) : null;
+    }
+
+    public static function getSummary(PDO $conn): array
+    {
+        self::ensurePaginationIndexes($conn);
+
+        $stmt = $conn->query("
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active_count,
+                SUM(CASE WHEN status = 'inactive' THEN 1 ELSE 0 END) AS inactive_count,
+                SUM(CASE WHEN role = 'admin' THEN 1 ELSE 0 END) AS admin_count
+            FROM " . self::TABLE . "
+        ");
+
+        $summary = $stmt ? ($stmt->fetch(PDO::FETCH_ASSOC) ?: []) : [];
+
+        return [
+            'total' => (int) ($summary['total'] ?? 0),
+            'active' => (int) ($summary['active_count'] ?? 0),
+            'inactive' => (int) ($summary['inactive_count'] ?? 0),
+            'admin' => (int) ($summary['admin_count'] ?? 0),
+        ];
     }
 
     public static function addStaff(PDO $conn, array $data): int
@@ -446,5 +552,27 @@ final class StaffController
         if ((int) $stmt->fetchColumn() > 0) {
             throw new RuntimeException('Username or email already exists.');
         }
+    }
+
+    private static function ensurePaginationIndexes(PDO $conn): void
+    {
+        if (self::$paginationIndexesChecked) {
+            return;
+        }
+
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_users_status_role_user',
+            'CREATE INDEX idx_users_status_role_user ON users (status, role, user_id)'
+        );
+        ListQueryHelper::ensureIndex(
+            $conn,
+            self::TABLE,
+            'idx_users_last_first_user',
+            'CREATE INDEX idx_users_last_first_user ON users (last_name, first_name, user_id)'
+        );
+
+        self::$paginationIndexesChecked = true;
     }
 }

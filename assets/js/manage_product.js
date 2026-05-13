@@ -136,7 +136,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   const table = document.getElementById("productsTable");
-  let productsDataTable = null;
   const addForm = document.getElementById("addProductForm");
   const editForm = document.getElementById("editProductForm");
   const restockForm = document.getElementById("restockForm");
@@ -150,6 +149,34 @@ document.addEventListener("DOMContentLoaded", () => {
   const addSubcategorySelect = document.getElementById("addProductSubcategory");
   const editCategorySelect = document.getElementById("editProductCategory");
   const editSubcategorySelect = document.getElementById("editProductSubcategory");
+
+  function queueReloadToast(message, icon = "success") {
+    try {
+      sessionStorage.setItem("manageProductsFlash", JSON.stringify({ message, icon }));
+    } catch (error) {
+      console.warn("Unable to persist product flash message.", error);
+    }
+  }
+
+  function flushQueuedToast() {
+    try {
+      const raw = sessionStorage.getItem("manageProductsFlash");
+      if (!raw) return;
+
+      sessionStorage.removeItem("manageProductsFlash");
+      const payload = JSON.parse(raw);
+      if (payload?.message) {
+        showToast(payload.message, payload.icon || "success");
+      }
+    } catch (error) {
+      console.warn("Unable to restore product flash message.", error);
+    }
+  }
+
+  function reloadCurrentPage(message, icon = "success") {
+    queueReloadToast(message, icon);
+    window.location.assign(window.location.pathname + window.location.search);
+  }
 
   function cacheSubcategoryOptions(select) {
     if (!select) return [];
@@ -208,62 +235,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  if (table && window.simpleDatatables && simpleDatatables.DataTable) {
-    productsDataTable = new simpleDatatables.DataTable(table, {
-      searchable: true,
-      fixedHeight: true,
-      perPage: 10
-    });
-  }
-
-  function createDataTableRowFromElement(row) {
-    if (!row) return null;
-
-    const attributes = {};
-    if (row.id) attributes.id = row.id;
-    if (row.className) attributes.class = row.className;
-
-    return {
-      attributes,
-      cells: Array.from(row.children).map((cell) => ({
-        data: cell.innerHTML
-      }))
-    };
-  }
-
-  function findDataTableRowIndex(rowId) {
-    if (!productsDataTable?.data?.data || !rowId) return -1;
-
-    return productsDataTable.data.data.findIndex((row) => {
-      return String(row?.attributes?.id || "") === String(rowId);
-    });
-  }
-
-  function syncDataTableRowNumbers() {
-    if (!productsDataTable?.data?.data) return;
-
-    productsDataTable.data.data.forEach((row, index) => {
-      if (row?.cells?.[0]) {
-        row.cells[0].data = String(index + 1);
-      }
-    });
-  }
-
-  function renderDataTablePreservingPage(preferredPage = null) {
-    if (!productsDataTable) {
-      updateRowNumbers();
-      return;
-    }
-
-    const currentPage = preferredPage ?? productsDataTable._currentPage ?? 1;
-    syncDataTableRowNumbers();
-    productsDataTable.update(true);
-
-    const totalPages = Math.max(productsDataTable.totalPages || 1, 1);
-    const targetPage = Math.min(Math.max(currentPage, 1), totalPages);
-    productsDataTable.page(targetPage);
-  }
-
   function flashRenderedRow(rowId, flashClass) {
     if (!rowId || !flashClass) return;
 
@@ -292,24 +263,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const newRow = temp.firstElementChild;
     if (!newRow || !oldRow) return;
 
-    try {
-      if (productsDataTable) {
-        const rowId = oldRow.id || newRow.id;
-        const rowIndex = findDataTableRowIndex(oldRow.id || newRow.id);
-        const rowData = createDataTableRowFromElement(newRow);
-
-        if (rowIndex >= 0 && rowData) {
-          const currentPage = productsDataTable._currentPage ?? 1;
-          productsDataTable.data.data[rowIndex] = rowData;
-          renderDataTablePreservingPage(currentPage);
-          flashRenderedRow(rowId, "table-warning");
-          return;
-        }
-      }
-    } catch (error) {
-      console.error("Product table sync failed. Falling back to DOM update.", error);
-    }
-
     oldRow.replaceWith(newRow);
     updateRowNumbers();
     flashRenderedRow(newRow.id, "table-warning");
@@ -317,20 +270,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function prependRow(newRow) {
     if (!newRow) return;
-
-    try {
-      if (productsDataTable) {
-        const rowData = createDataTableRowFromElement(newRow);
-        if (rowData) {
-          productsDataTable.data.data.unshift(rowData);
-          renderDataTablePreservingPage(1);
-          flashRenderedRow(newRow.id, "table-success");
-          return;
-        }
-      }
-    } catch (error) {
-      console.error("Product table prepend sync failed. Falling back to DOM update.", error);
-    }
 
     const tbody = table?.querySelector("tbody");
     if (!tbody) return;
@@ -369,6 +308,7 @@ document.addEventListener("DOMContentLoaded", () => {
     editCategorySelect?.value || "",
     editSubcategorySelect?.value || ""
   );
+  flushQueuedToast();
 
   addCategorySelect?.addEventListener("change", () => {
     populateSubcategorySelect(
@@ -485,18 +425,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       postData("/inventory_system/http/ajax/product_actions.php", formData)
         .then((res) => {
-          if (res.success && res.newRowHtml) {
-            const temp = document.createElement("tbody");
-            temp.innerHTML = res.newRowHtml.trim();
-            const newRow = temp.firstElementChild;
-
-            if (newRow) {
-              prependRow(newRow);
-            }
-
+          if (res.success) {
             hideModal("addProductModal");
             addForm.reset();
-            showToast(res.message || "Product added successfully", "success");
+            reloadCurrentPage(res.message || "Product added successfully", "success");
             sendWS(res.event, res.type);
           } else {
             showToast(res.error || "Add failed", "error");
@@ -589,34 +521,8 @@ document.addEventListener("DOMContentLoaded", () => {
           postData("/inventory_system/http/ajax/product_actions.php", formData)
             .then((res) => {
               if (res.success && res.new_status) {
-                const row = document.getElementById(`productRow${id}`);
-                if (row) {
-                  const badge = row.querySelector(".badge");
-                  const btn = row.querySelector(".toggleProductStatusBtn");
-
-                  if (badge) {
-                    badge.textContent =
-                      res.new_status.charAt(0).toUpperCase() + res.new_status.slice(1);
-
-                    badge.classList.remove("bg-success", "bg-secondary");
-                    badge.classList.add(res.new_status === "active" ? "bg-success" : "bg-secondary");
-                  }
-
-                  if (btn) {
-                    btn.classList.remove("btn-success", "btn-danger");
-                    btn.classList.add(res.new_status === "active" ? "btn-danger" : "btn-success");
-                    btn.innerHTML =
-                      res.new_status === "active"
-                        ? '<i class="bi bi-slash-circle"></i>'
-                        : '<i class="bi bi-check-circle"></i>';
-
-                    btn.dataset.status = res.new_status;
-                    btn.dataset.name = productName;
-                  }
-                }
-
                 const successMessage = res.message || `${productName} is now ${res.new_status}.`;
-                showToast(`All set. ${successMessage}`, "success");
+                reloadCurrentPage(`All set. ${successMessage}`, "success");
                 sendWS(res.event, res.type);
               } else {
                 showToast(res.error || "Action failed", "error");
@@ -691,17 +597,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
       postData("/inventory_system/http/ajax/product_actions.php", formData)
         .then((res) => {
-          if (res.success && res.newRowHtml) {
-            const id = document.getElementById("editProductId").value;
-            const oldRow = document.getElementById(`productRow${id}`);
-
-            if (oldRow) {
-              replaceRow(oldRow, res.newRowHtml);
-            }
-
+          if (res.success) {
             hideModal("editProductModal");
             editForm.reset();
-            showToast(res.message || "Product updated", "success");
+            reloadCurrentPage(res.message || "Product updated", "success");
             sendWS(res.event, res.type);
           } else {
             showToast(res.error || "Update failed", "error");
@@ -751,16 +650,6 @@ document.addEventListener("DOMContentLoaded", () => {
             return showToast(res.error || "Restock failed", "error");
           }
 
-          const row = document.getElementById(`productRow${res.product_id}`);
-          if (row) {
-            const qtyCell = row.querySelector(".product-quantity");
-            if (qtyCell) {
-              qtyCell.textContent = res.new_quantity;
-              qtyCell.classList.add("fw-bold");
-              setTimeout(() => qtyCell.classList.remove("fw-bold"), 700);
-            }
-          }
-
           hideModal("restockModal");
           restockForm.reset();
 
@@ -769,7 +658,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (restockName) restockName.value = "";
           if (restockId) restockId.value = "";
 
-          showToast(res.message || "Product restocked", "success");
+          reloadCurrentPage(res.message || "Product restocked", "success");
           sendWS(res.event, res.type);
         })
         .catch(() => showToast("Server error!", "error"));
@@ -829,16 +718,6 @@ document.addEventListener("DOMContentLoaded", () => {
             return showToast(res.error || "Stock out failed", "error");
           }
 
-          const row = document.getElementById(`productRow${res.product_id}`);
-          if (row) {
-            const qtyCell = row.querySelector(".product-quantity");
-            if (qtyCell) {
-              qtyCell.textContent = res.new_quantity;
-              qtyCell.classList.add("fw-bold");
-              setTimeout(() => qtyCell.classList.remove("fw-bold"), 700);
-            }
-          }
-
           hideModal("stockOutModal");
           stockOutForm.reset();
 
@@ -850,7 +729,7 @@ document.addEventListener("DOMContentLoaded", () => {
           if (productIdInput) productIdInput.value = "";
           if (customReasonInput) customReasonInput.value = "";
 
-          showToast(res.message || "Stock out recorded", "success");
+          reloadCurrentPage(res.message || "Stock out recorded", "success");
           sendWS(res.event, res.type);
         })
         .catch(() => showToast("Server error!", "error"));
