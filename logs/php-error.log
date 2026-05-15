@@ -1,35 +1,44 @@
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property React\Socket\Connection::$decor is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 83
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$resourceId is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 84
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$remoteAddress is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 87
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpHeadersReceived is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpServer.php on line 33
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpBuffer is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpRequestParser.php on line 30
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpRequest is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 112
-[13-May-2026 22:59:14 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$WebSocket is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 114
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property React\Socket\Connection::$decor is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 83
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$resourceId is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 84
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$remoteAddress is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 87
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpHeadersReceived is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpServer.php on line 33
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpBuffer is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpRequestParser.php on line 30
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpRequest is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 112
-[13-May-2026 22:59:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$WebSocket is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 114
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property React\Socket\Connection::$decor is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 83
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$resourceId is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 84
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$remoteAddress is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 87
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpHeadersReceived is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpServer.php on line 33
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpBuffer is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpRequestParser.php on line 30
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpRequest is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 112
-[13-May-2026 23:00:40 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$WebSocket is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 114
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property React\Socket\Connection::$decor is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 83
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$resourceId is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 84
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$remoteAddress is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 87
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpHeadersReceived is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpServer.php on line 33
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpBuffer is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpRequestParser.php on line 30
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpRequest is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 112
-[13-May-2026 23:00:49 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$WebSocket is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 114
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property React\Socket\Connection::$decor is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 83
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$resourceId is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 84
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$remoteAddress is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Server\IoServer.php on line 87
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpHeadersReceived is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpServer.php on line 33
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpBuffer is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\Http\HttpRequestParser.php on line 30
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$httpRequest is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 112
-[13-May-2026 23:01:30 Asia/Manila] PHP Deprecated:  Creation of dynamic property Ratchet\Server\IoConnection::$WebSocket is deprecated in C:\xampp\htdocs\inventory_system\vendor\cboden\ratchet\src\Ratchet\WebSocket\WsServer.php on line 114
+[15-May-2026 14:32:17 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:17 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:20 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:20 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:22 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:22 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:24 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:24 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:26 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:26 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:28 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:28 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:31 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:31 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:33 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:33 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:35 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:35 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:37 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:37 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:39 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:39 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:41 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:41 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:43 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:43 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:46 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:46 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:48 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:48 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:50 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:50 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:52 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:52 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:54 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:54 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:32:56 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:32:56 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:33:02 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:33:02 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:33:04 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[15-May-2026 14:33:04 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[15-May-2026 14:41:15 Asia/Manila] [manage_product.php] Call to undefined method ProductController::getSummary()
+[15-May-2026 14:41:29 Asia/Manila] [manage_product.php] Call to undefined method ProductController::getSummary()

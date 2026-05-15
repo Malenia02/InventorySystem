@@ -7,7 +7,13 @@ require_once __DIR__ . '/bootstrap/app.php';
 require_once __DIR__ . '/controllers/AuthController.php';
 require_once __DIR__ . '/components/branding.php';
 
-// Activity log config
+
+if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] > 0) {
+    header('Location: /inventory_system/index.php');
+    exit;
+}
+
+// ── Activity log config ───────────────────────────────────────────────────────
 $logConfig = [
     'table'       => $table_activity_logs,
     'col_user_id' => $activity_log_user_id,
@@ -17,27 +23,17 @@ $logConfig = [
     'col_created' => $activity_log_created,
 ];
 
-// Try secure remember-me auto-login first
-AuthController::consumeRememberMe($conn);
-
-// Redirect already logged-in users
-if (isset($_SESSION['user_id']) && (int) $_SESSION['user_id'] > 0) {
-    header('Location: /inventory_system/index.php');
-    exit;
-}
-
-// Generate CSRF token for form
-$csrf_token = AuthController::generateCsrfToken();
-$error_message = '';
+// ── One-time flash messages (e.g. post-setup success) ─────────────────────────
 $success_message = '';
-$submittedUsername = (string) ($_POST['username'] ?? '');
-$loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername);
-$brand = app_branding($conn ?? null);
-
 if (!empty($_SESSION['setup_success'])) {
     $success_message = (string) $_SESSION['setup_success'];
     unset($_SESSION['setup_success']);
 }
+
+// ── Handle POST before reading security state ─────────────────────────────────
+// We process the form first so that if login fails the rotated CSRF token and
+// updated attempt counts are reflected in the security state we render below.
+$error_message = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $result = AuthController::login($conn, $_POST, $logConfig);
@@ -50,10 +46,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $error_message = (string) ($result['message'] ?? 'Login failed.');
 }
 
-// Re-read token after POST because failed login may rotate it
-$csrf_token = AuthController::generateCsrfToken();
+// ── Read CSRF + security state ONCE, after any POST processing ───────────────
+// On GET:  reads the current (existing) token and fresh attempt state.
+// On POST: reads the rotated token and updated attempt state after the login
+//          attempt was processed above — ensuring the form always has a fresh
+//          token and the captcha is shown/hidden correctly.
+$csrf_token        = AuthController::generateCsrfToken();
 $submittedUsername = (string) ($_POST['username'] ?? '');
-$loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername);
+$loginSecurity     = AuthController::getLoginSecurityState($conn, $submittedUsername);
+$brand             = app_branding($conn ?? null);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -126,7 +127,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
         letter-spacing: 0.01em;
         font-size: clamp(1.7rem, 4vw, 2.25rem);
         line-height: 1;
-    }   
+    }
 
     .login-logo img,
     .login-logo .login-brand-mark {
@@ -168,11 +169,14 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
         }
     }
 </style>
+
 <main>
     <div class="container login-shell">
         <section class="section register min-vh-100 d-flex flex-column align-items-center justify-content-center py-4">
             <div class="container">
                 <div class="row justify-content-center align-items-center g-4">
+
+                    <!-- Left: brand copy -->
                     <div class="col-lg-6 d-flex align-items-center">
                         <div class="login-brand-copy">
                             <span class="eyebrow">Store Access</span>
@@ -186,6 +190,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                         </div>
                     </div>
 
+                    <!-- Right: login form -->
                     <div class="col-lg-5 col-md-7 d-flex flex-column align-items-center justify-content-center">
 
                         <div class="d-flex justify-content-center py-4">
@@ -201,6 +206,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
 
                         <div class="card mb-3 shadow-sm login-panel">
                             <div class="card-body p-4 p-lg-4">
+
                                 <div class="pt-4 pb-2">
                                     <h5 class="card-title text-center pb-0 fs-4">Login to Your Account</h5>
                                     <p class="text-center small">Enter your username and password to log in</p>
@@ -211,7 +217,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
 
                                     <?php if ($error_message !== ''): ?>
                                         <div class="col-12">
-                                            <div class="alert alert-danger text-center small mb-0">
+                                            <div class="alert alert-danger text-center small mb-0" role="alert">
                                                 <?= htmlspecialchars($error_message, ENT_QUOTES, 'UTF-8') ?>
                                             </div>
                                         </div>
@@ -219,7 +225,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
 
                                     <?php if ($success_message !== ''): ?>
                                         <div class="col-12">
-                                            <div class="alert alert-success text-center small mb-0">
+                                            <div class="alert alert-success text-center small mb-0" role="alert">
                                                 <?= htmlspecialchars($success_message, ENT_QUOTES, 'UTF-8') ?>
                                             </div>
                                         </div>
@@ -228,7 +234,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                                     <div class="col-12">
                                         <label for="yourUsername" class="form-label">Username</label>
                                         <div class="input-group has-validation">
-                                            <span class="input-group-text">@</span>
+                                            <span class="input-group-text" aria-hidden="true">@</span>
                                             <input
                                                 type="text"
                                                 name="username"
@@ -236,7 +242,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                                                 id="yourUsername"
                                                 required
                                                 autocomplete="username"
-                                                value="<?= htmlspecialchars($_POST['username'] ?? '', ENT_QUOTES, 'UTF-8') ?>"
+                                                value="<?= htmlspecialchars($submittedUsername, ENT_QUOTES, 'UTF-8') ?>"
                                             >
                                             <div class="invalid-feedback">Please enter your username.</div>
                                         </div>
@@ -287,12 +293,13 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                                                     pattern="[0-9]+"
                                                     required
                                                     autocomplete="off"
+                                                    aria-describedby="captchaHelp"
                                                 >
                                                 <div class="invalid-feedback">
                                                     Please answer the verification challenge.
                                                 </div>
                                             </div>
-                                            <div class="form-text">
+                                            <div class="form-text" id="captchaHelp">
                                                 This appears only after repeated failed login attempts.
                                             </div>
                                         </div>
@@ -301,6 +308,7 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                                     <div class="col-12">
                                         <button class="btn btn-primary w-100" type="submit">Login</button>
                                     </div>
+
                                 </form>
                             </div>
                         </div>
@@ -309,8 +317,8 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
                             Designed by <a href="https://bootstrapmade.com/" target="_blank" rel="noopener noreferrer">BootstrapMade</a>
                         </div>
 
-                    </div>
-                </div>
+                    </div><!-- /col right -->
+                </div><!-- /row -->
             </div>
         </section>
     </div>
@@ -319,13 +327,11 @@ $loginSecurity = AuthController::getLoginSecurityState($conn, $submittedUsername
 <script>
 (() => {
     'use strict';
-    const forms = document.querySelectorAll('.needs-validation');
-
-    Array.from(forms).forEach(form => {
-        form.addEventListener('submit', event => {
+    document.querySelectorAll('.needs-validation').forEach(form => {
+        form.addEventListener('submit', e => {
             if (!form.checkValidity()) {
-                event.preventDefault();
-                event.stopPropagation();
+                e.preventDefault();
+                e.stopPropagation();
             }
             form.classList.add('was-validated');
         }, false);
