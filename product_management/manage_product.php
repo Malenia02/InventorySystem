@@ -45,7 +45,7 @@ try {
         : 0;
 
     // Summary counts
-    // $productSummary = ProductController::getSummary($conn);
+    $productSummary = ProductController::getSummary($conn);
 
 } catch (Throwable $e) {
     error_log('[manage_product.php] ' . $e->getMessage());
@@ -550,38 +550,38 @@ require __DIR__ . '/../components/sidebar.php';
     <div class="stats-grid">
         <div class="stat-card">
             <div class="stat-icon" style="background:var(--c-accent-bg);color:var(--c-accent);">
-                <i class="bi bi-box-seam-fill"></i>
+                <i class="bi bi-box-seam-fill" aria-hidden="true"></i>
             </div>
             <div class="stat-body">
                 <div class="stat-label">Total products</div>
-                <div class="stat-val" style="color:var(--c-accent);"><?= number_format((int)($productSummary['total'] ?? 0)) ?></div>
+                <div class="stat-val" id="statTotal" style="color:var(--c-accent);"><?= number_format((int)($productSummary['total'] ?? 0)) ?></div>
             </div>
         </div>
         <div class="stat-card">
             <div class="stat-icon" style="background:var(--c-green-bg);color:var(--c-green);">
-                <i class="bi bi-check-circle-fill"></i>
+                <i class="bi bi-check-circle-fill" aria-hidden="true"></i>
             </div>
             <div class="stat-body">
                 <div class="stat-label">Active</div>
-                <div class="stat-val" style="color:var(--c-green);"><?= number_format((int)($productSummary['active'] ?? 0)) ?></div>
+                <div class="stat-val" id="statActive" style="color:var(--c-green);"><?= number_format((int)($productSummary['active'] ?? 0)) ?></div>
             </div>
         </div>
         <div class="stat-card">
             <div class="stat-icon" style="background:var(--c-amber-bg);color:var(--c-amber);">
-                <i class="bi bi-exclamation-triangle-fill"></i>
+                <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
             </div>
             <div class="stat-body">
                 <div class="stat-label">Low stock</div>
-                <div class="stat-val" style="color:var(--c-amber);"><?= number_format((int)($productSummary['low_stock'] ?? 0)) ?></div>
+                <div class="stat-val" id="statLowStock" style="color:var(--c-amber);"><?= number_format((int)($productSummary['low_stock'] ?? 0)) ?></div>
             </div>
         </div>
         <div class="stat-card">
             <div class="stat-icon" style="background:var(--c-red-bg);color:var(--c-red);">
-                <i class="bi bi-slash-circle-fill"></i>
+                <i class="bi bi-slash-circle-fill" aria-hidden="true"></i>
             </div>
             <div class="stat-body">
                 <div class="stat-label">Inactive</div>
-                <div class="stat-val" style="color:var(--c-red);"><?= number_format((int)($productSummary['inactive'] ?? 0)) ?></div>
+                <div class="stat-val" id="statInactive" style="color:var(--c-red);"><?= number_format((int)($productSummary['inactive'] ?? 0)) ?></div>
             </div>
         </div>
     </div>
