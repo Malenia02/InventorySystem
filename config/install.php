@@ -11,6 +11,11 @@ if (!function_exists('app_install_url')) {
 if (!function_exists('app_secure_storage_dir')) {
     function app_secure_storage_dir(): string
     {
+        $configured = trim((string) ($_ENV['APP_SECURE_STORAGE_DIR'] ?? $_SERVER['APP_SECURE_STORAGE_DIR'] ?? ''));
+        if ($configured !== '') {
+            return rtrim($configured, '/\\');
+        }
+
         return 'C:/xampp/secure';
     }
 }
@@ -177,14 +182,19 @@ if (!function_exists('app_has_setup_token')) {
 if (!function_exists('app_validate_setup_token')) {
     function app_validate_setup_token(?string $token): bool
     {
-        $expectedHash = app_setup_token_hash();
+        $storedHash = trim(app_setup_token_hash());
         $provided = trim((string) $token);
 
-        if ($expectedHash === '' || $provided === '') {
+        if ($storedHash === '' || $provided === '') {
             return false;
         }
 
-        return hash_equals($expectedHash, hash('sha256', $provided));
+        if (preg_match('/^\$2y\$/', $storedHash) === 1 || preg_match('/^\$argon2(id|i)\$/', $storedHash) === 1) {
+            return password_verify($provided, $storedHash);
+        }
+
+        // Backward-compatible support for legacy SHA-256 setup token files.
+        return hash_equals($storedHash, hash('sha256', $provided));
     }
 }
 
@@ -264,14 +274,22 @@ if (!function_exists('app_write_setup_token_hash')) {
         $tokenPath = app_setup_token_path();
         $directory = dirname($tokenPath);
 
-        if (!is_dir($directory) && !mkdir($directory, 0755, true) && !is_dir($directory)) {
+        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
             throw new RuntimeException('Unable to create the setup token directory.');
         }
 
-        $written = file_put_contents($tokenPath, hash('sha256', $token) . PHP_EOL, LOCK_EX);
+        $algo = defined('PASSWORD_ARGON2ID') ? PASSWORD_ARGON2ID : PASSWORD_DEFAULT;
+        $hashedToken = password_hash($token, $algo);
+        if (!is_string($hashedToken) || $hashedToken === '') {
+            throw new RuntimeException('Unable to hash the setup access key securely.');
+        }
+
+        $written = file_put_contents($tokenPath, $hashedToken . PHP_EOL, LOCK_EX);
         if ($written === false) {
             throw new RuntimeException('Unable to save the setup access key.');
         }
+
+        @chmod($tokenPath, 0600);
     }
 }
 
@@ -324,6 +342,30 @@ if (!function_exists('app_has_table')) {
         $stmt->execute([':table_name' => $table]);
 
         return (int) $stmt->fetchColumn() > 0;
+    }
+}
+
+if (!function_exists('app_runtime_schema_changes_allowed')) {
+    function app_runtime_schema_changes_allowed(): bool
+    {
+        if (app_is_install_context()) {
+            return true;
+        }
+
+        return filter_var(
+            $_ENV['APP_ALLOW_RUNTIME_SCHEMA_CHANGES'] ?? $_SERVER['APP_ALLOW_RUNTIME_SCHEMA_CHANGES'] ?? false,
+            FILTER_VALIDATE_BOOL
+        );
+    }
+}
+
+if (!function_exists('app_fail_runtime_schema_change')) {
+    function app_fail_runtime_schema_change(string $schemaTarget): never
+    {
+        throw new RuntimeException(
+            'Database schema is outdated for ' . $schemaTarget
+            . '. Run the required migration before serving production traffic.'
+        );
     }
 }
 
@@ -399,6 +441,164 @@ if (!function_exists('app_import_sql_file')) {
     }
 }
 
+if (!function_exists('app_migrations_directory')) {
+    function app_migrations_directory(): string
+    {
+        return rtrim(DATABASE_PATH, '/\\') . DIRECTORY_SEPARATOR . 'migrations';
+    }
+}
+
+if (!function_exists('app_migration_files')) {
+    function app_migration_files(): array
+    {
+        $dir = app_migrations_directory();
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $files = glob($dir . DIRECTORY_SEPARATOR . '*.sql') ?: [];
+        sort($files, SORT_NATURAL);
+
+        return array_values(array_filter($files, 'is_file'));
+    }
+}
+
+if (!function_exists('app_migrations_table')) {
+    function app_migrations_table(): string
+    {
+        return 'schema_migrations';
+    }
+}
+
+if (!function_exists('app_has_migrations_table')) {
+    function app_has_migrations_table(PDO $conn): bool
+    {
+        return app_has_table($conn, app_migrations_table());
+    }
+}
+
+if (!function_exists('app_ensure_migrations_table')) {
+    function app_ensure_migrations_table(PDO $conn): void
+    {
+        if (app_has_migrations_table($conn)) {
+            return;
+        }
+
+        if (php_sapi_name() !== 'cli' && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(app_migrations_table());
+        }
+
+        $conn->exec("
+            CREATE TABLE IF NOT EXISTS " . app_migrations_table() . " (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                migration VARCHAR(255) NOT NULL,
+                checksum CHAR(64) NOT NULL,
+                applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uniq_schema_migrations_migration (migration)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+        ");
+    }
+}
+
+if (!function_exists('app_applied_migrations')) {
+    function app_applied_migrations(PDO $conn): array
+    {
+        if (!app_has_migrations_table($conn)) {
+            return [];
+        }
+
+        $stmt = $conn->query('SELECT migration, checksum FROM ' . app_migrations_table() . ' ORDER BY id ASC');
+        $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+        $applied = [];
+
+        foreach ($rows as $row) {
+            $name = trim((string) ($row['migration'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+
+            $applied[$name] = trim((string) ($row['checksum'] ?? ''));
+        }
+
+        return $applied;
+    }
+}
+
+if (!function_exists('app_migration_status')) {
+    function app_migration_status(PDO $conn): array
+    {
+        $applied = app_applied_migrations($conn);
+        $pending = [];
+        $drifted = [];
+
+        foreach (app_migration_files() as $filePath) {
+            $name = basename($filePath);
+            $checksum = hash_file('sha256', $filePath);
+            if (!is_string($checksum) || $checksum === '') {
+                throw new RuntimeException('Unable to calculate migration checksum for ' . $name . '.');
+            }
+
+            if (!array_key_exists($name, $applied)) {
+                $pending[] = $name;
+                continue;
+            }
+
+            if ($applied[$name] !== $checksum) {
+                $drifted[] = $name;
+            }
+        }
+
+        return [
+            'pending' => $pending,
+            'drifted' => $drifted,
+        ];
+    }
+}
+
+if (!function_exists('app_apply_pending_migrations')) {
+    function app_apply_pending_migrations(PDO $conn): array
+    {
+        $files = app_migration_files();
+        if ($files === []) {
+            return [];
+        }
+
+        app_ensure_migrations_table($conn);
+        $applied = app_applied_migrations($conn);
+        $appliedNow = [];
+
+        foreach ($files as $filePath) {
+            $name = basename($filePath);
+            $checksum = hash_file('sha256', $filePath);
+            if (!is_string($checksum) || $checksum === '') {
+                throw new RuntimeException('Unable to calculate migration checksum for ' . $name . '.');
+            }
+
+            if (isset($applied[$name])) {
+                if ($applied[$name] !== $checksum) {
+                    throw new RuntimeException('Applied migration checksum mismatch detected for ' . $name . '.');
+                }
+                continue;
+            }
+
+            app_import_sql_file($conn, $filePath);
+
+            $stmt = $conn->prepare('
+                INSERT INTO ' . app_migrations_table() . ' (migration, checksum, applied_at)
+                VALUES (:migration, :checksum, NOW())
+            ');
+            $stmt->execute([
+                ':migration' => $name,
+                ':checksum' => $checksum,
+            ]);
+
+            $appliedNow[] = $name;
+        }
+
+        return $appliedNow;
+    }
+}
+
 if (!function_exists('app_write_env_file')) {
     function app_write_env_file(string $projectRoot, array $values): void
     {
@@ -412,6 +612,7 @@ if (!function_exists('app_write_env_file')) {
             'BACKUP_SIGNING_KEY' => base64_encode(random_bytes(32)),
             'APP_ENABLE_PUBLIC_INSTALLER' => 'false',
             'APP_SETUP_TOKEN_HASH' => '',
+            'APP_ALLOW_RUNTIME_SCHEMA_CHANGES' => 'false',
             'APP_TIMEZONE' => 'Asia/Manila',
             'SESSION_TIMEOUT' => '1800',
             'DB_HOST' => '127.0.0.1',
@@ -436,14 +637,16 @@ if (!function_exists('app_write_env_file')) {
         $envPath = app_external_env_path();
         $envDirectory = dirname($envPath);
 
-        if (!is_dir($envDirectory) && !mkdir($envDirectory, 0755, true) && !is_dir($envDirectory)) {
+        if (!is_dir($envDirectory) && !mkdir($envDirectory, 0700, true) && !is_dir($envDirectory)) {
             throw new RuntimeException('Unable to create the secure environment directory.');
         }
 
-        $written = file_put_contents($envPath, implode(PHP_EOL, $lines) . PHP_EOL);
+        $written = file_put_contents($envPath, implode(PHP_EOL, $lines) . PHP_EOL, LOCK_EX);
 
         if ($written === false) {
             throw new RuntimeException('Unable to save environment configuration.');
         }
+
+        @chmod($envPath, 0600);
     }
 }

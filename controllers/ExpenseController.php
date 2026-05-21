@@ -7,6 +7,10 @@ final class ExpenseController
 
     public static function ensureSchema(PDO $conn): void
     {
+        if (!app_has_table($conn, self::TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::TABLE);
+        }
+
         $conn->exec("
             CREATE TABLE IF NOT EXISTS " . self::TABLE . " (
                 expense_id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -469,12 +473,20 @@ final class ExpenseController
             return false;
         }
 
+        if (!app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::TABLE . '.' . $column);
+        }
+
         $conn->exec("ALTER TABLE " . self::TABLE . " ADD COLUMN `{$column}` {$definition}");
         return true;
     }
 
     private static function ensureIndex(PDO $conn, string $indexName, string $column): void
     {
+        if (function_exists('app_runtime_schema_changes_allowed') && !app_runtime_schema_changes_allowed()) {
+            return;
+        }
+
         $stmt = $conn->prepare("
             SELECT COUNT(*)
             FROM information_schema.STATISTICS

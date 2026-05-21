@@ -119,6 +119,11 @@ final class AuthController
             return false;
         }
 
+        $tokenAge = time() - (int) ($_SESSION['csrf_token_time'] ?? 0);
+        if ($tokenAge < 0 || $tokenAge > self::CSRF_TOKEN_TTL) {
+            return false;
+        }
+
         if ($token === null) {
             $headerToken = (string) ($_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
             if ($headerToken !== '') {
@@ -949,6 +954,14 @@ final class AuthController
         static $ready = false;
         if ($ready) {
             return;
+        }
+
+        if (!function_exists('app_has_table') || !function_exists('app_runtime_schema_changes_allowed')) {
+            return;
+        }
+
+        if (!app_has_table($conn, self::LOGIN_ATTEMPTS_TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::LOGIN_ATTEMPTS_TABLE);
         }
 
         $conn->exec(

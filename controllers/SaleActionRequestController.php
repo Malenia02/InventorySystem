@@ -10,6 +10,10 @@ final class SaleActionRequestController
 
     public static function ensureSchema(PDO $conn): void
     {
+        if (!app_has_table($conn, self::TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::TABLE);
+        }
+
         $conn->exec("
             CREATE TABLE IF NOT EXISTS " . self::TABLE . " (
                 request_id INT(11) NOT NULL AUTO_INCREMENT PRIMARY KEY,

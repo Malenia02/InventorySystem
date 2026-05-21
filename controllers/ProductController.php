@@ -294,6 +294,38 @@ final class ProductController
         );
     }
 
+    /**
+     * Product rows used by the barcode label admin screen.
+     * Keeps compatibility with that workflow without restoring the old
+     * generic all-products helper that encouraged unlimited full-table reads.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function barcodeLabelProducts(PDO $conn): array
+    {
+        self::ensureSubcatSchema($conn);
+        self::ensurePaginationIndexes($conn);
+
+        $stmt = $conn->query(
+            'SELECT
+                p.product_id,
+                p.product_name,
+                p.sku,
+                p.price,
+                p.quantity,
+                p.status,
+                c.category_name,
+                s.supplier_name
+             ' . self::FROM_JOINS . '
+             ORDER BY p.product_name ASC, p.product_id ASC'
+        );
+
+        return array_map(
+            static fn(array $r): array => self::normalizeForView($r),
+            $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : []
+        );
+    }
+
     // =========================================================================
     // WRITE — add
     // =========================================================================
@@ -1096,6 +1128,9 @@ final class ProductController
         $stmt->execute([':t' => $table, ':c' => $column]);
 
         if ((int) $stmt->fetchColumn() === 0) {
+            if (!app_runtime_schema_changes_allowed()) {
+                app_fail_runtime_schema_change($table . '.' . $column);
+            }
             try {
                 $conn->exec($sql);
             } catch (Throwable $e) {

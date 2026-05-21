@@ -486,6 +486,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
+            app_apply_pending_migrations($dbConn);
+
             $dbConn->beginTransaction();
 
             $dbConn->exec('DELETE FROM pos_config');

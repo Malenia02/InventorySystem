@@ -283,6 +283,10 @@ final class ListQueryHelper
             return;
         }
 
+        if (function_exists('app_runtime_schema_changes_allowed') && !app_runtime_schema_changes_allowed()) {
+            return;
+        }
+
         $cacheKey = $table . '.' . $indexName;
         if (self::$indexExistenceCache[$cacheKey] ?? false) {
             return;

@@ -19,6 +19,10 @@ final class ShiftClosingController
     {
         SaleController::ensureReturnSchema($conn);
 
+        if (!app_has_table($conn, self::TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::TABLE);
+        }
+
         $conn->exec("
             CREATE TABLE IF NOT EXISTS " . self::TABLE . " (
                 shift_closing_id int(11) NOT NULL AUTO_INCREMENT,
@@ -49,6 +53,10 @@ final class ShiftClosingController
                 CONSTRAINT shift_closings_ibfk_1 FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
         ");
+
+        if (!app_has_table($conn, self::REQUEST_TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::REQUEST_TABLE);
+        }
 
         $conn->exec("
             CREATE TABLE IF NOT EXISTS " . self::REQUEST_TABLE . " (
@@ -857,6 +865,10 @@ final class ShiftClosingController
                 return;
             }
 
+            if (!app_runtime_schema_changes_allowed()) {
+                app_fail_runtime_schema_change(self::TABLE . '.' . $column);
+            }
+
             $conn->exec("
                 ALTER TABLE " . self::TABLE . "
                 ADD COLUMN {$definition}
@@ -882,6 +894,10 @@ final class ShiftClosingController
                 return;
             }
 
+            if (!app_runtime_schema_changes_allowed()) {
+                app_fail_runtime_schema_change(self::TABLE . '.closed_at');
+            }
+
             $conn->exec("
                 ALTER TABLE " . self::TABLE . "
                 MODIFY closed_at datetime DEFAULT NULL
@@ -893,6 +909,10 @@ final class ShiftClosingController
 
     private static function ensureIndex(PDO $conn, string $indexName, string $definition): void
     {
+        if (function_exists('app_runtime_schema_changes_allowed') && !app_runtime_schema_changes_allowed()) {
+            return;
+        }
+
         try {
             $stmt = $conn->prepare("
                 SELECT COUNT(*)
@@ -921,6 +941,10 @@ final class ShiftClosingController
 
     private static function ensureUniqueUserDateIndex(PDO $conn): void
     {
+        if (function_exists('app_runtime_schema_changes_allowed') && !app_runtime_schema_changes_allowed()) {
+            return;
+        }
+
         try {
             $indexStmt = $conn->query("
                 SHOW INDEX

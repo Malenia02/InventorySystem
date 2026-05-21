@@ -353,6 +353,34 @@ if (php_sapi_name() !== 'cli') {
         );
     }
 
+    if (
+        !$isInstallRoute &&
+        isset($conn) &&
+        function_exists('app_is_fully_installed') &&
+        app_is_fully_installed($conn) &&
+        function_exists('app_migration_status')
+    ) {
+        $migrationStatus = app_migration_status($conn);
+        $pendingMigrations = is_array($migrationStatus['pending'] ?? null) ? $migrationStatus['pending'] : [];
+        $driftedMigrations = is_array($migrationStatus['drifted'] ?? null) ? $migrationStatus['drifted'] : [];
+
+        if ($driftedMigrations !== []) {
+            error_log('[bootstrap] Applied migration checksum mismatch: ' . implode(', ', $driftedMigrations));
+            http_response_code(500);
+            exit('Application migration integrity error. Review applied migrations before continuing.');
+        }
+
+        if ($pendingMigrations !== []) {
+            if (function_exists('app_runtime_schema_changes_allowed') && app_runtime_schema_changes_allowed()) {
+                app_apply_pending_migrations($conn);
+            } else {
+                error_log('[bootstrap] Pending database migrations: ' . implode(', ', $pendingMigrations));
+                http_response_code(503);
+                exit('Database migrations are pending. Run the required migrations before serving this application.');
+            }
+        }
+    }
+
     if (!$isInstallRoute && isset($conn) && function_exists('app_is_fully_installed') && !app_is_fully_installed($conn)) {
         safe_redirect(app_install_url());
     }

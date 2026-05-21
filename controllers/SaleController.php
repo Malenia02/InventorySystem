@@ -9,6 +9,9 @@ final class SaleController
     {
         self::ensureVoidSchema($conn);
         self::ensureColumn($conn, 'sale_items', 'returned_quantity', 'ALTER TABLE sale_items ADD COLUMN returned_quantity int(11) NOT NULL DEFAULT 0 AFTER quantity');
+        if (!app_has_table($conn, 'sale_item_returns') && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change('sale_item_returns');
+        }
         $conn->exec("
             CREATE TABLE IF NOT EXISTS sale_item_returns (
                 return_id int(11) NOT NULL AUTO_INCREMENT,
@@ -449,12 +452,19 @@ final class SaleController
         ]);
 
         if ((int) $stmt->fetchColumn() === 0) {
+            if (!app_runtime_schema_changes_allowed()) {
+                app_fail_runtime_schema_change($table . '.' . $column);
+            }
             $conn->exec($alterSql);
         }
     }
 
     private static function ensureIndex(PDO $conn, string $table, string $index, string $createSql): void
     {
+        if (function_exists('app_runtime_schema_changes_allowed') && !app_runtime_schema_changes_allowed()) {
+            return;
+        }
+
         $stmt = $conn->prepare("
             SELECT COUNT(*)
             FROM information_schema.statistics

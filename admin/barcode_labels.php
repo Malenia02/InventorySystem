@@ -7,7 +7,7 @@ require_once __DIR__ . '/../controllers/ProductController.php';
 
 Middleware::auth()->role(['admin']);
 
-$products = ProductController::allProducts($conn);
+$products = ProductController::barcodeLabelProducts($conn);
 $skuCounts = [];
 foreach ($products as $product) {
     $sku = trim((string) ($product['sku'] ?? ''));
