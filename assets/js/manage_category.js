@@ -1,175 +1,396 @@
 // ==============================
-// manage_category.js (PRO VERSION)
+// manage_category.js (PRODUCTION LEVEL)
 // ==============================
 
-const csrfToken = document.querySelector('input[name="csrf_token"]')?.value || "";
-
-// ------------------------------
-// SweetAlert Toast
-// ------------------------------
-const Toast = Swal.mixin({
-  toast: true,
-  position: "top-end",
-  showConfirmButton: false,
-  timer: 3000,
-  timerProgressBar: true
-});
-
-function showToast(message, icon = "success") {
-  Toast.fire({
-    icon: icon,
-    title: message
-  });
-}
-
-// ------------------------------
-// POST helper
-// ------------------------------
-function postData(url, formData) {
-  if (!(formData instanceof FormData)) formData = new FormData();
-  if (!formData.has("csrf_token")) formData.append("csrf_token", csrfToken);
-
-  return fetch(url, {
-    method: "POST",
-    body: formData
-  }).then(res => res.json());
-}
-
 document.addEventListener("DOMContentLoaded", () => {
+  const CATEGORY_ACTION_URL = "/inventory_system/http/ajax/category_actions.php";
+  const csrfToken = document.querySelector('input[name="csrf_token"]')?.value || "";
+
   const table = document.getElementById("categoryTable");
   const addForm = document.getElementById("addCategoryForm");
   const editForm = document.getElementById("editCategoryForm");
+  const addModalEl = document.getElementById("addCategoryModal");
+  const editModalEl = document.getElementById("editCategoryModal");
 
-  // Initialize DataTable
-  let dataTable = new simpleDatatables.DataTable(table);
+  if (!table || !addForm || !editForm) {
+    console.error("Category management elements are missing.");
+    return;
+  }
 
   // ------------------------------
-  // Helper: Update row numbers dynamically
+  // SweetAlert Toast
   // ------------------------------
-  function updateRowNumbers() {
-    table.querySelectorAll("tbody tr").forEach((tr, idx) => {
-      tr.querySelector("td:first-child").innerText = idx + 1;
+  const Toast = Swal.mixin({
+    toast: true,
+    position: "top-end",
+    showConfirmButton: false,
+    timer: 3500,
+    timerProgressBar: true
+  });
+
+  function showToast(message, icon = "success") {
+    Toast.fire({
+      icon,
+      title: message
     });
   }
 
-  // ------------------------------
-  // Helper: Replace a single row safely
-  // ------------------------------
-  function replaceRow(oldRow, newRowHtml) {
-    const temp = document.createElement("tbody");
-    temp.innerHTML = newRowHtml.trim();
-    oldRow.replaceWith(temp.firstChild);
-    updateRowNumbers();
-    dataTable.refresh(); // refresh sorting/pagination
+  function showDetailedToast(title, html, icon = "success") {
+    Toast.fire({
+      icon,
+      title,
+      html,
+      timer: 4500
+    });
   }
 
-  // ==========================
+  function escapeHtml(value) {
+    const div = document.createElement("div");
+    div.textContent = value ?? "";
+    return div.innerHTML;
+  }
+
+  // ------------------------------
+  // DataTable Helpers
+  // ------------------------------
+  let dataTable = null;
+
+  function initializeDataTable() {
+    if (!table) return;
+
+    if (dataTable) {
+      try {
+        dataTable.destroy();
+      } catch (error) {
+        console.warn("Failed to destroy existing DataTable instance.", error);
+      }
+    }
+
+    dataTable = new simpleDatatables.DataTable(table, {
+      searchable: true,
+      fixedHeight: false,
+      perPage: 10
+    });
+  }
+
+  function refreshDataTable() {
+    updateRowNumbers();
+  }
+
+  initializeDataTable();
+
+  // ------------------------------
+  // UI Helpers
+  // ------------------------------
+  function updateRowNumbers() {
+    const tableBody = table.querySelector("tbody");
+    if (!tableBody) return;
+
+    const rows = tableBody.querySelectorAll("tr");
+    rows.forEach((tr, index) => {
+      const firstCell = tr.querySelector("td:first-child");
+      if (firstCell) {
+        firstCell.textContent = String(index + 1);
+      }
+    });
+  }
+
+  function createRowFromHtml(rowHtml) {
+    const temp = document.createElement("tbody");
+    temp.innerHTML = rowHtml.trim();
+    return temp.firstElementChild;
+  }
+
+  function replaceRow(rowId, newRowHtml) {
+    const oldRow = document.getElementById(rowId);
+    const newRow = createRowFromHtml(newRowHtml);
+
+    if (!oldRow || !newRow) return false;
+
+    oldRow.replaceWith(newRow);
+    updateRowNumbers();
+    return true;
+  }
+
+  function prependRow(newRowHtml) {
+    const tableBody = table.querySelector("tbody");
+    const newRow = createRowFromHtml(newRowHtml);
+    if (!newRow || !tableBody) return false;
+
+    tableBody.prepend(newRow);
+    updateRowNumbers();
+    return true;
+  }
+
+  function getBootstrapModalInstance(modalEl) {
+    if (!modalEl) return null;
+    return bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+  }
+
+  function setButtonLoading(button, isLoading, loadingText = "Processing...") {
+    if (!button) return;
+
+    if (isLoading) {
+      button.dataset.originalText = button.innerHTML;
+      button.disabled = true;
+      button.innerHTML = `
+        <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+        ${loadingText}
+      `;
+    } else {
+      button.disabled = false;
+      button.innerHTML = button.dataset.originalText || button.innerHTML;
+    }
+  }
+
+  // ------------------------------
+  // Request Helper
+  // ------------------------------
+  async function postData(url, formData) {
+    const payload = formData instanceof FormData ? formData : new FormData();
+
+    if (!payload.has("csrf_token")) {
+      payload.append("csrf_token", csrfToken);
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      body: payload,
+      headers: {
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+
+    let result;
+    try {
+      result = await response.json();
+    } catch (error) {
+      throw {
+        status: response.status,
+        message: "Invalid server response."
+      };
+    }
+
+    if (!response.ok) {
+      throw {
+        status: response.status,
+        message: result.error || "Request failed."
+      };
+    }
+
+    return result;
+  }
+
+  function handleRequestError(error) {
+    if (!error || typeof error !== "object") {
+      showToast("An unexpected error occurred.", "error");
+      return;
+    }
+
+    switch (error.status) {
+      case 401:
+        showToast(error.message || "Unauthorized access.", "error");
+        break;
+      case 404:
+        showToast(error.message || "Record not found.", "error");
+        break;
+      case 409:
+        showToast(error.message || "Duplicate record found.", "warning");
+        break;
+      case 422:
+        showToast(error.message || "Validation failed.", "warning");
+        break;
+      case 500:
+        showToast(error.message || "Internal server error.", "error");
+        break;
+      default:
+        showToast(error.message || "Something went wrong.", "error");
+        break;
+    }
+  }
+
+  // ------------------------------
   // ADD CATEGORY
-  // ==========================
-  addForm.addEventListener("submit", e => {
+  // ------------------------------
+  addForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const formData = new FormData(addForm);
-    formData.append("add_category", true);
+    const submitBtn = addForm.querySelector("button[type='submit']");
+    setButtonLoading(submitBtn, true, "Saving...");
 
-    postData("/inventory_system/http/ajax/category_ajax.php", formData)
-      .then(res => {
-        if (res.success && res.updatedRowHtml) {
-          const temp = document.createElement("tbody");
-          temp.innerHTML = res.updatedRowHtml.trim();
-          table.querySelector("tbody").prepend(temp.firstChild);
+    try {
+      const formData = new FormData(addForm);
+      formData.append("add_category", "1");
 
-          updateRowNumbers();
-          dataTable.refresh();
+      const res = await postData(CATEGORY_ACTION_URL, formData);
 
-          bootstrap.Modal.getInstance(document.getElementById("addCategoryModal")).hide();
-          addForm.reset();
+      if (res.success && res.newRowHtml) {
+        prependRow(res.newRowHtml);
 
-          showToast(res.message, "success");
-        } else {
-          showToast(res.error || "Something went wrong", "error");
-        }
-      })
-      .catch(() => showToast("Server error occurred", "error"));
+        const modal = getBootstrapModalInstance(addModalEl);
+        modal?.hide();
+
+        const categoryName = formData.get("category_name") || "New category";
+        addForm.reset();
+
+        showDetailedToast(
+          "Category Added",
+          `
+            <div class="text-start">
+              <div><strong>Category:</strong> ${escapeHtml(categoryName)}</div>
+              <div><strong>Status:</strong> Active</div>
+              <div class="small mt-1">The new category was created successfully.</div>
+            </div>
+          `,
+          "success"
+        );
+      } else {
+        showToast(res.error || "Failed to add category.", "error");
+      }
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setButtonLoading(submitBtn, false);
+    }
   });
 
-  // ==========================
+  // ------------------------------
   // OPEN EDIT MODAL
-  // ==========================
-  table.addEventListener("click", e => {
+  // ------------------------------
+  table.addEventListener("click", (e) => {
     const btn = e.target.closest(".editCategoryBtn");
     if (!btn) return;
 
-    document.getElementById("editCategoryId").value = btn.dataset.id;
-    document.getElementById("editCategoryName").value = btn.dataset.name;
+    const editIdInput = document.getElementById("editCategoryId");
+    const editNameInput = document.getElementById("editCategoryName");
+    const editDescriptionInput = document.getElementById("editCategoryDescription");
+
+    if (editIdInput) editIdInput.value = btn.dataset.id || "";
+    if (editNameInput) editNameInput.value = btn.dataset.name || "";
+    if (editDescriptionInput) editDescriptionInput.value = btn.dataset.description || "";
   });
 
-  // ==========================
+  // ------------------------------
   // EDIT CATEGORY
-  // ==========================
-  editForm.addEventListener("submit", e => {
+  // ------------------------------
+  editForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
-    const formData = new FormData(editForm);
-    formData.append("edit_category", true);
+    const submitBtn = editForm.querySelector("button[type='submit']");
+    setButtonLoading(submitBtn, true, "Updating...");
 
-    postData("/inventory_system/http/ajax/category_ajax.php", formData)
-      .then(res => {
-        if (res.success && res.updatedRowHtml) {
-          const id = document.getElementById("editCategoryId").value;
-          const oldRow = document.getElementById(`categoryRow${id}`);
-          if (oldRow) replaceRow(oldRow, res.updatedRowHtml);
+    try {
+      const formData = new FormData(editForm);
+      formData.append("edit_category", "1");
 
-          bootstrap.Modal.getInstance(document.getElementById("editCategoryModal")).hide();
-          editForm.reset();
+      const res = await postData(CATEGORY_ACTION_URL, formData);
 
-          showToast(res.message, "success");
-        } else {
-          showToast(res.error || "Update failed", "error");
-        }
-      })
-      .catch(() => showToast("Server error occurred", "error"));
+      if (res.success && res.newRowHtml) {
+        const id = document.getElementById("editCategoryId")?.value || "";
+        replaceRow(`categoryRow${id}`, res.newRowHtml);
+
+        const modal = getBootstrapModalInstance(editModalEl);
+        modal?.hide();
+
+        const categoryName = formData.get("category_name") || "Category";
+        editForm.reset();
+
+        showDetailedToast(
+          "Category Updated",
+          `
+            <div class="text-start">
+              <div><strong>Category:</strong> ${escapeHtml(categoryName)}</div>
+              <div><strong>Status:</strong> Changes saved</div>
+              <div class="small mt-1">The category details were updated successfully.</div>
+            </div>
+          `,
+          "success"
+        );
+      } else {
+        showToast(res.error || "Failed to update category.", "error");
+      }
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setButtonLoading(submitBtn, false);
+    }
   });
 
-  // ==========================
-  // TOGGLE STATUS
-  // ==========================
-  table.addEventListener("click", e => {
+  // ------------------------------
+  // TOGGLE CATEGORY STATUS
+  // ------------------------------
+  table.addEventListener("click", async (e) => {
     const btn = e.target.closest(".toggleCategoryStatusBtn");
     if (!btn) return;
 
-    const id = btn.dataset.id;
-    const currentStatus = btn.getAttribute("data-status");
-    const newAction = currentStatus === "active" ? "Deactivate" : "Activate";
+    const id = btn.dataset.id || "";
+    const categoryName = btn.dataset.name || "this category";
+    const currentStatus = (btn.dataset.status || "").toLowerCase();
+    const actionText = currentStatus === "active" ? "Deactivate" : "Activate";
 
-    Swal.fire({
-      title: `${newAction} Category?`,
-      text: "You can change it back later.",
+    const result = await Swal.fire({
+      title: `${actionText} ${escapeHtml(categoryName)}?`,
+      html: `
+        <p class="mb-1">You are about to <strong>${actionText.toLowerCase()}</strong> this category.</p>
+        <small class="text-muted">You can change this again anytime.</small>
+      `,
       icon: "warning",
       showCancelButton: true,
       confirmButtonColor: "#3085d6",
       cancelButtonColor: "#d33",
-      confirmButtonText: `Yes, ${newAction}`
-    }).then(result => {
-      if (!result.isConfirmed) return;
+      confirmButtonText: `Yes, ${actionText}`
+    });
 
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    setButtonLoading(btn, true, `${actionText}...`);
+
+    try {
       const formData = new FormData();
       formData.append("toggle_id", id);
 
-      postData("/inventory_system/http/ajax/category_ajax.php", formData)
-        .then(res => {
-          if (res.success && res.updatedRowHtml) {
-            const oldRow = document.getElementById(`categoryRow${id}`);
-            if (oldRow) replaceRow(oldRow, res.updatedRowHtml);
+      const res = await postData(CATEGORY_ACTION_URL, formData);
 
-            // Toast message
-            showToast(res.message, "success");
-          } else {
-            showToast(res.error || "Action failed", "error");
-          }
-        })
-        .catch(() => showToast("Server error occurred", "error"));
-    });
+      if (res.success && res.newRowHtml) {
+        replaceRow(`categoryRow${id}`, res.newRowHtml);
+
+        showDetailedToast(
+          "Status Updated",
+          `
+            <div class="text-start">
+              <div><strong>Category:</strong> ${escapeHtml(categoryName)}</div>
+              <div><strong>New Status:</strong> ${escapeHtml(
+                res.new_status ? res.new_status.charAt(0).toUpperCase() + res.new_status.slice(1) : "Updated"
+              )}</div>
+              <div class="small mt-1">The category status was updated successfully.</div>
+            </div>
+          `,
+          "success"
+        );
+      } else {
+        showToast(res.error || "Failed to update category status.", "error");
+      }
+    } catch (error) {
+      handleRequestError(error);
+    } finally {
+      setButtonLoading(btn, false);
+    }
   });
 
+  // ------------------------------
+  // Reset forms when modals close
+  // ------------------------------
+  if (addModalEl) {
+    addModalEl.addEventListener("hidden.bs.modal", () => {
+      addForm.reset();
+    });
+  }
+
+  if (editModalEl) {
+    editModalEl.addEventListener("hidden.bs.modal", () => {
+      editForm.reset();
+    });
+  }
 });

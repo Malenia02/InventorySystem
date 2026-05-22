@@ -10,6 +10,12 @@ $pages = [
     'index.php' => 'Dashboard',
     'manage_staff.php' => 'Manage Staff',
     'manage_products.php' => 'Manage Products',
+    'manage_product.php' => 'Manage Products',
+    'bulk_upload_products.php' => 'Bulk Create Products',
+    'manage_category.php' => 'Manage Categories',
+    'manage_subcategory.php' => 'Manage Subcategories',
+    'profile.php' => 'My Profile',
+    'settings.php' => 'Account Settings',
     'manage_orders.php' => 'Manage Orders',
     // Add more pages here
 ];

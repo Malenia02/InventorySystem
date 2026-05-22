@@ -1,10 +1,13 @@
 <?php
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+declare(strict_types=1);
+
+require_once __DIR__ . '/../controllers/AuthController.php';
 
 class Middleware
 {
+    private const CSRF_TTL = 1800;
+    private const ROLE_RECHECK_TTL = 300;
+
     public static function auth(): static
     {
         $instance = new static();
@@ -16,8 +19,12 @@ class Middleware
     {
         $instance = new static();
 
-        if (isset($_SESSION['user_id']) && !empty($_SESSION['user_id'])) {
-            $instance->denyAccess(403, 'You are already logged in.', '/inventory_system/index.php');
+        if (!empty($_SESSION['user_id'])) {
+            $instance->denyAccess(
+                403,
+                'You are already logged in.',
+                '/inventory_system/index.php'
+            );
         }
 
         return $instance;
@@ -28,23 +35,67 @@ class Middleware
         if (
             !isset($_SESSION['user_id']) ||
             !is_numeric($_SESSION['user_id']) ||
-            (int)$_SESSION['user_id'] <= 0
+            (int) $_SESSION['user_id'] <= 0
         ) {
-            $this->denyAccess(401, 'Unauthenticated. Please log in.', '/inventory_system/login.php');
+            $this->denyAccess(
+                401,
+                'Unauthenticated. Please log in.',
+                '/inventory_system/login.php'
+            );
         }
+
+        $appEnv = strtolower((string) env_value('APP_ENV', 'production'));
+        if ($appEnv === 'production' && !app_is_https()) {
+            $host = (string) ($_SERVER['HTTP_HOST'] ?? 'localhost');
+            $uri = (string) ($_SERVER['REQUEST_URI'] ?? '/inventory_system/index.php');
+            safe_redirect('https://' . $host . $uri, 301);
+        }
+
+        $sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
+        if (isset($GLOBALS['conn']) && $GLOBALS['conn'] instanceof PDO && $sessionUserId > 0) {
+            if (!AuthController::validateSessionContext($GLOBALS['conn'], $sessionUserId)) {
+                $_SESSION = [];
+                session_unset();
+                if (ini_get('session.use_cookies')) {
+                    $params = session_get_cookie_params();
+                    setcookie(
+                        session_name(),
+                        '',
+                        time() - 42000,
+                        $params['path'],
+                        $params['domain'],
+                        (bool) $params['secure'],
+                        (bool) $params['httponly']
+                    );
+                }
+                session_destroy();
+
+                $this->denyAccess(
+                    401,
+                    'Session security check failed. Please log in again.',
+                    '/inventory_system/login.php'
+                );
+            }
+        }
+
+        AuthController::rotateSessionIdIfDue();
     }
 
-    public function role(string|array $allowed_roles): static
+    public function role(string|array $allowedRoles, ?PDO $conn = null): static
     {
-        $allowed_roles = (array)$allowed_roles;
-        $user_role     = $_SESSION['role'] ?? null;
+        $allowedRoles = (array) $allowedRoles;
+        $userRole = $_SESSION['role'] ?? null;
 
-        if (!$user_role || !in_array($user_role, $allowed_roles, true)) {
+        if ($conn !== null) {
+            $userRole = $this->getFreshRole($conn) ?? $userRole;
+        }
+
+        if (!$userRole || !in_array($userRole, $allowedRoles, true)) {
             error_log(sprintf(
-                '[Middleware] Unauthorized — user_id: %s, role: %s, required: %s, uri: %s',
+                '[Middleware] Unauthorized access - user_id: %s, role: %s, required: %s, uri: %s',
                 $_SESSION['user_id'] ?? 'guest',
-                $user_role ?? 'none',
-                implode('|', $allowed_roles),
+                $userRole ?? 'none',
+                implode('|', $allowedRoles),
                 $_SERVER['REQUEST_URI'] ?? ''
             ));
 
@@ -60,12 +111,9 @@ class Middleware
 
     public function ajax(): static
     {
-        $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
-            strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
-
-        if (!$isAjax) {
+        if (!$this->expectsJsonRequest()) {
             error_log(sprintf(
-                '[Security] Direct access blocked for AJAX endpoint: %s from IP %s',
+                '[Middleware] Non-AJAX/JSON access blocked - uri: %s, ip: %s',
                 $_SERVER['REQUEST_URI'] ?? '',
                 $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN'
             ));
@@ -83,11 +131,14 @@ class Middleware
     public function methods(array $allowedMethods): static
     {
         $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-        $allowedMethods = array_map('strtoupper', $allowedMethods);
+        $allowedMethods = array_map(
+            static fn ($m) => strtoupper((string) $m),
+            $allowedMethods
+        );
 
         if (!in_array($method, $allowedMethods, true)) {
             error_log(sprintf(
-                '[Security] Method blocked: %s on %s',
+                '[Middleware] Method blocked - method: %s, uri: %s',
                 $method,
                 $_SERVER['REQUEST_URI'] ?? ''
             ));
@@ -110,7 +161,9 @@ class Middleware
 
     public function csrf(): static
     {
-        if (!in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['POST', 'PUT', 'DELETE', 'PATCH'], true)) {
+        $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+
+        if (!in_array($method, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
             return $this;
         }
 
@@ -120,33 +173,104 @@ class Middleware
         return $this;
     }
 
-    private function validateCsrfToken(): void
+    public function throttle(string $scope, int $maxRequests, int $windowSeconds, string $message = 'Too many requests. Please slow down.'): static
     {
-        $sessionToken = $_SESSION['csrf_token'] ?? '';
-        $token = '';
-
-        if (!empty($_SERVER['HTTP_X_CSRF_TOKEN'])) {
-            $token = (string)$_SERVER['HTTP_X_CSRF_TOKEN'];
+        $scope = trim($scope);
+        if ($scope === '' || $maxRequests <= 0 || $windowSeconds <= 0) {
+            return $this;
         }
 
-        if ($token === '') {
-            $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-            if (str_contains($contentType, 'application/json')) {
-                $raw = file_get_contents('php://input');
-                $body = json_decode($raw, true);
+        $path = $this->rateLimitPath($scope);
+        if ($path === null) {
+            return $this;
+        }
 
-                if (is_array($body)) {
-                    $token = (string)($body['csrf_token'] ?? '');
+        $directory = dirname($path);
+        if (!is_dir($directory)) {
+            @mkdir($directory, 0755, true);
+        }
+
+        $fh = @fopen($path, 'c+');
+        if ($fh === false) {
+            return $this;
+        }
+
+        if (!flock($fh, LOCK_EX)) {
+            fclose($fh);
+            return $this;
+        }
+
+        try {
+            $raw = stream_get_contents($fh);
+            $decoded = json_decode($raw !== false ? $raw : '[]', true);
+            $bucket = is_array($decoded) ? $decoded : [];
+            $cutoff = time() - $windowSeconds;
+            $bucket = array_values(array_filter($bucket, static fn($ts): bool => is_int($ts) && $ts >= $cutoff));
+
+            if (count($bucket) >= $maxRequests) {
+                error_log(sprintf(
+                    '[Middleware] Rate limit exceeded - scope: %s, user_id: %s, ip: %s',
+                    $scope,
+                    $_SESSION['user_id'] ?? 'guest',
+                    $_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN'
+                ));
+                $this->denyAccess(429, $message, '/inventory_system/error.php?code=429');
+            }
+
+            $bucket[] = time();
+            $payload = json_encode(array_values($bucket));
+            if ($payload !== false) {
+                ftruncate($fh, 0);
+                rewind($fh);
+                fwrite($fh, $payload);
+            }
+        } finally {
+            flock($fh, LOCK_UN);
+            fclose($fh);
+        }
+
+        return $this;
+    }
+
+    private function validateCsrfToken(): void
+    {
+        $sessionToken = (string) ($_SESSION['csrf_token'] ?? '');
+        $tokenAge = time() - (int) ($_SESSION['csrf_token_time'] ?? 0);
+        $requestToken = '';
+
+        if ($sessionToken === '' || $tokenAge > self::CSRF_TTL) {
+            error_log('[Middleware] CSRF token expired or missing from IP ' . ($_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN'));
+            $this->denyAccess(
+                403,
+                'Security token expired. Please refresh and try again.',
+                '/inventory_system/error.php?code=403'
+            );
+        }
+
+        if (!empty($_SERVER['HTTP_X_CSRF_TOKEN'])) {
+            $requestToken = (string) $_SERVER['HTTP_X_CSRF_TOKEN'];
+        }
+
+        if ($requestToken === '') {
+            $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+
+            if (str_contains($contentType, 'application/json')) {
+                $rawBody = file_get_contents('php://input');
+                $decoded = json_decode($rawBody, true);
+
+                if (is_array($decoded)) {
+                    $requestToken = (string) ($decoded['csrf_token'] ?? '');
                 }
             }
         }
 
-        if ($token === '') {
-            $token = (string)($_POST['csrf_token'] ?? '');
+        if ($requestToken === '') {
+            $requestToken = (string) ($_POST['csrf_token'] ?? '');
         }
 
-        if ($sessionToken === '' || $token === '' || !hash_equals($sessionToken, $token)) {
-            error_log('[Security] CSRF Blocked: Missing or Invalid token from IP ' . ($_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN'));
+        if ($sessionToken === '' || $requestToken === '' || !hash_equals($sessionToken, $requestToken)) {
+            error_log('[Middleware] CSRF validation failed from IP ' . ($_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN'));
+
             $this->denyAccess(
                 403,
                 'Security token mismatch or missing.',
@@ -159,34 +283,39 @@ class Middleware
     {
         $expectedOrigin = $this->getExpectedOrigin();
 
-        $origin  = $_SERVER['HTTP_ORIGIN'] ?? '';
-        $referer = $_SERVER['HTTP_REFERER'] ?? '';
+        $origin  = (string) ($_SERVER['HTTP_ORIGIN'] ?? '');
+        $referer = (string) ($_SERVER['HTTP_REFERER'] ?? '');
 
         if ($origin !== '') {
             if (!$this->isSameOrigin($origin, $expectedOrigin)) {
-                error_log('[Security] Origin check failed: ' . $origin);
+                error_log('[Middleware] Origin check failed: ' . $origin);
+
                 $this->denyAccess(
                     403,
                     'Invalid request origin.',
                     '/inventory_system/error.php?code=403'
                 );
             }
+
             return;
         }
 
         if ($referer !== '') {
             if (!$this->isSameOrigin($referer, $expectedOrigin)) {
-                error_log('[Security] Referer check failed: ' . $referer);
+                error_log('[Middleware] Referer check failed: ' . $referer);
+
                 $this->denyAccess(
                     403,
                     'Invalid request origin.',
                     '/inventory_system/error.php?code=403'
                 );
             }
+
             return;
         }
 
-        error_log('[Security] Missing Origin/Referer for sensitive request');
+        error_log('[Middleware] Missing Origin/Referer for sensitive request');
+
         $this->denyAccess(
             403,
             'Invalid request origin.',
@@ -196,8 +325,10 @@ class Middleware
 
     private function getExpectedOrigin(): string
     {
-        $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || (($_SERVER['SERVER_PORT'] ?? null) == 443);
+        $isHttps = (
+            (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ||
+            (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443)
+        );
 
         $scheme = $isHttps ? 'https' : 'http';
         $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -216,56 +347,62 @@ class Middleware
 
         $candidateScheme = $candidateParts['scheme'] ?? '';
         $candidateHost   = $candidateParts['host'] ?? '';
-        $candidatePort   = $candidateParts['port'] ?? null;
+        $candidatePort   = $candidateParts['port'] ?? ($candidateScheme === 'https' ? 443 : 80);
 
         $expectedScheme = $expectedParts['scheme'] ?? '';
         $expectedHost   = $expectedParts['host'] ?? '';
-        $expectedPort   = $expectedParts['port'] ?? null;
-
-        $candidatePort = $candidatePort ?? ($candidateScheme === 'https' ? 443 : 80);
-        $expectedPort  = $expectedPort ?? ($expectedScheme === 'https' ? 443 : 80);
+        $expectedPort   = $expectedParts['port'] ?? ($expectedScheme === 'https' ? 443 : 80);
 
         return $candidateScheme === $expectedScheme
             && $candidateHost === $expectedHost
-            && $candidatePort === $expectedPort;
+            && (int) $candidatePort === (int) $expectedPort;
     }
 
-   private function denyAccess(int $code, string $message, string $redirect): void
-{
-    $_SESSION['error_code'] = $code;
-    $_SESSION['error_message'] = $message;
+    private function denyAccess(int $code, string $message, string $redirect): void
+    {
+        $_SESSION['error_code'] = $code;
+        $_SESSION['error_message'] = $message;
 
-    $isAjax = isset($_SERVER['HTTP_X_REQUESTED_WITH']) &&
-        strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+        if ($this->expectsJsonRequest()) {
+            http_response_code($code);
+            header('Content-Type: application/json; charset=UTF-8');
 
-    if ($isAjax) {
-        http_response_code($code);
-        header('Content-Type: application/json');
+            echo json_encode([
+                'success'  => false,
+                'error'    => $message,
+                'code'     => $code,
+                'redirect' => $redirect
+            ]);
+            exit;
+        }
 
-        echo json_encode([
-            'success' => false,
-            'error'   => $message,
-            'code'    => $code
-        ]);
+        header('Location: ' . $redirect, true, 302);
         exit;
     }
 
-    header("Location: /inventory_system/error.php");
-    exit;
-}
+    private function expectsJsonRequest(): bool
+    {
+        $requestedWith = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? ''));
+        $accept        = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+        $contentType   = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+
+        return $requestedWith === 'xmlhttprequest'
+            || str_contains($accept, 'application/json')
+            || str_contains($contentType, 'application/json');
+    }
 
     public static function generateCsrfToken(): string
     {
         if (
             empty($_SESSION['csrf_token']) ||
             empty($_SESSION['csrf_token_time']) ||
-            (time() - $_SESSION['csrf_token_time']) > 1800
+            (time() - (int) $_SESSION['csrf_token_time']) > self::CSRF_TTL
         ) {
             $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
             $_SESSION['csrf_token_time'] = time();
         }
 
-        return $_SESSION['csrf_token'];
+        return (string) $_SESSION['csrf_token'];
     }
 
     public static function rotateCsrfToken(): string
@@ -276,18 +413,87 @@ class Middleware
 
     public static function user(): array
     {
+        $userId = isset($_SESSION['user_id']) && is_numeric($_SESSION['user_id'])
+            ? (int) $_SESSION['user_id']
+            : null;
+        $username = isset($_SESSION['username']) ? (string) $_SESSION['username'] : null;
+        $role = isset($_SESSION['role']) ? (string) $_SESSION['role'] : null;
+        $firstName = trim((string) ($_SESSION['first_name'] ?? ''));
+        $lastName  = trim((string) ($_SESSION['last_name'] ?? ''));
+        $fullName  = trim($firstName . ' ' . $lastName);
+
         return [
-            'id'       => $_SESSION['user_id'] ?? null,
-            'username' => $_SESSION['username'] ?? null,
-            'role'     => $_SESSION['role'] ?? null,
-            'name'     => $_SESSION['first_name'] ?? null,
+            'id'       => $userId,
+            'username' => $username,
+            'role'     => $role,
+            'name'     => $fullName !== '' ? $fullName : null,
         ];
     }
 
     public static function is(string|array $roles): bool
     {
-        $roles     = (array)$roles;
-        $user_role = $_SESSION['role'] ?? null;
-        return in_array($user_role, $roles, true);
+        $roles = (array) $roles;
+        $userRole = $_SESSION['role'] ?? null;
+
+        return in_array($userRole, $roles, true);
+    }
+
+    private function getFreshRole(PDO $conn): ?string
+    {
+        $lastCheck = (int) ($_SESSION['_role_checked_at'] ?? 0);
+        if ((time() - $lastCheck) < self::ROLE_RECHECK_TTL) {
+            return (string) ($_SESSION['role'] ?? '');
+        }
+
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            return null;
+        }
+
+        try {
+            $stmt = $conn->prepare('SELECT role, status FROM users WHERE user_id = :id LIMIT 1');
+            $stmt->execute([':id' => $userId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            error_log('[Middleware::getFreshRole] ' . $e->getMessage());
+            return (string) ($_SESSION['role'] ?? '');
+        }
+
+        if (!$row || ($row['status'] ?? '') !== 'active') {
+            $_SESSION = [];
+            session_unset();
+            if (ini_get('session.use_cookies')) {
+                $params = session_get_cookie_params();
+                setcookie(
+                    session_name(),
+                    '',
+                    time() - 42000,
+                    $params['path'],
+                    $params['domain'],
+                    (bool) $params['secure'],
+                    (bool) $params['httponly']
+                );
+            }
+            session_destroy();
+            $this->denyAccess(401, 'Your account is no longer active.', '/inventory_system/login.php');
+        }
+
+        $freshRole = (string) ($row['role'] ?? '');
+        $_SESSION['role'] = $freshRole;
+        $_SESSION['_role_checked_at'] = time();
+        return $freshRole;
+    }
+
+    private function rateLimitPath(string $scope): ?string
+    {
+        if (!defined('LOG_PATH')) {
+            return null;
+        }
+
+        $userId = (string) ($_SESSION['user_id'] ?? 'guest');
+        $ip = (string) ($_SERVER['REMOTE_ADDR'] ?? 'UNKNOWN');
+        $key = hash('sha256', strtolower($scope) . '|' . $userId . '|' . $ip);
+
+        return LOG_PATH . '/rate_limits/' . $key . '.json';
     }
 }

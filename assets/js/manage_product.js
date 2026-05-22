@@ -13,6 +13,12 @@ function showToast(message, icon = "success") {
   Toast.fire({ icon, title: message });
 }
 
+function escapeHtml(value) {
+  const div = document.createElement("div");
+  div.textContent = value ?? "";
+  return div.innerHTML;
+}
+
 function sendWS(event = "notification_update", type = "general") {
   if (window.socket && window.socket.readyState === WebSocket.OPEN) {
     window.socket.send(JSON.stringify({ event, type }));
@@ -28,13 +34,19 @@ function postData(url, formData) {
 
   return fetch(url, {
     method: "POST",
-    headers:{
+    headers: {
       "X-Requested-With": "XMLHttpRequest"
     },
     body: formData
   }).then(async (res) => {
-    const data = await res.json();
-    return data;
+    const text = await res.text();
+
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      console.error("Invalid JSON response:", text);
+      throw new Error("Server returned invalid JSON.");
+    }
   });
 }
 
@@ -104,6 +116,7 @@ document.getElementById("addProductModal")?.addEventListener("hidden.bs.modal", 
     form.reset();
     const preview = document.getElementById("addProductPhotoPreview");
     if (preview) preview.src = "/inventory_system/assets/img/card.jpg";
+    document.getElementById("addProductCategory")?.dispatchEvent(new Event("change"));
   }
 });
 
@@ -113,6 +126,7 @@ document.getElementById("editProductModal")?.addEventListener("hidden.bs.modal",
     form.reset();
     const preview = document.getElementById("editProductPhotoPreview");
     if (preview) preview.src = "/inventory_system/assets/img/card.jpg";
+    document.getElementById("editProductCategory")?.dispatchEvent(new Event("change"));
   }
 });
 
@@ -122,16 +136,143 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   const table = document.getElementById("productsTable");
+  let productsDataTable = null;
   const addForm = document.getElementById("addProductForm");
   const editForm = document.getElementById("editProductForm");
   const restockForm = document.getElementById("restockForm");
   const stockOutForm = document.getElementById("stockOutForm");
 
+  const supplierForm = document.getElementById("supplierForm");
+  const supplierMessage = document.getElementById("supplierMessage");
+  const supplierModalEl = document.getElementById("supplierModal");
+  const saveSupplierBtn = document.getElementById("saveSupplierBtn");
+  const addCategorySelect = document.getElementById("addProductCategory");
+  const addSubcategorySelect = document.getElementById("addProductSubcategory");
+  const editCategorySelect = document.getElementById("editProductCategory");
+  const editSubcategorySelect = document.getElementById("editProductSubcategory");
+
+  function cacheSubcategoryOptions(select) {
+    if (!select) return [];
+
+    return Array.from(select.options).map((option) => ({
+      value: option.value,
+      label: option.textContent,
+      categoryId: option.dataset.categoryId || ""
+    }));
+  }
+
+  const addSubcategoryOptions = cacheSubcategoryOptions(addSubcategorySelect);
+  const editSubcategoryOptions = cacheSubcategoryOptions(editSubcategorySelect);
+
+  function populateSubcategorySelect(select, options, categoryId, selectedValue = "") {
+    if (!select) return;
+
+    const normalizedCategory = String(categoryId || "");
+    const normalizedSelected = String(selectedValue || "");
+    const filteredOptions = options.filter((option) => (
+      option.value === "" || option.categoryId === normalizedCategory
+    ));
+
+    select.innerHTML = filteredOptions.map((option) => {
+      const selected = option.value === normalizedSelected ? " selected" : "";
+      return `<option value="${escapeHtml(option.value)}"${selected}>${escapeHtml(option.label)}</option>`;
+    }).join("");
+
+    if (!Array.from(select.options).some((option) => option.value === normalizedSelected)) {
+      select.value = "";
+    }
+  }
+
+  function isBeverageCategory(select) {
+    const label = select?.options?.[select.selectedIndex]?.textContent || "";
+    return label.toLowerCase().includes("beverage");
+  }
+
+  function applyProductUnitRules(form, categorySelect) {
+    if (!form || !categorySelect) return;
+
+    const beverageMode = isBeverageCategory(categorySelect);
+    form.querySelectorAll(".product-box-field").forEach((fieldWrap) => {
+      fieldWrap.classList.toggle("d-none", beverageMode);
+
+      fieldWrap.querySelectorAll("input, select, textarea").forEach((field) => {
+        field.disabled = beverageMode;
+        if (beverageMode) {
+          field.value = "";
+        }
+      });
+    });
+
+    form.querySelectorAll('.product-unit-note[data-unit-note="beverage"]').forEach((note) => {
+      note.classList.toggle("d-none", !beverageMode);
+    });
+  }
+
   if (table && window.simpleDatatables && simpleDatatables.DataTable) {
-    new simpleDatatables.DataTable(table, {
+    productsDataTable = new simpleDatatables.DataTable(table, {
       searchable: true,
       fixedHeight: true,
       perPage: 10
+    });
+  }
+
+  function createDataTableRowFromElement(row) {
+    if (!row) return null;
+
+    const attributes = {};
+    if (row.id) attributes.id = row.id;
+    if (row.className) attributes.class = row.className;
+
+    return {
+      attributes,
+      cells: Array.from(row.children).map((cell) => ({
+        data: cell.innerHTML
+      }))
+    };
+  }
+
+  function findDataTableRowIndex(rowId) {
+    if (!productsDataTable?.data?.data || !rowId) return -1;
+
+    return productsDataTable.data.data.findIndex((row) => {
+      return String(row?.attributes?.id || "") === String(rowId);
+    });
+  }
+
+  function syncDataTableRowNumbers() {
+    if (!productsDataTable?.data?.data) return;
+
+    productsDataTable.data.data.forEach((row, index) => {
+      if (row?.cells?.[0]) {
+        row.cells[0].data = String(index + 1);
+      }
+    });
+  }
+
+  function renderDataTablePreservingPage(preferredPage = null) {
+    if (!productsDataTable) {
+      updateRowNumbers();
+      return;
+    }
+
+    const currentPage = preferredPage ?? productsDataTable._currentPage ?? 1;
+    syncDataTableRowNumbers();
+    productsDataTable.update(true);
+
+    const totalPages = Math.max(productsDataTable.totalPages || 1, 1);
+    const targetPage = Math.min(Math.max(currentPage, 1), totalPages);
+    productsDataTable.page(targetPage);
+  }
+
+  function flashRenderedRow(rowId, flashClass) {
+    if (!rowId || !flashClass) return;
+
+    window.requestAnimationFrame(() => {
+      const row = document.getElementById(rowId);
+      if (!row) return;
+
+      row.classList.add(flashClass);
+      window.setTimeout(() => row.classList.remove(flashClass), 3000);
     });
   }
 
@@ -151,8 +292,187 @@ document.addEventListener("DOMContentLoaded", () => {
     const newRow = temp.firstElementChild;
     if (!newRow || !oldRow) return;
 
-    oldRow.innerHTML = newRow.innerHTML;
+    try {
+      if (productsDataTable) {
+        const rowId = oldRow.id || newRow.id;
+        const rowIndex = findDataTableRowIndex(oldRow.id || newRow.id);
+        const rowData = createDataTableRowFromElement(newRow);
+
+        if (rowIndex >= 0 && rowData) {
+          const currentPage = productsDataTable._currentPage ?? 1;
+          productsDataTable.data.data[rowIndex] = rowData;
+          renderDataTablePreservingPage(currentPage);
+          flashRenderedRow(rowId, "table-warning");
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Product table sync failed. Falling back to DOM update.", error);
+    }
+
+    oldRow.replaceWith(newRow);
     updateRowNumbers();
+    flashRenderedRow(newRow.id, "table-warning");
+  }
+
+  function prependRow(newRow) {
+    if (!newRow) return;
+
+    try {
+      if (productsDataTable) {
+        const rowData = createDataTableRowFromElement(newRow);
+        if (rowData) {
+          productsDataTable.data.data.unshift(rowData);
+          renderDataTablePreservingPage(1);
+          flashRenderedRow(newRow.id, "table-success");
+          return;
+        }
+      }
+    } catch (error) {
+      console.error("Product table prepend sync failed. Falling back to DOM update.", error);
+    }
+
+    const tbody = table?.querySelector("tbody");
+    if (!tbody) return;
+
+    tbody.prepend(newRow);
+    updateRowNumbers();
+    flashRenderedRow(newRow.id, "table-success");
+  }
+
+  function showSupplierMessage(message, type = "success") {
+    if (!supplierMessage) return;
+
+    supplierMessage.innerHTML = `
+      <div class="alert alert-${type} alert-dismissible fade show mb-0" role="alert">
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+      </div>
+    `;
+  }
+
+  function clearSupplierMessage() {
+    if (supplierMessage) {
+      supplierMessage.innerHTML = "";
+    }
+  }
+
+  populateSubcategorySelect(
+    addSubcategorySelect,
+    addSubcategoryOptions,
+    addCategorySelect?.value || "",
+    addSubcategorySelect?.value || ""
+  );
+  populateSubcategorySelect(
+    editSubcategorySelect,
+    editSubcategoryOptions,
+    editCategorySelect?.value || "",
+    editSubcategorySelect?.value || ""
+  );
+
+  addCategorySelect?.addEventListener("change", () => {
+    populateSubcategorySelect(
+      addSubcategorySelect,
+      addSubcategoryOptions,
+      addCategorySelect.value,
+      ""
+    );
+    applyProductUnitRules(addForm, addCategorySelect);
+  });
+
+  editCategorySelect?.addEventListener("change", () => {
+    populateSubcategorySelect(
+      editSubcategorySelect,
+      editSubcategoryOptions,
+      editCategorySelect.value,
+      editSubcategorySelect?.value || ""
+    );
+    applyProductUnitRules(editForm, editCategorySelect);
+  });
+
+  applyProductUnitRules(addForm, addCategorySelect);
+  applyProductUnitRules(editForm, editCategorySelect);
+
+  if (supplierModalEl) {
+    supplierModalEl.addEventListener("shown.bs.modal", () => {
+      clearSupplierMessage();
+      document.getElementById("supplier_name")?.focus();
+    });
+
+    supplierModalEl.addEventListener("hidden.bs.modal", () => {
+      clearSupplierMessage();
+
+      if (supplierForm) {
+        supplierForm.reset();
+      }
+
+      if (saveSupplierBtn) {
+        saveSupplierBtn.disabled = false;
+        saveSupplierBtn.innerHTML = '<i class="bi bi-save me-1"></i>Add Supplier';
+      }
+    });
+  }
+
+  // ADD SUPPLIER
+  if (supplierForm) {
+    supplierForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      clearSupplierMessage();
+
+      if (saveSupplierBtn) {
+        saveSupplierBtn.disabled = true;
+        saveSupplierBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+      }
+
+      const formData = new FormData(supplierForm);
+
+      postData("/inventory_system/http/ajax/supplier_actions.php", formData)
+        .then((res) => {
+          if (!res.success) {
+            showSupplierMessage(res.error || "Failed to add supplier", "danger");
+            return;
+          }
+
+          const supplierId = String(res.supplier_id || "");
+          const supplierName = res.supplier_name || "";
+
+          if (supplierId && supplierName) {
+            const selects = document.querySelectorAll('select[name="supplier_id"]');
+
+            selects.forEach((select) => {
+              let existingOption = Array.from(select.options).find(
+                (option) => option.value === supplierId
+              );
+
+              if (!existingOption) {
+                existingOption = new Option(supplierName, supplierId, true, true);
+                select.add(existingOption);
+              } else {
+                select.value = supplierId;
+              }
+
+              select.dispatchEvent(new Event("change"));
+            });
+          }
+
+          showSupplierMessage(res.message || "Supplier added successfully", "success");
+          showToast(res.message || "Supplier added successfully", "success");
+
+          setTimeout(() => {
+            hideModal("supplierModal");
+          }, 900);
+        })
+        .catch((err) => {
+          console.error(err);
+          showSupplierMessage("Server error!", "danger");
+        })
+        .finally(() => {
+          if (saveSupplierBtn) {
+            saveSupplierBtn.disabled = false;
+            saveSupplierBtn.innerHTML = '<i class="bi bi-save me-1"></i>Add Supplier';
+          }
+        });
+    });
   }
 
   // ADD PRODUCT
@@ -170,14 +490,10 @@ document.addEventListener("DOMContentLoaded", () => {
             temp.innerHTML = res.newRowHtml.trim();
             const newRow = temp.firstElementChild;
 
-            const tbody = table?.querySelector("tbody");
-            if (tbody && newRow) {
-              tbody.prepend(newRow);
-              newRow.classList.add("table-success");
-              setTimeout(() => newRow.classList.remove("table-success"), 3000);
+            if (newRow) {
+              prependRow(newRow);
             }
 
-            updateRowNumbers();
             hideModal("addProductModal");
             addForm.reset();
             showToast(res.message || "Product added successfully", "success");
@@ -201,18 +517,40 @@ document.addEventListener("DOMContentLoaded", () => {
       // EDIT PRODUCT
       if (editBtn) {
         const d = editBtn.dataset;
+        const editModalForm = document.getElementById("editProductForm");
+        const setEditValue = (selector, value) => {
+          const field = editModalForm?.querySelector(selector);
+          if (field) field.value = value;
+        };
+        const setEditSrc = (selector, value) => {
+          const field = editModalForm?.querySelector(selector);
+          if (field) field.src = value;
+        };
 
-        document.getElementById("editProductId").value = d.id || "";
-        document.getElementById("editProductName").value = d.name || "";
-        document.getElementById("editProductSku").value = d.sku || "";
-        document.getElementById("editProductCategory").value = d.category || "";
-        document.getElementById("editProductSupplierSelect").value = d.supplier || "";
-        document.getElementById("editProductPrice").value = d.price || 0;
-        document.getElementById("editProductSalePrice").value = d.sale_price || "";
-        document.getElementById("editProductVatable").value = d.vatable || 0;
-        document.getElementById("editProductReorderLevel").value = d.reorder || 5;
-        document.getElementById("editProductPhotoPreview").src =
-          d.photo || "/inventory_system/assets/img/card.jpg";
+        setEditValue('#editProductId', d.id || "");
+        setEditValue('#editProductName', d.name || "");
+        setEditValue('#editProductSku', d.sku || "");
+        setEditValue('#editProductCategory', d.category || "");
+        populateSubcategorySelect(
+          editSubcategorySelect,
+          editSubcategoryOptions,
+          d.category || "",
+          d.subcategory || ""
+        );
+        setEditValue('#editProductSubcategory', d.subcategory || "");
+        setEditValue('#editProductSupplierSelect', d.supplier || "");
+        setEditValue('#editProductPrice', d.price || 0);
+        setEditValue('#editProductPiecesPerBox', d.pieces_per_box || 1);
+        setEditValue('#editProductBoxPrice', d.box_price || "");
+        setEditValue('#editProductBoxesPerCase', d.boxes_per_case || 1);
+        setEditValue('#editProductCasePrice', d.case_price || "");
+        setEditValue('#editProductSalePrice', d.sale_price || "");
+        setEditValue('#editProductBoxSalePrice', d.box_sale_price || "");
+        setEditValue('#editProductCaseSalePrice', d.case_sale_price || "");
+        setEditValue('#editProductVatable', d.vatable || 0);
+        setEditValue('#editProductReorderLevel', d.reorder || 5);
+        setEditSrc('#editProductPhotoPreview', d.photo || "/inventory_system/assets/img/card.jpg");
+        applyProductUnitRules(editForm, editCategorySelect);
 
         new bootstrap.Modal(document.getElementById("editProductModal")).show();
         return;
@@ -221,6 +559,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // TOGGLE STATUS
       if (toggleBtn) {
         const id = parseInt(toggleBtn.dataset.id, 10);
+        const productName = toggleBtn.dataset.name || "this product";
         const currentStatus = toggleBtn.dataset.status || "";
         const isCurrentlyActive = currentStatus === "active";
         const newAction = isCurrentlyActive ? "Deactivate" : "Activate";
@@ -231,8 +570,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         Swal.fire({
-          title: `${newAction} Product?`,
-          text: "You can change it back later.",
+          title: `${newAction} ${productName}?`,
+          html: `
+            <p class="mb-1">You're about to <strong>${newAction.toLowerCase()}</strong> this product.</p>
+            <small class="text-muted">You can change it back later anytime.</small>
+          `,
           icon: "warning",
           showCancelButton: true,
           confirmButtonColor: "#3085d6",
@@ -269,10 +611,12 @@ document.addEventListener("DOMContentLoaded", () => {
                         : '<i class="bi bi-check-circle"></i>';
 
                     btn.dataset.status = res.new_status;
+                    btn.dataset.name = productName;
                   }
                 }
 
-                showToast(res.message || "Status updated", "success");
+                const successMessage = res.message || `${productName} is now ${res.new_status}.`;
+                showToast(`All set. ${successMessage}`, "success");
                 sendWS(res.event, res.type);
               } else {
                 showToast(res.error || "Action failed", "error");
@@ -353,8 +697,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (oldRow) {
               replaceRow(oldRow, res.newRowHtml);
-              oldRow.classList.add("table-warning");
-              setTimeout(() => oldRow.classList.remove("table-warning"), 3000);
             }
 
             hideModal("editProductModal");
@@ -376,6 +718,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const productId = document.getElementById("restockProductId")?.value || "";
       const quantity = restockForm.querySelector('input[name="quantity"]')?.value || "";
+      const adjustmentType = restockForm.querySelector('select[name="adjustment_type"]')?.value || "";
+      const notes = restockForm.querySelector('textarea[name="notes"]')?.value.trim() || "";
 
       if (!productId || parseInt(productId, 10) <= 0) {
         showToast("Invalid product ID", "error");
@@ -384,6 +728,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (!quantity || parseInt(quantity, 10) <= 0) {
         showToast("Invalid quantity", "error");
+        return;
+      }
+
+      if (!adjustmentType) {
+        showToast("Select a restock type", "error");
+        return;
+      }
+
+      if (notes.length > 500) {
+        showToast("Restock notes must be 500 characters or fewer", "error");
         return;
       }
 
@@ -429,8 +783,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
       const productId = document.getElementById("stockOutProductId")?.value || "";
       const quantity = stockOutForm.querySelector('input[name="quantity"]')?.value || "";
-      const reasonSelect = stockOutForm.querySelector('select[name="reason"]')?.value || "";
+      const reasonSelect = stockOutForm.querySelector('select[name="adjustment_type"]')?.value || "";
       const customReason = document.getElementById("customStockOutReason")?.value.trim() || "";
+      const notes = stockOutForm.querySelector('textarea[name="notes"]')?.value.trim() || "";
 
       if (!productId || parseInt(productId, 10) <= 0) {
         showToast("Invalid product ID", "error");
@@ -452,9 +807,20 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (finalReason.length > 500) {
+        showToast("Reason must be 500 characters or fewer", "error");
+        return;
+      }
+
+      if (notes.length > 500) {
+        showToast("Notes must be 500 characters or fewer", "error");
+        return;
+      }
+
       const formData = new FormData(stockOutForm);
       formData.set("product_id", productId);
       formData.set("reason", finalReason);
+      formData.set("adjustment_type", reasonSelect);
       formData.append("stockout_product", "1");
 
       postData("/inventory_system/http/ajax/product_actions.php", formData)

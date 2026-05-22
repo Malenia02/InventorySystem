@@ -3,25 +3,45 @@
  * manage_product.php
  * Admin-only page for managing products.
  */
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/middleware/Middleware.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/ProductController.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/CategoryController.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/SupplierController.php';
+require_once __DIR__ . '/../bootstrap/app.php';
+require_once __DIR__ . '/../middleware/Middleware.php';
+require_once __DIR__ . '/../controllers/ProductController.php';
+require_once __DIR__ . '/../controllers/CategoryController.php';
+require_once __DIR__ . '/../controllers/SubcategoryController.php';
+require_once __DIR__ . '/../controllers/SupplierController.php';
+require_once __DIR__ . '/../controllers/StockAdjustmentController.php';
 
 Middleware::auth()->role('admin');
 
 $csrf_token = Middleware::generateCsrfToken();
 
-$categories = CategoryController::all($conn, $table_categories);
+$categories = CategoryController::all($conn);
+$subcategories = SubcategoryController::all($conn);
 $products   = ProductController::allProducts($conn);
-$suppliers  = SupplierController::all($conn, $table_suppliers);
+$suppliers  = SupplierController::all($conn);
+$pendingStockRequests = StockAdjustmentController::pendingCount($conn);
+
+function renderSubcategoryOptions(array $subcategories): string
+{
+    $html = '<option value="">No subcategory</option>';
+
+    foreach ($subcategories as $subcategory) {
+        $html .= sprintf(
+            '<option value="%d" data-category-id="%d">%s</option>',
+            (int) ($subcategory['subcategory_id'] ?? 0),
+            (int) ($subcategory['category_id'] ?? 0),
+            htmlspecialchars((string) ($subcategory['subcategory_name'] ?? '-'), ENT_QUOTES, 'UTF-8')
+        );
+    }
+
+    return $html;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
-    <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/head.php'; ?>
+    <?php require __DIR__ . '/../components/head.php'; ?>
     <title>Manage Products</title>
     <style>
         .modal-message-center {
@@ -106,9 +126,9 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
 <body>
     <?php
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/header.php';
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/sidebar.php';
-    require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/breadcrumb.php';
+    require __DIR__ . '/../components/header.php';
+    require __DIR__ . '/../components/sidebar.php';
+    require __DIR__ . '/../components/breadcrumb.php';
     ?>
 
     <main class="main">
@@ -121,10 +141,21 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
                             <div id="productMessages"></div>
 
-                            <button type="button" class="btn btn-primary mb-3"
-                                data-bs-toggle="modal" data-bs-target="#addProductModal">
-                                <i class="bi bi-plus-circle"></i> Add New Product
-                            </button>
+                            <div class="d-flex flex-wrap gap-2 mb-3">
+                                <button type="button" class="btn btn-primary"
+                                    data-bs-toggle="modal" data-bs-target="#addProductModal">
+                                    <i class="bi bi-plus-circle"></i> Add New Product
+                                </button>
+                                <a href="/inventory_system/stock_adjustment_requests.php" class="btn btn-light border position-relative">
+                                    <i class="bi bi-clipboard-check me-1"></i> Stock Requests
+                                    <?php if ($pendingStockRequests > 0): ?>
+                                        <span class="badge bg-warning text-dark ms-2"><?= (int) $pendingStockRequests ?></span>
+                                    <?php endif; ?>
+                                </a>
+                                <a href="/inventory_system/product_management/bulk_upload_products.php" class="btn btn-outline-primary">
+                                    <i class="bi bi-upload"></i> Bulk Create
+                                </a>
+                            </div>
 
                             <div class="table-responsive" style="max-height:500px; overflow-y:auto;">
                                 <table id="productsTable" class="table table-striped table-bordered">
@@ -134,11 +165,12 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                             <th>Photo</th>
                                             <th>Name</th>
                                             <th>Category</th>
+                                            <th>Subcategory</th>
                                             <th>Supplier</th>
                                             <th>SKU</th>
                                             <th>Quantity</th>
                                             <th>Price</th>
-                                            <th>Sale Price</th>
+                                            <th>Discounts</th>
                                             <th>Vatable</th>
                                             <th>Reorder Level</th>
                                             <th>Status</th>
@@ -150,6 +182,10 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                             $photo    = !empty($p['photo']) ? htmlspecialchars($p['photo']) : '/inventory_system/assets/img/card.jpg';
                                             $status   = $p['status'] ?? 'inactive';
                                             $isActive = $status === 'active';
+                                            $discountParts = [];
+                                            if (!empty($p['sale_price'])) $discountParts[] = 'Piece: ' . rtrim(rtrim(number_format((float)$p['sale_price'], 2), '0'), '.') . '%';
+                                            if (!empty($p['box_sale_price'])) $discountParts[] = 'Box: ' . rtrim(rtrim(number_format((float)$p['box_sale_price'], 2), '0'), '.') . '%';
+                                            if (!empty($p['case_sale_price'])) $discountParts[] = 'Case: ' . rtrim(rtrim(number_format((float)$p['case_sale_price'], 2), '0'), '.') . '%';
                                         ?>
                                             <tr id="productRow<?= (int)$p['product_id'] ?>">
                                                 <td><?= $index + 1 ?></td>
@@ -159,11 +195,12 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                 </td>
                                                 <td><?= htmlspecialchars($p['product_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['category_name'] ?? '-') ?></td>
+                                                <td><?= htmlspecialchars($p['subcategory_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['supplier_name'] ?? '-') ?></td>
                                                 <td><?= htmlspecialchars($p['sku'] ?? '-') ?></td>
                                                 <td class="product-quantity"><?= (int)($p['quantity'] ?? 0) ?></td>
                                                 <td>₱<?= number_format((float)($p['price'] ?? 0), 2) ?></td>
-                                                <td><?= !empty($p['sale_price']) ? '₱' . number_format((float)$p['sale_price'], 2) : '-' ?></td>
+                                                <td><?= $discountParts !== [] ? htmlspecialchars(implode(' | ', $discountParts)) : '-' ?></td>
                                                 <td><?= !empty($p['vatable']) ? 'Yes' : 'No' ?></td>
                                                 <td><?= (int)($p['reorder_level'] ?? 5) ?></td>
                                                 <td>
@@ -178,11 +215,18 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                             data-id="<?= (int)$p['product_id'] ?>"
                                                             data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>"
                                                             data-category="<?= (int)($p['category_id'] ?? 0) ?>"
+                                                            data-subcategory="<?= (int)($p['subcategory_id'] ?? 0) ?>"
                                                             data-supplier="<?= (int)($p['supplier_id'] ?? 0) ?>"
                                                             data-sku="<?= htmlspecialchars($p['sku'] ?? '') ?>"
                                                             data-price="<?= (float)($p['price'] ?? 0) ?>"
+                                                            data-box_price="<?= htmlspecialchars((string)($p['box_price'] ?? '')) ?>"
+                                                            data-case_price="<?= htmlspecialchars((string)($p['case_price'] ?? '')) ?>"
                                                             data-sale_price="<?= htmlspecialchars((string)($p['sale_price'] ?? '')) ?>"
+                                                            data-box_sale_price="<?= htmlspecialchars((string)($p['box_sale_price'] ?? '')) ?>"
+                                                            data-case_sale_price="<?= htmlspecialchars((string)($p['case_sale_price'] ?? '')) ?>"
                                                             data-vatable="<?= (int)($p['vatable'] ?? 0) ?>"
+                                                            data-pieces_per_box="<?= (int)($p['pieces_per_box'] ?? 1) ?>"
+                                                            data-boxes_per_case="<?= (int)($p['boxes_per_case'] ?? 1) ?>"
                                                             data-reorder="<?= (int)($p['reorder_level'] ?? 5) ?>"
                                                             data-photo="<?= $photo ?>"
                                                             data-bs-toggle="modal"
@@ -204,6 +248,7 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
                                                         <button class="btn btn-sm <?= $isActive ? 'btn-danger' : 'btn-success' ?> toggleProductStatusBtn"
                                                             data-id="<?= (int)$p['product_id'] ?>"
+                                                            data-name="<?= htmlspecialchars($p['product_name'] ?? '') ?>"
                                                             data-status="<?= $status ?>">
                                                             <i class="bi <?= $isActive ? 'bi-slash-circle' : 'bi-check-circle' ?>"></i>
                                                         </button>
@@ -269,12 +314,19 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
 
                                                         <div class="col-md-6">
                                                             <label class="form-label">Category</label>
-                                                            <select class="form-select" name="category_id" required>
+                                                            <select class="form-select" name="category_id" id="addProductCategory" required>
                                                                 <?php foreach ($categories as $cat): ?>
                                                                     <option value="<?= (int)$cat['category_id'] ?>">
                                                                         <?= htmlspecialchars($cat['category_name']) ?>
                                                                     </option>
                                                                 <?php endforeach; ?>
+                                                            </select>
+                                                        </div>
+
+                                                        <div class="col-md-6">
+                                                            <label class="form-label">Subcategory</label>
+                                                            <select class="form-select" name="subcategory_id" id="addProductSubcategory">
+                                                                <?= renderSubcategoryOptions($subcategories) ?>
                                                             </select>
                                                         </div>
 
@@ -296,29 +348,76 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                                 </button>
                                                             </div>
                                                         </div>
-
                                                         <div class="col-12 mt-2">
                                                             <div class="modal-section-title">Pricing & Stock</div>
                                                         </div>
 
-                                                        <div class="col-md-4">
-                                                            <label class="form-label">Price</label>
-                                                            <div class="input-group">
-                                                                <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="price" step="0.01" required>
+                                                        <div class="col-12 product-unit-note d-none" data-unit-note="beverage">
+                                                            <div class="alert alert-warning border small mb-0">
+                                                                Beverage items use <strong>Piece</strong> and <strong>Case</strong> in POS. Box selling fields are disabled for this category.
                                                             </div>
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Sale Price</label>
+                                                            <label class="form-label">Piece Price</label>
                                                             <div class="input-group">
                                                                 <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="sale_price" step="0.01">
+                                                                <input type="number" class="form-control" name="price" step="0.01" min="0" required>
                                                             </div>
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Initial Quantity</label>
+                                                            <label class="form-label">Pieces per Box</label>
+                                                            <input type="number" class="form-control" name="pieces_per_box" value="1" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="box_price" step="0.01" min="0" placeholder="Optional">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Boxes per Case</label>
+                                                            <input type="number" class="form-control" name="boxes_per_case" value="1" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="case_price" step="0.01" min="0" placeholder="Optional">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Piece Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="sale_price" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="box_sale_price" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="case_sale_price" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Initial Quantity (Pieces)</label>
                                                             <input type="number" class="form-control" name="initial_quantity" value="0" min="0" required>
                                                         </div>
 
@@ -326,6 +425,7 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                             <label class="form-label">Reorder Level</label>
                                                             <input type="number" class="form-control" name="reorder_level" value="5" min="0">
                                                         </div>
+
 
                                                         <div class="col-md-6">
                                                             <label class="form-label">Vatable?</label>
@@ -412,6 +512,13 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                         </div>
 
                                                         <div class="col-md-6">
+                                                            <label class="form-label">Subcategory</label>
+                                                            <select class="form-select" name="subcategory_id" id="editProductSubcategory">
+                                                                <?= renderSubcategoryOptions($subcategories) ?>
+                                                            </select>
+                                                        </div>
+
+                                                        <div class="col-md-6">
                                                             <label class="form-label">Supplier</label>
                                                             <div class="input-group">
                                                                 <select class="form-select" name="supplier_id" id="editProductSupplierSelect" required>
@@ -434,19 +541,67 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                             <div class="modal-section-title">Pricing & Stock Settings</div>
                                                         </div>
 
-                                                        <div class="col-md-4">
-                                                            <label class="form-label">Price</label>
-                                                            <div class="input-group">
-                                                                <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="price" id="editProductPrice" step="0.01" required>
+                                                        <div class="col-12 product-unit-note d-none" data-unit-note="beverage">
+                                                            <div class="alert alert-warning border small mb-0">
+                                                                Beverage items use <strong>Piece</strong> and <strong>Case</strong> in POS. Box selling fields are disabled for this category.
                                                             </div>
                                                         </div>
 
                                                         <div class="col-md-4">
-                                                            <label class="form-label">Sale Price</label>
+                                                            <label class="form-label">Piece Price</label>
                                                             <div class="input-group">
                                                                 <span class="input-group-text">₱</span>
-                                                                <input type="number" class="form-control" name="sale_price" id="editProductSalePrice" step="0.01">
+                                                                <input type="number" class="form-control" name="price" id="editProductPrice" step="0.01" min="0" required>
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Pieces per Box</label>
+                                                            <input type="number" class="form-control" name="pieces_per_box" id="editProductPiecesPerBox" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="box_price" id="editProductBoxPrice" step="0.01" min="0">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Boxes per Case</label>
+                                                            <input type="number" class="form-control" name="boxes_per_case" id="editProductBoxesPerCase" min="1" required>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Price</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">₱</span>
+                                                                <input type="number" class="form-control" name="case_price" id="editProductCasePrice" step="0.01" min="0">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Piece Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="sale_price" id="editProductSalePrice" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4 product-box-field">
+                                                            <label class="form-label">Box Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="box_sale_price" id="editProductBoxSalePrice" step="0.01" min="0" max="100">
+                                                            </div>
+                                                        </div>
+
+                                                        <div class="col-md-4">
+                                                            <label class="form-label">Case Discount %</label>
+                                                            <div class="input-group">
+                                                                <span class="input-group-text">%</span>
+                                                                <input type="number" class="form-control" name="case_sale_price" id="editProductCaseSalePrice" step="0.01" min="0" max="100">
                                                             </div>
                                                         </div>
 
@@ -512,6 +667,40 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                     <label class="form-label">Quantity to Add</label>
                                                     <input type="number" name="quantity" class="form-control" required min="1" placeholder="Enter quantity">
                                                 </div>
+
+                                                <div class="mt-3">
+                                                    <label class="form-label">Adjustment Type</label>
+                                                    <select name="adjustment_type" class="form-select" required>
+                                                        <option value="delivery_received">Delivery Received</option>
+                                                        <option value="manual_restock">Manual Restock</option>
+                                                        <option value="count_correction">Count Correction</option>
+                                                        <option value="customer_return">Customer Return</option>
+                                                        <option value="purchase_receive">Purchase Order Receipt</option>
+                                                    </select>
+                                                </div>
+
+                                                <div class="mt-3">
+                                                    <label class="form-label">Supplier (optional)</label>
+                                                    <select name="supplier_id" class="form-select">
+                                                        <option value="">No supplier link</option>
+                                                        <?php foreach ($suppliers as $sup): ?>
+                                                            <option value="<?= (int) ($sup['supplier_id'] ?? 0) ?>">
+                                                                <?= htmlspecialchars((string) ($sup['supplier_name'] ?? 'Supplier'), ENT_QUOTES, 'UTF-8') ?>
+                                                            </option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                </div>
+
+                                                <div class="mt-3 mb-0">
+                                                    <label class="form-label">Restock Note (optional)</label>
+                                                    <textarea
+                                                        name="notes"
+                                                        class="form-control"
+                                                        rows="3"
+                                                        maxlength="500"
+                                                        placeholder="Example: Delivery received from supplier, emergency refill, counted adjustment"
+                                                    ></textarea>
+                                                </div>
                                             </div>
                                         </div>
 
@@ -557,21 +746,27 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                                                 </div>
 
                                                 <div class="mb-3">
-                                                    <label class="form-label">Reason</label>
-                                                    <select name="reason" class="form-select" required>
-                                                        <option value="">Select reason</option>
+                                                    <label class="form-label">Adjustment Type</label>
+                                                    <select name="adjustment_type" class="form-select" required>
+                                                        <option value="">Select adjustment type</option>
                                                         <option value="Damaged">Damaged</option>
                                                         <option value="Expired">Expired</option>
                                                         <option value="Lost">Lost</option>
                                                         <option value="Returned to supplier">Returned to supplier</option>
                                                         <option value="Broken packaging">Broken packaging</option>
+                                                        <option value="Count correction">Count correction</option>
                                                         <option value="Other">Other</option>
                                                     </select>
                                                 </div>
 
+                                                <div class="mb-3">
+                                                    <label class="form-label">Specific Reason (optional)</label>
+                                                    <input type="text" id="customStockOutReason" class="form-control" maxlength="500" placeholder="Enter a specific reason if needed">
+                                                </div>
+
                                                 <div class="mb-0">
-                                                    <label class="form-label">Custom Reason (optional)</label>
-                                                    <input type="text" id="customStockOutReason" class="form-control" placeholder="Enter custom reason if needed">
+                                                    <label class="form-label">Notes (optional)</label>
+                                                    <textarea name="notes" class="form-control" rows="3" maxlength="500" placeholder="Add more details for the stock-out record"></textarea>
                                                 </div>
                                             </div>
                                         </div>
@@ -587,73 +782,71 @@ $suppliers  = SupplierController::all($conn, $table_suppliers);
                             </div>
                         </div>
 
-                        <!-- SUPPLIER MODAL -->
-                        <div class="modal fade modal-modern" id="supplierModal" tabindex="-1" aria-hidden="true">
-                            <div class="modal-dialog modal-dialog-centered">
-                                <div class="modal-content">
-                                    <form id="supplierForm">
-                                        <input type="hidden" name="csrf_token" value="<?= $csrf_token ?>">
+                    <!-- SUPPLIER MODAL -->
+                    <div class="modal fade modal-modern" id="supplierModal" tabindex="-1" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <div class="modal-content">
+                                <form id="supplierForm">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token) ?>">
 
-                                        <div class="modal-header bg-info-subtle">
-                                            <div>
-                                                <h5 class="modal-title fw-bold mb-1">
-                                                    <i class="bi bi-truck me-2"></i>Add New Supplier
-                                                </h5>
-                                                <small class="text-muted">Create a supplier record for product assignment.</small>
+                                    <div class="modal-header bg-info-subtle">
+                                        <div>
+                                            <h5 class="modal-title fw-bold mb-1">
+                                                <i class="bi bi-truck me-2"></i>Add New Supplier
+                                            </h5>
+                                            <small class="text-muted">Create a supplier record for product assignment.</small>
+                                        </div>
+                                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                    </div>
+
+                                    <div class="modal-body">
+                                        <div id="supplierMessage" class="modal-message-center"></div>
+
+                                        <div class="row g-3">
+                                            <div class="col-12">
+                                                <label class="form-label">Supplier Name</label>
+                                                <input type="text" class="form-control" id="supplier_name" name="supplier_name" required>
                                             </div>
-                                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                                        </div>
 
-                                        <div class="modal-body">
-                                            <div id="supplierMessage" class="modal-message-center"></div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Contact Person</label>
+                                                <input type="text" class="form-control" id="contact_person" name="contact_person">
+                                            </div>
 
-                                            <div class="row g-3">
-                                                <div class="col-12">
-                                                    <label class="form-label">Supplier Name</label>
-                                                    <input type="text" class="form-control" name="supplier_name" required>
-                                                </div>
+                                            <div class="col-md-6">
+                                                <label class="form-label">Phone</label>
+                                                <input type="text" class="form-control" id="phone" name="phone">
+                                            </div>
 
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Contact Person</label>
-                                                    <input type="text" class="form-control" name="contact_person">
-                                                </div>
+                                            <div class="col-12">
+                                                <label class="form-label">Email</label>
+                                                <input type="email" class="form-control" id="email" name="email">
+                                            </div>
 
-                                                <div class="col-md-6">
-                                                    <label class="form-label">Phone</label>
-                                                    <input type="text" class="form-control" name="phone">
-                                                </div>
-
-                                                <div class="col-12">
-                                                    <label class="form-label">Email</label>
-                                                    <input type="email" class="form-control" name="email">
-                                                </div>
-
-                                                <div class="col-12">
-                                                    <label class="form-label">Address</label>
-                                                    <textarea class="form-control" name="address" rows="3"></textarea>
-                                                </div>
+                                            <div class="col-12">
+                                                <label class="form-label">Address</label>
+                                                <textarea class="form-control" id="address" name="address" rows="3"></textarea>
                                             </div>
                                         </div>
+                                    </div>
 
-                                        <div class="modal-footer">
-                                            <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
-                                            <button type="submit" class="btn btn-info px-4 text-white">
-                                                <i class="bi bi-save me-1"></i>Add Supplier
-                                            </button>
-                                        </div>
-                                    </form>
-                                </div>
+                                    <div class="modal-footer">
+                                        <button type="button" class="btn btn-light border px-4" data-bs-dismiss="modal">Close</button>
+                                        <button type="submit" class="btn btn-info px-4 text-white" id="saveSupplierBtn">
+                                            <i class="bi bi-save me-1"></i>Add Supplier
+                                        </button>
+                                    </div>
+                                </form>
                             </div>
                         </div>
-
-                    </div><!-- end card -->
+                    </div>
                 </div>
             </div>
         </section>
     </main>
 
-    <?php require $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/components/js_script.php'; ?>
-    <script src="<?= HOSTURL ?>/assets/js/manage_product.js"></script>
+    <?php require __DIR__ . '/../components/js_script.php'; ?>
+    <script src="/inventory_system/assets/js/manage_product.js"></script>
 
 </body>
 </html>

@@ -1,0 +1,381 @@
+<?php
+declare(strict_types=1);
+
+final class DatabaseBackupController
+{
+    private const TABLES = [
+        'users',
+        'categories',
+        'suppliers',
+        'subcategories',
+        'pos_config',
+        'products',
+        'expenses',
+        'sales',
+        'sale_items',
+        'sale_item_returns',
+        'sale_action_requests',
+        'stock_in',
+        'stock_out',
+        'stock_audit_log',
+        'stock_adjustment_requests',
+        'activity_logs',
+        'notifications',
+        'notification_seen',
+        'shift_closings',
+        'shift_closing_edit_requests',
+        'purchase_orders',
+        'purchase_order_items',
+    ];
+
+    private const AUTO_INCREMENT_COLUMNS = [
+        'users'            => 'user_id',
+        'categories'       => 'category_id',
+        'suppliers'        => 'supplier_id',
+        'subcategories'    => 'subcategory_id',
+        'pos_config'       => 'config_id',
+        'products'         => 'product_id',
+        'expenses'         => 'expense_id',
+        'sales'            => 'sale_id',
+        'sale_items'       => 'sale_item_id',
+        'sale_item_returns' => 'return_id',
+        'sale_action_requests' => 'request_id',
+        'stock_in'         => 'stockin_id',
+        'stock_out'        => 'stockout_id',
+        'stock_audit_log'  => 'log_id',
+        'stock_adjustment_requests' => 'request_id',
+        'activity_logs'    => 'id',
+        'notifications'    => 'notification_id',
+        'shift_closings'   => 'shift_closing_id',
+        'shift_closing_edit_requests' => 'request_id',
+        'purchase_orders'  => 'po_id',
+        'purchase_order_items' => 'po_item_id',
+    ];
+
+    public static function manifest(PDO $conn): array
+    {
+        $manifest = [];
+
+        foreach (self::TABLES as $table) {
+            $manifest[] = [
+                'table' => $table,
+                'rows'  => self::tableCount($conn, $table),
+            ];
+        }
+
+        return $manifest;
+    }
+
+    public static function exportPayload(PDO $conn): array
+    {
+        $payload = [
+            'app' => 'StockWise',
+            'format_version' => 2,
+            'generated_at' => date('c'),
+            'tables' => [],
+        ];
+
+        foreach (self::TABLES as $table) {
+            if (!self::hasTable($conn, $table)) {
+                continue;
+            }
+
+            $stmt = $conn->query('SELECT * FROM `' . $table . '`');
+            $rows = $stmt ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+
+            $payload['tables'][$table] = [
+                'columns' => $rows !== [] ? array_keys($rows[0]) : [],
+                'rows'    => $rows,
+            ];
+        }
+
+        $payload['signature'] = self::signPayload($payload);
+
+        return $payload;
+    }
+
+    public static function download(PDO $conn): never
+    {
+        $payload = self::exportPayload($conn);
+
+        header('Content-Type: application/json; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="stockwise-backup-' . date('Ymd-His') . '.json"');
+        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        exit;
+    }
+
+    public static function restoreFromUpload(PDO $conn, array $file): array
+    {
+        if (
+            !isset($file['error']) ||
+            (int) $file['error'] === UPLOAD_ERR_NO_FILE
+        ) {
+            throw new InvalidArgumentException('Please choose a backup file to restore.');
+        }
+
+        if ((int) $file['error'] !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('The backup file could not be uploaded.');
+        }
+
+        $tmpFile = (string) ($file['tmp_name'] ?? '');
+        if ($tmpFile === '' || !is_uploaded_file($tmpFile)) {
+            throw new RuntimeException('The uploaded backup file is invalid.');
+        }
+
+        $raw = (string) file_get_contents($tmpFile);
+        $payload = json_decode($raw, true);
+
+        if (!is_array($payload) || !isset($payload['tables']) || !is_array($payload['tables'])) {
+            throw new RuntimeException('This backup file does not look valid.');
+        }
+
+        self::assertValidSignature($payload);
+
+        return self::restorePayload($conn, $payload);
+    }
+
+    public static function restorePayload(PDO $conn, array $payload): array
+    {
+        $tables = is_array($payload['tables'] ?? null) ? $payload['tables'] : [];
+        if ($tables === []) {
+            throw new RuntimeException('No tables were found in the backup file.');
+        }
+
+        self::assertValidSignature($payload);
+
+        $summary = [
+            'tables_cleared' => 0,
+            'rows_restored'  => 0,
+        ];
+
+        $conn->beginTransaction();
+        try {
+            $conn->exec('SET FOREIGN_KEY_CHECKS=0');
+
+            foreach (array_reverse(self::TABLES) as $table) {
+                if (!self::hasTable($conn, $table)) {
+                    continue;
+                }
+                $conn->exec('DELETE FROM `' . $table . '`');
+                $summary['tables_cleared']++;
+            }
+
+            foreach (self::TABLES as $table) {
+                if (!isset($tables[$table]) || !is_array($tables[$table])) {
+                    continue;
+                }
+
+                $rows = is_array($tables[$table]['rows'] ?? null) ? $tables[$table]['rows'] : [];
+                if ($rows === []) {
+                    continue;
+                }
+
+                $inserted = self::restoreTableRows($conn, $table, self::sanitizeRowsForTable($conn, $table, $rows));
+                $summary['rows_restored'] += $inserted;
+                self::resetAutoIncrement($conn, $table, $rows);
+            }
+
+            $conn->exec('SET FOREIGN_KEY_CHECKS=1');
+            $conn->commit();
+
+            return $summary;
+        } catch (Throwable $e) {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
+
+            try {
+                $conn->exec('SET FOREIGN_KEY_CHECKS=1');
+            } catch (Throwable) {
+                // ignore
+            }
+
+            throw $e;
+        }
+    }
+
+    private static function restoreTableRows(PDO $conn, string $table, array $rows): int
+    {
+        if ($rows === []) {
+            return 0;
+        }
+
+        $columns = array_keys($rows[0]);
+        $placeholders = array_map(static fn(string $column): string => ':' . $column, $columns);
+
+        $sql = 'INSERT INTO `' . $table . '` (`' . implode('`, `', $columns) . '`) VALUES (' . implode(', ', $placeholders) . ')';
+        $stmt = $conn->prepare($sql);
+        $count = 0;
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $params = [];
+            foreach ($columns as $column) {
+                $params[':' . $column] = $row[$column] ?? null;
+            }
+
+            $stmt->execute($params);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    private static function sanitizeRowsForTable(PDO $conn, string $table, array $rows): array
+    {
+        $allowedColumns = self::tableColumns($conn, $table);
+        if ($allowedColumns === []) {
+            throw new RuntimeException('Backup table schema could not be verified for ' . $table . '.');
+        }
+
+        $cleanRows = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $unknownColumns = array_diff(array_keys($row), $allowedColumns);
+            if ($unknownColumns !== []) {
+                throw new RuntimeException('Backup contains unexpected columns for ' . $table . '.');
+            }
+
+            $cleanRows[] = array_intersect_key($row, array_flip($allowedColumns));
+        }
+
+        return $cleanRows;
+    }
+
+    private static function tableColumns(PDO $conn, string $table): array
+    {
+        $stmt = $conn->prepare("
+            SELECT COLUMN_NAME
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = :table_name
+            ORDER BY ORDINAL_POSITION
+        ");
+        $stmt->execute([':table_name' => $table]);
+
+        return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
+    }
+
+    private static function signPayload(array $payload): string
+    {
+        unset($payload['signature']);
+        return hash_hmac('sha256', self::canonicalJson($payload), self::backupSecret());
+    }
+
+    private static function assertValidSignature(array $payload): void
+    {
+        $signature = trim((string) ($payload['signature'] ?? ''));
+        if ($signature === '') {
+            throw new RuntimeException('This backup is unsigned. Create a fresh backup before restoring.');
+        }
+
+        if (!hash_equals(self::signPayload($payload), $signature)) {
+            throw new RuntimeException('Backup signature verification failed. The file may have been modified.');
+        }
+    }
+
+    private static function canonicalJson(array $payload): string
+    {
+        self::ksortRecursive($payload);
+        $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            throw new RuntimeException('Unable to sign backup payload.');
+        }
+
+        return $json;
+    }
+
+    private static function ksortRecursive(array &$value): void
+    {
+        foreach ($value as &$child) {
+            if (is_array($child)) {
+                self::ksortRecursive($child);
+            }
+        }
+        unset($child);
+
+        if (array_keys($value) !== range(0, count($value) - 1)) {
+            ksort($value);
+        }
+    }
+
+    private static function backupSecret(): string
+    {
+        if (function_exists('app_secret_value')) {
+            $secret = app_secret_value('BACKUP_SIGNING_KEY', true);
+            if ($secret !== '') {
+                return $secret;
+            }
+
+            $appKey = app_secret_value('APP_KEY', true);
+            if ($appKey !== '') {
+                return $appKey;
+            }
+        }
+
+        if (function_exists('env_value')) {
+            $secret = trim((string) env_value('BACKUP_SIGNING_KEY', env_value('APP_KEY', '')));
+            if ($secret !== '') {
+                return $secret;
+            }
+        }
+
+        throw new RuntimeException('BACKUP_SIGNING_KEY or APP_KEY is required for backups.');
+    }
+
+    private static function resetAutoIncrement(PDO $conn, string $table, array $rows): void
+    {
+        $column = self::AUTO_INCREMENT_COLUMNS[$table] ?? null;
+        if ($column === null || $rows === []) {
+            return;
+        }
+
+        $maxId = 0;
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $maxId = max($maxId, (int) ($row[$column] ?? 0));
+        }
+
+        if ($maxId <= 0) {
+            return;
+        }
+
+        $conn->exec('ALTER TABLE `' . $table . '` AUTO_INCREMENT = ' . ($maxId + 1));
+    }
+
+    private static function tableCount(PDO $conn, string $table): int
+    {
+        if (!self::hasTable($conn, $table)) {
+            return 0;
+        }
+
+        $stmt = $conn->query('SELECT COUNT(*) FROM `' . $table . '`');
+        return (int) ($stmt ? $stmt->fetchColumn() : 0);
+    }
+
+    private static function hasTable(PDO $conn, string $table): bool
+    {
+        if (function_exists('app_has_table')) {
+            return app_has_table($conn, $table);
+        }
+
+        $stmt = $conn->prepare("
+            SELECT COUNT(*)
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE()
+              AND table_name = :table_name
+        ");
+        $stmt->execute([':table_name' => $table]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+}

@@ -9,8 +9,8 @@ Options -Indexes
     Require all denied
 </FilesMatch>
 
-# Block sensitive extensions
-<FilesMatch "\.(env|ini|log|json|yml|yaml|xml)$">
+# Block sensitive extensions and env-like leftovers
+<FilesMatch "(^\.envd$|\.(env|ini|log|json|yml|yaml|xml)$)">
     Require all denied
 </FilesMatch>
 
@@ -24,7 +24,7 @@ Options -Indexes
 # PROTECT CORE PHP FILES
 # ===============================
 
-<FilesMatch "(config\.php|database\.php|config\.json)$">
+<FilesMatch "^(config\.php|database\.php|config\.json)$">
     Require all denied
 </FilesMatch>
 

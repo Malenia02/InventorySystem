@@ -1,39 +1,46 @@
 <?php
-header('Content-Type: application/json');
+declare(strict_types=1);
 
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/middleware/Middleware.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/inventory_system/controllers/NotificationController.php';
+require_once __DIR__ . '/../../bootstrap/app.php';
+require_once __DIR__ . '/../../middleware/Middleware.php';
+require_once __DIR__ . '/../../controllers/NotificationController.php';
+
+header('Content-Type: application/json; charset=UTF-8');
 
 Middleware::auth()
     ->ajax()
     ->methods(['POST'])
-    ->csrf();
+    ->csrf()
+    ->throttle('mark_notifications_seen', 30, 60, 'Too many notification updates. Please wait a moment.');
 
-$userId = (int)($_SESSION['user_id'] ?? 0);
-
-if ($userId <= 0) {
-    echo json_encode([
-        'success' => false,
-        'error'   => 'Unauthorized'
-    ]);
+function jsonResponse(array $payload, int $statusCode = 200): never
+{
+    http_response_code($statusCode);
+    echo json_encode($payload);
     exit;
 }
 
 try {
+    $userId = (int) ($_SESSION['user_id'] ?? 0);
+
+    if ($userId <= 0) {
+        jsonResponse([
+            'success' => false,
+            'error'   => 'Unauthorized.'
+        ], 401);
+    }
+
     NotificationController::markSeen($conn, $userId);
 
-    echo json_encode([
+    jsonResponse([
         'success' => true,
         'message' => 'Notifications marked as seen.'
     ]);
-    exit;
-} catch (\Throwable $e) {
+} catch (Throwable $e) {
     error_log('[mark_notifications_seen] ' . $e->getMessage());
 
-    echo json_encode([
+    jsonResponse([
         'success' => false,
         'error'   => 'Failed to mark notifications as seen.'
-    ]);
-    exit;
+    ], 500);
 }
