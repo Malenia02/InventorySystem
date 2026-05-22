@@ -43,7 +43,8 @@ CREATE TABLE `categories` (
   `status` enum('active','inactive') DEFAULT 'active',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`category_id`),
-  UNIQUE KEY `category_name` (`category_name`)
+  UNIQUE KEY `category_name` (`category_name`),
+  KEY `idx_categories_status_name` (`status`,`category_name`,`category_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `login_attempts`;
@@ -147,6 +148,10 @@ CREATE TABLE `products` (
   KEY `category_id` (`category_id`),
   KEY `supplier_id` (`supplier_id`),
   KEY `idx_products_subcategory` (`subcategory_id`),
+  KEY `idx_products_status_created` (`status`,`created_at`,`product_id`),
+  KEY `idx_products_category_status_created` (`category_id`,`status`,`created_at`,`product_id`),
+  KEY `idx_products_supplier_status_created` (`supplier_id`,`status`,`created_at`,`product_id`),
+  KEY `idx_products_name` (`product_name`),
   CONSTRAINT `products_ibfk_1` FOREIGN KEY (`category_id`) REFERENCES `categories` (`category_id`),
   CONSTRAINT `products_ibfk_2` FOREIGN KEY (`supplier_id`) REFERENCES `suppliers` (`supplier_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -594,7 +599,8 @@ CREATE TABLE `subcategories` (
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   PRIMARY KEY (`subcategory_id`),
   UNIQUE KEY `uniq_category_subcategory` (`category_id`,`subcategory_name`),
-  KEY `idx_subcategory_category` (`category_id`)
+  KEY `idx_subcategory_category` (`category_id`),
+  KEY `idx_subcategories_status_category_name` (`status`,`category_id`,`subcategory_name`,`subcategory_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `suppliers`;
@@ -609,7 +615,9 @@ CREATE TABLE `suppliers` (
   `address` text DEFAULT NULL,
   `status` enum('active','inactive') DEFAULT 'active',
   PRIMARY KEY (`supplier_id`),
-  UNIQUE KEY `unique_supplier_name` (`supplier_name`)
+  UNIQUE KEY `unique_supplier_name` (`supplier_name`),
+  KEY `idx_suppliers_status_name` (`status`,`supplier_name`,`supplier_id`),
+  KEY `idx_suppliers_contact_person` (`contact_person`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `users`;
@@ -629,7 +637,9 @@ CREATE TABLE `users` (
   `photo` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`user_id`),
   UNIQUE KEY `username` (`username`),
-  UNIQUE KEY `email` (`email`)
+  UNIQUE KEY `email` (`email`),
+  KEY `idx_users_status_role_user` (`status`,`role`,`user_id`),
+  KEY `idx_users_last_first_user` (`last_name`,`first_name`,`user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 DROP TABLE IF EXISTS `purchase_order_items`;

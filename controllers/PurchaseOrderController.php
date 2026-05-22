@@ -15,6 +15,10 @@ final class PurchaseOrderController
         ProductController::ensureStockMovementSchema($conn);
         SaleController::ensureReturnSchema($conn);
 
+        if (!app_has_table($conn, self::PO_TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::PO_TABLE);
+        }
+
         $conn->exec("
             CREATE TABLE IF NOT EXISTS " . self::PO_TABLE . " (
                 po_id int(11) NOT NULL AUTO_INCREMENT,
@@ -37,6 +41,10 @@ final class PurchaseOrderController
                 CONSTRAINT purchase_orders_ibfk_3 FOREIGN KEY (received_by) REFERENCES users (user_id) ON DELETE SET NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
         ");
+
+        if (!app_has_table($conn, self::ITEM_TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::ITEM_TABLE);
+        }
 
         $conn->exec("
             CREATE TABLE IF NOT EXISTS " . self::ITEM_TABLE . " (

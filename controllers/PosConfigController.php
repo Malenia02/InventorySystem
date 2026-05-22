@@ -345,6 +345,10 @@ final class PosConfigController
 
     private static function ensureSchema(PDO $conn): void
     {
+        if (!app_has_table($conn, self::TABLE) && !app_runtime_schema_changes_allowed()) {
+            app_fail_runtime_schema_change(self::TABLE);
+        }
+
         self::ensureColumn($conn, 'shift_edit_window_hours', 'shift_edit_window_hours int(11) NOT NULL DEFAULT ' . self::DEFAULT_SHIFT_EDIT_WINDOW_HOURS . ' AFTER logo');
         self::ensureColumn($conn, 'shift_unlock_window_hours', 'shift_unlock_window_hours int(11) NOT NULL DEFAULT ' . self::DEFAULT_SHIFT_UNLOCK_WINDOW_HOURS . ' AFTER shift_edit_window_hours');
     }
@@ -366,6 +370,10 @@ final class PosConfigController
 
             if ((int) $stmt->fetchColumn() > 0) {
                 return;
+            }
+
+            if (!app_runtime_schema_changes_allowed()) {
+                app_fail_runtime_schema_change(self::TABLE . '.' . $column);
             }
 
             $conn->exec("
