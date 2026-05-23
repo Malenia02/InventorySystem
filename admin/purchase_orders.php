@@ -6,636 +6,770 @@ require_once __DIR__ . '/../middleware/Middleware.php';
 require_once __DIR__ . '/../controllers/PurchaseOrderController.php';
 require_once __DIR__ . '/../controllers/NotificationController.php';
 require_once __DIR__ . '/../controllers/AuthController.php';
+require_once __DIR__ . '/../controllers/ListQueryHelper.php';
 
 Middleware::auth()->role(['admin']);
 
 $sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
-$csrfToken = Middleware::generateCsrfToken();
-$successMsg = null;
-$errorMsg = null;
+$csrf_token    = Middleware::generateCsrfToken();
 
+// ── Flash messages ────────────────────────────────────────────────────────────
+$successMsg = null;
+$errorMsg   = null;
 if (isset($_SESSION['purchase_order_flash']) && is_array($_SESSION['purchase_order_flash'])) {
-    $flash = $_SESSION['purchase_order_flash'];
+    $flash      = $_SESSION['purchase_order_flash'];
     $successMsg = isset($flash['success']) ? (string) $flash['success'] : null;
-    $errorMsg = isset($flash['error']) ? (string) $flash['error'] : null;
+    $errorMsg   = isset($flash['error'])   ? (string) $flash['error']   : null;
     unset($_SESSION['purchase_order_flash']);
 }
 
-$logConfig = [
-    'table'       => $table_activity_logs,
-    'col_user_id' => $activity_log_user_id,
-    'col_action'  => $activity_log_action,
-    'col_desc'    => $activity_log_desc,
-    'col_ip'      => $activity_log_ip,
-    'col_created' => $activity_log_created,
-];
-
-function e(?string $value): string
+// ── Page helpers ──────────────────────────────────────────────────────────────
+function e(?string $v): string
 {
-    return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+    return htmlspecialchars((string) $v, ENT_QUOTES, 'UTF-8');
 }
 
-function money(float $amount): string
+function buildLogConfig(): array
 {
-    return 'PHP ' . number_format($amount, 2);
+    return [
+        'table'       => $GLOBALS['table_activity_logs']  ?? 'activity_logs',
+        'col_user_id' => $GLOBALS['activity_log_user_id'] ?? 'user_id',
+        'col_action'  => $GLOBALS['activity_log_action']  ?? 'action',
+        'col_desc'    => $GLOBALS['activity_log_desc']    ?? 'description',
+        'col_ip'      => $GLOBALS['activity_log_ip']      ?? 'ip_address',
+        'col_created' => $GLOBALS['activity_log_created'] ?? 'created_at',
+    ];
 }
 
-function poStatusBadge(string $status): string
+function notify(PDO $conn, int $userId, string $type, string $title, string $message, string $icon = 'bi-bag', string $color = 'text-primary'): void
 {
-    return match (strtolower(trim($status))) {
-        'ordered' => 'bg-primary',
-        'partial' => 'bg-warning text-dark',
-        'received' => 'bg-success',
-        'cancelled' => 'bg-secondary',
-        default => 'bg-light text-dark',
-    };
-}
-
-function safeCreateAdminNotification(
-    PDO $conn,
-    int $userId,
-    string $type,
-    string $title,
-    string $message,
-    string $icon,
-    string $color
-): void {
     try {
         NotificationController::create(
-            $conn,
-            $userId,
-            'admin',
-            $type,
-            $title,
-            $message,
-            $icon,
-            $color,
+            $conn, $userId, 'admin', $type, $title, $message, $icon, $color,
             '/inventory_system/admin/purchase_orders.php'
         );
     } catch (Throwable $e) {
-        error_log('[purchase_orders notification] ' . $e->getMessage());
+        error_log('[purchase_orders notify] ' . $e->getMessage());
     }
 }
 
-try {
-    PurchaseOrderController::ensureSchema($conn);
+function poListUrl(array $filters, array $overrides = []): string
+{
+    $params = array_merge($filters, $overrides);
+    if (($params['page']        ?? 1)     <= 1)     unset($params['page']);
+    if (($params['status']      ?? 'all') === 'all') unset($params['status']);
+    if (($params['supplier_id'] ?? 0)     <= 0)      unset($params['supplier_id']);
+    if (($params['date_from']   ?? '')    === '')     unset($params['date_from']);
+    if (($params['date_to']     ?? '')    === '')     unset($params['date_to']);
+    if (($params['per_page']    ?? 25)    === 25)     unset($params['per_page']);
+    $q = http_build_query($params);
+    return '/inventory_system/admin/purchase_orders.php' . ($q !== '' ? '?' . $q : '');
+}
 
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// JS expects these exact badge class names
+function poStatusBadge(string $status): string
+{
+    return match (strtolower(trim($status))) {
+        'ordered'   => 'badge-po-ordered',
+        'partial'   => 'badge-po-partial',
+        'received'  => 'badge-po-received',
+        'cancelled' => 'badge-po-cancelled',
+        default     => 'badge-po-draft',
+    };
+}
+
+// ── POST handler ──────────────────────────────────────────────────────────────
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        PurchaseOrderController::ensureSchema($conn);
+
         if (!AuthController::validateCsrfToken((string) ($_POST['csrf_token'] ?? ''))) {
             throw new RuntimeException('Invalid request token. Refresh the page and try again.');
         }
 
+        $logConfig = buildLogConfig();
+
+        // ── Create purchase order ─────────────────────────────────────────────
         if (isset($_POST['create_purchase_order'])) {
             $supplierId = (int) ($_POST['supplier_id'] ?? 0);
             $itemsInput = is_array($_POST['items'] ?? null) ? $_POST['items'] : [];
-            $items = [];
+            $items      = [];
 
             foreach ($itemsInput as $item) {
                 if (!is_array($item) || empty($item['selected'])) {
                     continue;
                 }
-
                 $items[] = [
-                    'product_id' => (int) ($item['product_id'] ?? 0),
-                    'quantity' => (int) ($item['quantity'] ?? 0),
-                    'notes' => (string) ($item['notes'] ?? ''),
+                    'product_id' => (int)    ($item['product_id'] ?? 0),
+                    'quantity'   => (int)    ($item['quantity']   ?? 0),
+                    'notes'      => (string) ($item['notes']      ?? ''),
                 ];
             }
 
             $created = PurchaseOrderController::createPurchaseOrder(
-                $conn,
-                $supplierId,
-                $items,
-                $sessionUserId,
-                (string) ($_POST['notes'] ?? '')
+                $conn, $supplierId, $items, $sessionUserId, (string) ($_POST['notes'] ?? '')
             );
 
             AuthController::logActivity(
-                $conn,
-                $logConfig,
-                $sessionUserId,
-                'purchase_order_create',
-                sprintf(
-                    'Created purchase order %s for %s with %d item line(s).',
-                    $created['po_number'],
-                    $created['supplier_name'],
-                    (int) $created['item_count']
-                ),
-                'purchase_order',
-                (int) $created['po_id']
+                $conn, $logConfig, $sessionUserId, 'purchase_order_create',
+                sprintf('Created %s for %s with %d line(s).', $created['po_number'], $created['supplier_name'], (int) $created['item_count']),
+                'purchase_order', (int) $created['po_id']
             );
 
-            safeCreateAdminNotification(
-                $conn,
-                $sessionUserId,
-                'purchase_order',
-                'Purchase Order Created',
+            notify($conn, $sessionUserId, 'purchase_order', 'Purchase Order Created',
                 sprintf('%s created for %s.', $created['po_number'], $created['supplier_name']),
-                'bi-bag-check',
-                'text-primary'
-            );
+                'bi-bag-check', 'text-primary');
 
-            $_SESSION['purchase_order_flash'] = [
-                'success' => sprintf('%s created successfully.', $created['po_number']),
-            ];
+            $_SESSION['purchase_order_flash'] = ['success' => $created['po_number'] . ' created successfully.'];
             header('Location: /inventory_system/admin/purchase_orders.php');
             exit;
         }
 
+        // ── Receive purchase order ────────────────────────────────────────────
         if (isset($_POST['receive_purchase_order'])) {
-            $poId = (int) ($_POST['po_id'] ?? 0);
+            $poId     = (int) ($_POST['po_id'] ?? 0);
             $received = is_array($_POST['received'] ?? null) ? $_POST['received'] : [];
-            $notes = (string) ($_POST['receive_notes'] ?? '');
+            $notes    = (string) ($_POST['receive_notes'] ?? '');
 
-            $result = PurchaseOrderController::receivePurchaseOrder($conn, $poId, $received, $sessionUserId, $notes);
+            $result = PurchaseOrderController::receivePurchaseOrder(
+                $conn, $poId, $received, $sessionUserId, $notes
+            );
 
             AuthController::logActivity(
-                $conn,
-                $logConfig,
-                $sessionUserId,
-                'purchase_order_receive',
-                sprintf(
-                    'Received %d line(s) / %d piece(s) for %s. Status: %s.',
-                    (int) $result['received_lines'],
-                    (int) $result['received_pieces'],
-                    $result['po_number'],
-                    ucfirst((string) $result['status'])
-                ),
-                'purchase_order',
-                (int) $result['po_id'],
-                $result['status'] === 'received' ? 'info' : 'warning'
+                $conn, $logConfig, $sessionUserId, 'purchase_order_receive',
+                sprintf('Received %d line(s)/%d pcs for %s. Status: %s.',
+                    (int) $result['received_lines'], (int) $result['received_pieces'],
+                    $result['po_number'], ucfirst((string) $result['status'])),
+                'purchase_order', (int) $result['po_id']
             );
 
-            safeCreateAdminNotification(
-                $conn,
-                $sessionUserId,
-                'purchase_order_receive',
-                'Purchase Order Received',
+            notify($conn, $sessionUserId, 'purchase_order_receive', 'Purchase Order Received',
                 sprintf('%s updated to %s.', $result['po_number'], ucfirst((string) $result['status'])),
-                'bi-box-arrow-in-down',
-                'text-success',
-                '/inventory_system/admin/purchase_receiving_history.php?po_id=' . (int) ($result['po_id'] ?? 0)
-            );
+                'bi-box-arrow-in-down', 'text-success');
 
-            $_SESSION['purchase_order_flash'] = [
-                'success' => sprintf('%s updated successfully.', $result['po_number']),
-            ];
-            header('Location: /inventory_system/admin/purchase_orders.php');
+            $_SESSION['purchase_order_flash'] = ['success' => $result['po_number'] . ' updated successfully.'];
+            header('Location: /inventory_system/admin/purchase_orders.php'
+                . ($_SERVER['QUERY_STRING'] !== '' ? '?' . $_SERVER['QUERY_STRING'] : ''));
             exit;
         }
-    }
-} catch (Throwable $e) {
-    error_log('[purchase_orders.php] ' . $e->getMessage());
-    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-        $_SESSION['purchase_order_flash'] = [
-            'error' => $e->getMessage(),
-        ];
+
+    } catch (Throwable $e) {
+        error_log('[purchase_orders.php POST] ' . $e->getMessage());
+        $_SESSION['purchase_order_flash'] = ['error' => $e->getMessage()];
         header('Location: /inventory_system/admin/purchase_orders.php');
         exit;
     }
-
-    $errorMsg = $e->getMessage();
 }
 
-$suppliers = PurchaseOrderController::supplierOptions($conn);
-$lowStockRows = PurchaseOrderController::lowStockCandidates($conn);
-$orderableRows = array_values(array_filter($lowStockRows, static fn(array $row): bool => (int) ($row['supplier_id'] ?? 0) > 0));
-$unassignedRows = array_values(array_filter($lowStockRows, static fn(array $row): bool => (int) ($row['supplier_id'] ?? 0) <= 0));
-$statusSummary = PurchaseOrderController::statusSummary($conn);
-$purchaseOrders = PurchaseOrderController::listPurchaseOrders($conn, 30);
-$purchaseOrderDetails = [];
-foreach ($purchaseOrders as $row) {
-    $detail = PurchaseOrderController::getPurchaseOrder($conn, (int) ($row['po_id'] ?? 0));
-    if ($detail !== null) {
-        $purchaseOrderDetails[(int) $row['po_id']] = $detail;
-    }
+// ── Data loading ──────────────────────────────────────────────────────────────
+try {
+    PurchaseOrderController::ensureSchema($conn);
+
+    $poFilters = [
+        'status'      => strtolower(trim((string) ($_GET['status']      ?? 'all'))),
+        'supplier_id' => (int) ($_GET['supplier_id'] ?? 0),
+        'date_from'   => trim((string) ($_GET['date_from'] ?? '')),
+        'date_to'     => trim((string) ($_GET['date_to']   ?? '')),
+        'page'        => max(1, (int) ($_GET['page']     ?? 1)),
+        'per_page'    => (int) ($_GET['per_page'] ?? 25),
+    ];
+
+    $poPage    = PurchaseOrderController::paginate($conn, $poFilters);
+    $poFilters = array_merge($poFilters, [
+        'status'      => (string) $poPage['status'],
+        'supplier_id' => (int)    $poPage['supplier_id'],
+        'page'        => (int)    $poPage['page'],
+        'per_page'    => (int)    $poPage['per_page'],
+    ]);
+    $poItems    = $poPage['items'];
+    $poRowStart = $poPage['total'] > 0
+        ? (($poPage['page'] - 1) * $poPage['per_page']) + 1
+        : 0;
+
+    // ONE batch query for all items on this page — no N+1 loop
+    // JS reads items from data-items attribute on each button
+    $poIds      = array_map(static fn(array $r): int => (int) ($r['po_id'] ?? 0), $poItems);
+    $itemsBatch = PurchaseOrderController::getPurchaseOrderItemsBatch($conn, $poIds);
+
+    $statusSummary  = PurchaseOrderController::statusSummary($conn);
+    $suppliers      = PurchaseOrderController::supplierOptions($conn);
+    $lowStockRows   = PurchaseOrderController::lowStockCandidates($conn);
+    $orderableRows  = array_values(array_filter($lowStockRows, static fn(array $r): bool => (int) ($r['supplier_id'] ?? 0) > 0));
+    $unassignedRows = array_values(array_filter($lowStockRows, static fn(array $r): bool => (int) ($r['supplier_id'] ?? 0) <= 0));
+
+} catch (Throwable $e) {
+    error_log('[purchase_orders.php load] ' . $e->getMessage());
+    $errorMsg       = 'Failed to load purchase order data: ' . $e->getMessage();
+    $poItems        = [];
+    $itemsBatch     = [];
+    $poPage         = ['total' => 0, 'page' => 1, 'per_page' => 25, 'total_pages' => 1];
+    $poFilters      = ['status' => 'all', 'supplier_id' => 0, 'date_from' => '', 'date_to' => '', 'page' => 1, 'per_page' => 25];
+    $poRowStart     = 0;
+    $statusSummary  = ['ordered' => 0, 'partial' => 0, 'received' => 0, 'cancelled' => 0];
+    $suppliers      = [];
+    $orderableRows  = [];
+    $unassignedRows = [];
 }
-$defaultSupplierId = 0;
-$pageTitle = 'Purchase Orders';
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<?php require __DIR__ . '/../components/head.php'; ?>
-<link href="/inventory_system/assets/css/purchase-orders.css" rel="stylesheet">
+    <?php require __DIR__ . '/../components/head.php'; ?>
+    <title>Purchase Orders</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/inventory_system/assets/css/purchase_orders.css">
 </head>
 <body>
-<?php require __DIR__ . '/../components/header.php'; ?>
-<?php require __DIR__ . '/../components/sidebar.php'; ?>
 
-<main id="main" class="main po-page">
-    <div class="po-hero">
-        <div class="po-hero-copy">
-            <p class="po-eyebrow">Inventory Procurement</p>
-            <h1 class="po-hero-title">Purchase Orders</h1>
-            <p class="po-hero-text">
-                Build supplier orders from low-stock items, track receipts, and move replenishment into inventory without leaving one screen.
-            </p>
-            <nav>
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a href="/inventory_system/index.php">Home</a></li>
-                    <li class="breadcrumb-item active">Purchase Orders</li>
-                </ol>
-            </nav>
+<?php
+require __DIR__ . '/../components/header.php';
+require __DIR__ . '/../components/sidebar.php';
+?>
+
+<main id="main" class="main">
+    <div class="pagetitle">
+        <h1>Purchase Orders</h1>
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/inventory_system/index.php">Home</a></li>
+                <li class="breadcrumb-item active">Purchase Orders</li>
+            </ol>
+        </nav>
+    </div>
+
+    <?php if ($successMsg !== null): ?>
+        <div class="alert alert-success mb-3" style="border-radius:var(--radius-md);font-size:13px;" role="alert">
+            <i class="bi bi-check-circle me-2" aria-hidden="true"></i><?= e($successMsg) ?>
         </div>
-        <div class="po-hero-panel">
-            <div class="po-hero-stat">
-                <span class="po-hero-stat-label">Open pipeline</span>
-                <strong><?= number_format((int) (($statusSummary['ordered'] ?? 0) + ($statusSummary['partial'] ?? 0))) ?></strong>
-                <span class="po-hero-stat-note">orders pending full receipt</span>
+    <?php endif; ?>
+    <?php if ($errorMsg !== null): ?>
+        <div class="alert alert-danger mb-3" style="border-radius:var(--radius-md);font-size:13px;" role="alert">
+            <i class="bi bi-exclamation-triangle me-2" aria-hidden="true"></i><?= e($errorMsg) ?>
+        </div>
+    <?php endif; ?>
+
+    <!-- ── Stat cards ──────────────────────────────────────────────────────── -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon" style="background:var(--c-accent-bg);color:var(--c-accent);">
+                <i class="bi bi-bag-fill" aria-hidden="true"></i>
             </div>
-            <div class="po-hero-stat">
-                <span class="po-hero-stat-label">Ready to order</span>
-                <strong><?= number_format(count($orderableRows)) ?></strong>
-                <span class="po-hero-stat-note">low-stock products with suppliers</span>
+            <div class="stat-body">
+                <div class="stat-label">Ordered</div>
+                <div class="stat-val" id="statOrdered" style="color:var(--c-accent);">
+                    <?= number_format((int) ($statusSummary['ordered'] ?? 0)) ?>
+                </div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="background:var(--c-amber-bg);color:var(--c-amber);">
+                <i class="bi bi-hourglass-split" aria-hidden="true"></i>
+            </div>
+            <div class="stat-body">
+                <div class="stat-label">Partial</div>
+                <div class="stat-val" id="statPartial" style="color:var(--c-amber);">
+                    <?= number_format((int) ($statusSummary['partial'] ?? 0)) ?>
+                </div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="background:var(--c-green-bg);color:var(--c-green);">
+                <i class="bi bi-check2-circle" aria-hidden="true"></i>
+            </div>
+            <div class="stat-body">
+                <div class="stat-label">Received</div>
+                <div class="stat-val" id="statReceived" style="color:var(--c-green);">
+                    <?= number_format((int) ($statusSummary['received'] ?? 0)) ?>
+                </div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon" style="background:var(--c-teal-bg);color:var(--c-teal);">
+                <i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>
+            </div>
+            <div class="stat-body">
+                <div class="stat-label">Orderable candidates</div>
+                <div class="stat-val" id="statCandidates" style="color:var(--c-teal);">
+                    <?= number_format(count($orderableRows)) ?>
+                </div>
             </div>
         </div>
     </div>
 
-    <section class="section dashboard">
-        <?php if ($successMsg !== null): ?>
-            <div class="alert alert-success po-alert"><?= e($successMsg) ?></div>
-        <?php endif; ?>
-        <?php if ($errorMsg !== null): ?>
-            <div class="alert alert-danger po-alert"><?= e($errorMsg) ?></div>
-        <?php endif; ?>
 
-        <div class="po-summary-grid mb-4">
-            <div class="po-summary-tile">
-                <div class="po-summary-icon bg-primary-subtle text-primary"><i class="bi bi-bag"></i></div>
-                <div class="po-summary-content">
-                    <div class="po-summary-kicker">Ordered</div>
-                    <div class="po-summary-value"><?= number_format((int) ($statusSummary['ordered'] ?? 0)) ?></div>
-                    <div class="po-summary-note">Created and waiting for first receipt</div>
+    
+    <div class="po-card">
+
+        <!-- Toggle header — JS binds click to id="createPoToggle" -->
+        <div class="po-card-head section-toggle"
+             id="createPoToggle"
+             aria-expanded="true"
+             aria-controls="createPoBody"
+             role="button"
+             tabindex="0">
+            <div>
+                <div class="po-card-title">
+                    <i class="bi bi-plus-circle me-2" style="color:var(--c-accent);" aria-hidden="true"></i>
+                    Create Purchase Order
+                </div>
+                <div class="po-card-sub">
+                    Select a supplier and low-stock products to generate a new order.
                 </div>
             </div>
-            <div class="po-summary-tile">
-                <div class="po-summary-icon bg-warning-subtle text-warning"><i class="bi bi-hourglass-split"></i></div>
-                <div class="po-summary-content">
-                    <div class="po-summary-kicker">Partial Receipts</div>
-                    <div class="po-summary-value"><?= number_format((int) ($statusSummary['partial'] ?? 0)) ?></div>
-                    <div class="po-summary-note">Orders with remaining quantities</div>
-                </div>
-            </div>
-            <div class="po-summary-tile">
-                <div class="po-summary-icon bg-success-subtle text-success"><i class="bi bi-check2-circle"></i></div>
-                <div class="po-summary-content">
-                    <div class="po-summary-kicker">Received</div>
-                    <div class="po-summary-value"><?= number_format((int) ($statusSummary['received'] ?? 0)) ?></div>
-                    <div class="po-summary-note">Completed supplier deliveries</div>
-                </div>
-            </div>
-            <div class="po-summary-tile">
-                <div class="po-summary-icon bg-info-subtle text-info"><i class="bi bi-box-seam"></i></div>
-                <div class="po-summary-content">
-                    <div class="po-summary-kicker">Orderable Candidates</div>
-                    <div class="po-summary-value"><?= number_format(count($orderableRows)) ?></div>
-                    <div class="po-summary-note">Products ready for procurement</div>
-                </div>
-            </div>
+            <i class="bi bi-chevron-down toggle-icon" style="color:var(--c-text-3);font-size:16px;" aria-hidden="true"></i>
         </div>
 
-        <div class="card po-card mb-4">
-            <div class="card-body">
-                <div class="po-order-head mb-3">
-                    <div>
-                        <p class="po-section-kicker">Create</p>
-                        <h5 class="card-title mb-1">Build Purchase Order</h5>
-                        <p class="po-muted mb-0">Select a supplier, choose low-stock products, and generate an order sheet from live recommendations.</p>
+        <div id="createPoBody">
+            <div class="create-form-wrap">
+
+                <?php if (!empty($unassignedRows)): ?>
+                    <div class="helper-tip">
+                        <i class="bi bi-info-circle" aria-hidden="true"></i>
+                        <span>
+                            <?= number_format(count($unassignedRows)) ?> low-stock product(s) have no supplier assigned
+                            and cannot be included in a purchase order.
+                        </span>
                     </div>
-                </div>
+                <?php endif; ?>
 
-                <div class="po-helper mb-3">
-                    <div class="po-helper-icon"><i class="bi bi-lightbulb"></i></div>
-                    <div>
-                        <strong>How to test:</strong> products appear here when they are active, their quantity is at or below reorder level, and they have an assigned supplier.
-                    </div>
-                    <?php if ($unassignedRows !== []): ?>
-                        <div class="mt-2 text-warning-emphasis">
-                            <?= number_format(count($unassignedRows)) ?> low-stock product(s) are missing a supplier, so they cannot be included yet.
-                        </div>
-                    <?php endif; ?>
-                </div>
+                
+                <form method="post">
+                    <input type="hidden" name="csrf_token"            value="<?= e($csrf_token) ?>">
+                    <input type="hidden" name="create_purchase_order"  value="1">
 
-                <form method="post" class="po-form-shell">
-                    <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-                    <input type="hidden" name="create_purchase_order" value="1">
-
-                    <div class="row g-3 mb-4">
+                    <div class="row g-3 mb-3" style="padding-top:.25rem;">
                         <div class="col-md-4">
-                            <label class="form-label po-label">Supplier</label>
-                            <select class="form-select" name="supplier_id" id="poSupplierSelect" required>
-                                <option value="">Select supplier</option>
-                                <?php foreach ($suppliers as $supplier): ?>
-                                    <option value="<?= (int) $supplier['supplier_id'] ?>" <?= $defaultSupplierId === (int) $supplier['supplier_id'] ? 'selected' : '' ?>>
-                                        <?= e((string) ($supplier['supplier_name'] ?? 'Supplier')) ?>
+                            <label class="form-label"
+                                   style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--c-text-3);">
+                                Supplier
+                            </label>
+                            
+                            <select class="form-select"
+                                    name="supplier_id"
+                                    id="poSupplierSelect"
+                                    required
+                                    style="height:38px;border-radius:var(--radius-md);border-color:var(--c-border);font-family:var(--ff-base);font-size:13px;">
+                                <option value="">Select supplier…</option>
+                                <?php foreach ($suppliers as $sup): ?>
+                                    <option value="<?= (int) ($sup['supplier_id'] ?? 0) ?>">
+                                        <?= e((string) ($sup['supplier_name'] ?? '')) ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
                         </div>
                         <div class="col-md-8">
-                            <label class="form-label po-label">Notes</label>
-                            <input type="text" class="form-control" name="notes" maxlength="1000" placeholder="Optional supplier note or ordering context">
+                            <label class="form-label"
+                                   style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--c-text-3);">
+                                Order notes
+                            </label>
+                            <input type="text"
+                                   class="form-control"
+                                   name="notes"
+                                   maxlength="1000"
+                                   placeholder="Optional supplier note or ordering context…"
+                                   style="height:38px;border-radius:var(--radius-md);border-color:var(--c-border);font-family:var(--ff-base);font-size:13px;">
                         </div>
                     </div>
 
-                    <div class="po-table-shell">
-                        <div class="table-responsive">
-                            <table class="table align-middle po-creation-table po-modern-table">
+                    <!-- Candidate table wrapper -->
+                    <div class="table-wrap"
+                         style="border:1px solid var(--c-border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:.75rem;">
+                        <table class="po-table" style="margin:0;">
                             <thead>
                                 <tr>
-                                    <th style="width:52px;">Pick</th>
+                                    <th style="width:46px;">Pick</th>
                                     <th>Product</th>
                                     <th>Supplier</th>
-                                    <th class="text-end">Stock</th>
-                                    <th class="text-end">Reorder</th>
-                                    <th class="text-end">Suggested</th>
-                                    <th style="width:140px;">Order Qty</th>
+                                    <th style="text-align:right;">Stock</th>
+                                    <th style="text-align:right;">Reorder at</th>
+                                    <th style="text-align:right;">Suggested</th>
+                                    <th style="width:110px;">Order qty</th>
                                 </tr>
                             </thead>
-                                <tbody id="poCandidateBody">
-                                <?php if ($orderableRows === []): ?>
-                                    <tr><td colspan="7" class="text-center text-muted py-5">No orderable low-stock products are available. Assign a supplier and make sure the product quantity is at or below its reorder level.</td></tr>
+                           
+                            <tbody id="poCandidateBody">
+                                <?php if (empty($orderableRows)): ?>
+                                    <tr>
+                                        <td colspan="7">
+                                            <div class="empty-state">
+                                                <i class="bi bi-bag-x" aria-hidden="true"></i>
+                                                <p>No orderable low-stock products found.
+                                                   Assign a supplier and ensure quantity is at or below reorder level.</p>
+                                            </div>
+                                        </td>
+                                    </tr>
                                 <?php else: ?>
-                                    <?php foreach ($orderableRows as $row): ?>
-                                        <?php $productId = (int) ($row['product_id'] ?? 0); ?>
+                                    <?php foreach ($orderableRows as $row):
+                                        $pid = (int) ($row['product_id'] ?? 0);
+                                    ?>
+                                        
                                         <tr data-supplier-id="<?= (int) ($row['supplier_id'] ?? 0) ?>">
                                             <td>
-                                                <input class="form-check-input po-item-checkbox" type="checkbox" name="items[<?= $productId ?>][selected]" value="1">
-                                                <input type="hidden" name="items[<?= $productId ?>][product_id]" value="<?= $productId ?>">
+                                               
+                                                <input class="form-check-input po-item-checkbox"
+                                                       type="checkbox"
+                                                       name="items[<?= $pid ?>][selected]"
+                                                       value="1"
+                                                       aria-label="Select <?= e((string) ($row['product_name'] ?? '')) ?>">
+                                                <input type="hidden"
+                                                       name="items[<?= $pid ?>][product_id]"
+                                                       value="<?= $pid ?>">
                                             </td>
                                             <td>
-                                                <div class="po-product-cell">
-                                                    <div class="po-product-name"><?= e((string) ($row['product_name'] ?? '')) ?></div>
-                                                    <div class="po-line-meta"><?= e((string) ($row['category_name'] ?? 'Uncategorized')) ?></div>
+                                                <div style="font-weight:500;font-size:13px;">
+                                                    <?= e((string) ($row['product_name'] ?? '')) ?>
+                                                </div>
+                                                <div style="font-size:11px;color:var(--c-text-3);">
+                                                    <?= e((string) ($row['category_name'] ?? 'Uncategorized')) ?>
                                                 </div>
                                             </td>
-                                            <td><span class="po-chip po-chip-neutral"><?= e((string) ($row['supplier_name'] ?? 'No supplier')) ?></span></td>
-                                            <td class="text-end po-number-cell"><?= number_format((int) ($row['quantity'] ?? 0)) ?></td>
-                                            <td class="text-end po-number-cell"><?= number_format((int) ($row['reorder_level'] ?? 0)) ?></td>
-                                            <td class="text-end po-number-cell po-emphasis"><?= number_format((int) ($row['recommended_pieces'] ?? 0)) ?></td>
                                             <td>
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    class="form-control form-control-sm po-qty-input"
-                                                    name="items[<?= $productId ?>][quantity]"
-                                                    value="<?= max(1, (int) ($row['recommended_pieces'] ?? 1)) ?>"
-                                                    disabled
-                                                >
+                                                <span class="badge badge-supplier">
+                                                    <?= e((string) ($row['supplier_name'] ?? '—')) ?>
+                                                </span>
+                                            </td>
+                                            <td style="text-align:right;font-family:var(--ff-mono);font-weight:600;">
+                                                <?= number_format((int) ($row['quantity'] ?? 0)) ?>
+                                            </td>
+                                            <td style="text-align:right;font-family:var(--ff-mono);color:var(--c-text-3);">
+                                                <?= number_format((int) ($row['reorder_level'] ?? 0)) ?>
+                                            </td>
+                                            <td style="text-align:right;font-family:var(--ff-mono);font-weight:600;color:var(--c-amber);">
+                                                <?= number_format((int) ($row['recommended_pieces'] ?? 0)) ?>
+                                            </td>
+                                            <td>
+                                                
+                                                <input type="number"
+                                                       min="1"
+                                                       class="qty-input"
+                                                       name="items[<?= $pid ?>][quantity]"
+                                                       value="<?= max(1, (int) ($row['recommended_pieces'] ?? 1)) ?>"
+                                                       disabled
+                                                       aria-label="Order quantity for <?= e((string) ($row['product_name'] ?? '')) ?>">
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 <?php endif; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                            </tbody>
+                        </table>
                     </div>
 
-                    <div class="small text-muted mt-3" id="poVisibleHint">Showing all orderable candidates.</div>
+                    <div id="poVisibleHint"
+                         style="font-size:11px;color:var(--c-text-3);margin-bottom:1rem;">
+                        <?= number_format(count($orderableRows)) ?> orderable candidate(s) shown.
+                    </div>
 
-                    <div class="mt-4 d-flex justify-content-end">
-                        <button type="submit" class="btn btn-primary po-submit-btn">
-                            <i class="bi bi-bag-check me-1"></i>Create Purchase Order
+                    <div style="display:flex;justify-content:flex-end;">
+                        <!-- JS refs: id="createPoBtn" — disabled + spinner on submit -->
+                        <button type="submit" class="btn btn-primary" id="createPoBtn">
+                            <i class="bi bi-bag-check" aria-hidden="true"></i>
+                            Create purchase order
                         </button>
                     </div>
                 </form>
+
+            </div>
+        </div>
+    </div>
+
+
+   
+    <div class="po-card">
+        <div class="po-card-head">
+            <div>
+                <div class="po-card-title">Purchase order list</div>
+                <div class="po-card-sub">
+                    <?= number_format($poPage['total']) ?> total order(s)
+                </div>
             </div>
         </div>
 
-        <div class="card po-card po-order-list">
-            <div class="card-body">
-                <div class="po-order-head mb-3">
-                    <div>
-                        <p class="po-section-kicker">Monitor</p>
-                        <h5 class="card-title mb-1">Recent Purchase Orders</h5>
-                        <p class="po-muted mb-0">Track open orders, receipt progress, and which deliveries still need stock intake.</p>
-                    </div>
-                </div>
+        <!-- Filter bar -->
+        <form method="get" class="filter-bar">
+            <div class="filter-item">
+                <span class="filter-label">Status</span>
+                <select name="status" class="filter-select">
+                    <option value="all"       <?= $poFilters['status'] === 'all'       ? 'selected' : '' ?>>All status</option>
+                    <option value="ordered"   <?= $poFilters['status'] === 'ordered'   ? 'selected' : '' ?>>Ordered</option>
+                    <option value="partial"   <?= $poFilters['status'] === 'partial'   ? 'selected' : '' ?>>Partial</option>
+                    <option value="received"  <?= $poFilters['status'] === 'received'  ? 'selected' : '' ?>>Received</option>
+                    <option value="cancelled" <?= $poFilters['status'] === 'cancelled' ? 'selected' : '' ?>>Cancelled</option>
+                </select>
+            </div>
+            <div class="filter-item grow">
+                <span class="filter-label">Supplier</span>
+                <select name="supplier_id" class="filter-select">
+                    <option value="0">All suppliers</option>
+                    <?php foreach ($suppliers as $sup): ?>
+                        <option value="<?= (int) ($sup['supplier_id'] ?? 0) ?>"
+                            <?= $poFilters['supplier_id'] === (int) ($sup['supplier_id'] ?? 0) ? 'selected' : '' ?>>
+                            <?= e((string) ($sup['supplier_name'] ?? '')) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="filter-item">
+                <span class="filter-label">From</span>
+                <input type="date" name="date_from" class="filter-input"
+                       value="<?= e($poFilters['date_from']) ?>">
+            </div>
+            <div class="filter-item">
+                <span class="filter-label">To</span>
+                <input type="date" name="date_to" class="filter-input"
+                       value="<?= e($poFilters['date_to']) ?>">
+            </div>
+            <div class="filter-item">
+                <span class="filter-label">Per page</span>
+                <select name="per_page" class="filter-select">
+                    <?php foreach ([10, 25, 50, 100] as $sz): ?>
+                        <option value="<?= $sz ?>" <?= $poFilters['per_page'] === $sz ? 'selected' : '' ?>>
+                            <?= $sz ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="filter-item">
+                <span class="filter-label">&nbsp;</span>
+                <button type="submit" class="btn btn-primary">Apply</button>
+            </div>
+        </form>
 
-                <div class="po-table-shell">
-                    <div class="table-responsive">
-                        <table class="table align-middle po-modern-table po-order-table">
-                        <thead>
-                            <tr>
-                                <th>PO Number</th>
-                                <th>Supplier</th>
-                                <th>Status</th>
-                                <th class="text-end">Ordered</th>
-                                <th class="text-end">Received</th>
-                                <th>Date</th>
-                                <th class="text-end">Action</th>
+        <div class="table-wrap">
+            <table class="po-table" id="poTable">
+                <thead>
+                    <tr>
+                        <th style="width:50px;">#</th>
+                        <th>PO Number</th>
+                        <th>Supplier</th>
+                        <th>Status</th>
+                        <th style="text-align:right;">Lines</th>
+                        <th style="text-align:right;">Ordered</th>
+                        <th style="text-align:right;">Received</th>
+                        <th>Date</th>
+                        <th style="text-align:center;width:170px;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (!empty($poItems)): ?>
+                        <?php foreach ($poItems as $idx => $row):
+                            $poId   = (int) ($row['po_id'] ?? 0);
+                            $status = strtolower($row['status'] ?? 'ordered');
+                            $canRec = in_array($status, ['ordered', 'partial'], true);
+
+                           
+                            $rowItems = $itemsBatch[$poId] ?? [];
+                        ?>
+                            <tr id="poRow<?= $poId ?>">
+                                <td class="num"><?= $poRowStart + $idx ?></td>
+
+                                <td>
+                                    <div class="po-number"><?= e($row['po_number'] ?? '—') ?></div>
+                                    <div class="po-meta"><?= e($row['created_by_username'] ?? 'System') ?></div>
+                                </td>
+
+                                <td>
+                                    <span class="badge badge-supplier">
+                                        <?= e($row['supplier_name'] ?? '—') ?>
+                                    </span>
+                                </td>
+
+                                <td>
+                                    <span class="badge <?= poStatusBadge($status) ?>">
+                                        <i class="bi bi-circle-fill" style="font-size:7px;" aria-hidden="true"></i>
+                                        <?= ucfirst(e($status)) ?>
+                                    </span>
+                                </td>
+
+                                <td style="text-align:right;" class="po-qty">
+                                    <?= number_format((int) ($row['item_lines'] ?? 0)) ?>
+                                </td>
+                                <td style="text-align:right;" class="po-qty">
+                                    <?= number_format((int) ($row['ordered_total'] ?? 0)) ?>
+                                </td>
+                                <td style="text-align:right;" class="po-qty">
+                                    <?= number_format((int) ($row['received_total'] ?? 0)) ?>
+                                </td>
+
+                                <td style="font-size:12px;color:var(--c-text-2);">
+                                    <?= e(date('M d, Y', strtotime((string) ($row['ordered_at'] ?? $row['created_at'] ?? 'now')))) ?>
+                                    <div class="po-meta">
+                                        <?= e(date('h:i A', strtotime((string) ($row['ordered_at'] ?? $row['created_at'] ?? 'now')))) ?>
+                                    </div>
+                                </td>
+
+                                <td>
+                                    <div style="display:flex;gap:5px;justify-content:center;">
+                                      
+                                        <button type="button"
+                                                class="btn btn-outline btn-sm po-view-btn"
+                                                data-po-id="<?= $poId ?>"
+                                                data-po-number="<?= e($row['po_number'] ?? '') ?>"
+                                                data-supplier="<?= e($row['supplier_name'] ?? '') ?>"
+                                                data-status="<?= e($status) ?>"
+                                                data-ordered="<?= (int) ($row['ordered_total'] ?? 0) ?>"
+                                                data-received="<?= (int) ($row['received_total'] ?? 0) ?>"
+                                                data-items="<?= e(json_encode($rowItems, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?>"
+                                                aria-label="View <?= e($row['po_number'] ?? 'PO') ?>">
+                                            <i class="bi bi-eye" aria-hidden="true"></i> View
+                                        </button>
+
+                                        <?php if ($canRec): ?>
+                                            <!--
+                                                Receive button — same data-* as view button
+                                                JS opens modal in "receive" mode
+                                            -->
+                                            <button type="button"
+                                                    class="btn btn-success btn-sm po-receive-btn"
+                                                    data-po-id="<?= $poId ?>"
+                                                    data-po-number="<?= e($row['po_number'] ?? '') ?>"
+                                                    data-supplier="<?= e($row['supplier_name'] ?? '') ?>"
+                                                    data-status="<?= e($status) ?>"
+                                                    data-ordered="<?= (int) ($row['ordered_total'] ?? 0) ?>"
+                                                    data-received="<?= (int) ($row['received_total'] ?? 0) ?>"
+                                                    data-items="<?= e(json_encode($rowItems, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?>"
+                                                    aria-label="Receive <?= e($row['po_number'] ?? 'PO') ?>">
+                                                <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Receive
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
                             </tr>
-                        </thead>
-                        <tbody>
-                            <?php if ($purchaseOrders === []): ?>
-                                <tr><td colspan="7" class="text-center text-muted py-4">No purchase orders yet.</td></tr>
-                            <?php else: ?>
-                                <?php foreach ($purchaseOrders as $row): ?>
-                                    <tr>
-                                        <td>
-                                            <div class="po-product-name"><?= e((string) ($row['po_number'] ?? '')) ?></div>
-                                            <div class="po-line-meta"><?= e((string) ($row['created_by_username'] ?? 'System')) ?></div>
-                                        </td>
-                                        <td><span class="po-chip po-chip-neutral"><?= e((string) ($row['supplier_name'] ?? '')) ?></span></td>
-                                        <td><span class="badge po-status-badge <?= e(poStatusBadge((string) ($row['status'] ?? 'ordered'))) ?>"><?= e(ucfirst((string) ($row['status'] ?? 'ordered'))) ?></span></td>
-                                        <td class="text-end po-number-cell"><?= number_format((int) ($row['ordered_total'] ?? 0)) ?></td>
-                                        <td class="text-end po-number-cell"><?= number_format((int) ($row['received_total'] ?? 0)) ?></td>
-                                        <td><?= e(date('M d, Y h:i A', strtotime((string) ($row['ordered_at'] ?? $row['created_at'] ?? 'now')))) ?></td>
-                                        <td class="text-end">
-                                            <div class="po-action-group">
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm btn-outline-primary me-1 po-view-btn"
-                                                    data-po-id="<?= (int) ($row['po_id'] ?? 0) ?>"
-                                                >
-                                                    View
-                                                </button>
-                                            <?php if (in_array((string) ($row['status'] ?? ''), ['ordered', 'partial'], true)): ?>
-                                                <button
-                                                    type="button"
-                                                    class="btn btn-sm btn-success po-receive-btn"
-                                                    data-po-id="<?= (int) ($row['po_id'] ?? 0) ?>"
-                                                >
-                                                    Receive
-                                                </button>
-                                            <?php endif; ?>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            <?php endif; ?>
-                        </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr>
+                            <td colspan="9">
+                                <div class="empty-state">
+                                    <i class="bi bi-bag" aria-hidden="true"></i>
+                                    <p>No purchase orders found for the selected filters.</p>
+                                </div>
+                            </td>
+                        </tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
-    </section>
+
+        <!-- Pagination -->
+        <div class="pagination-bar">
+            <span class="pag-info">
+                <?php if ($poPage['total'] > 0): ?>
+                    Showing <?= number_format($poRowStart) ?>–<?= number_format(min($poRowStart + count($poItems) - 1, $poPage['total'])) ?>
+                    of <?= number_format($poPage['total']) ?> orders
+                <?php else: ?>
+                    No results
+                <?php endif; ?>
+            </span>
+            <nav aria-label="Purchase order pagination">
+                <ul class="pagination">
+                    <li class="page-item <?= $poPage['page'] <= 1 ? 'disabled' : '' ?>">
+                        <a class="page-link"
+                           href="<?= e(poListUrl($poFilters, ['page' => $poPage['page'] - 1])) ?>"
+                           aria-label="Previous">
+                            <i class="bi bi-chevron-left" style="font-size:11px;" aria-hidden="true"></i>
+                        </a>
+                    </li>
+                    <?php
+                    $pStart = max(1, $poPage['page'] - 2);
+                    $pEnd   = min($poPage['total_pages'], $poPage['page'] + 2);
+                    for ($pn = $pStart; $pn <= $pEnd; $pn++):
+                    ?>
+                        <li class="page-item <?= $pn === $poPage['page'] ? 'active' : '' ?>">
+                            <a class="page-link" href="<?= e(poListUrl($poFilters, ['page' => $pn])) ?>">
+                                <?= $pn ?>
+                            </a>
+                        </li>
+                    <?php endfor; ?>
+                    <li class="page-item <?= $poPage['page'] >= $poPage['total_pages'] ? 'disabled' : '' ?>">
+                        <a class="page-link"
+                           href="<?= e(poListUrl($poFilters, ['page' => $poPage['page'] + 1])) ?>"
+                           aria-label="Next">
+                            <i class="bi bi-chevron-right" style="font-size:11px;" aria-hidden="true"></i>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+
+    </div>
+
 </main>
 
-<div class="modal fade" id="purchaseOrderModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
-        <div class="modal-content po-modal-content">
-            <div class="modal-header po-modal-header">
+
+
+<div class="modal fade modal-modern" id="poModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+
+            <div class="modal-header">
                 <div>
-                    <h5 class="modal-title" id="purchaseOrderModalLabel">Purchase Order</h5>
-                    <small class="text-muted" id="purchaseOrderModalSubhead">Review or receive items.</small>
+                    <div class="modal-title" id="poModalTitle">Purchase Order</div>
+                    <div class="modal-subtitle" id="poModalSubtitle">Order details</div>
                 </div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <form method="post" id="purchaseOrderReceiveForm">
-                <input type="hidden" name="csrf_token" value="<?= e($csrfToken) ?>">
-                <input type="hidden" name="receive_purchase_order" value="1">
-                <input type="hidden" name="po_id" id="poModalId" value="">
+
+            <form method="post" id="poReceiveForm">
+                <input type="hidden" name="csrf_token"             value="<?= e($csrf_token) ?>">
+                <input type="hidden" name="receive_purchase_order"  value="1">
+                <!-- JS: poModalId.value = poId from button data-po-id -->
+                <input type="hidden" name="po_id" id="poModalId"   value="">
+
                 <div class="modal-body">
-                    <div class="po-modal-summary" id="poModalHeader"></div>
-                    <div class="po-table-shell">
-                        <div class="table-responsive">
-                            <table class="table align-middle po-modern-table">
+
+                   
+                    <div class="po-detail-grid" id="poModalSummary"></div>
+
+                    <div class="table-wrap"
+                         style="border:1px solid var(--c-border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:1rem;">
+                        <table class="po-table" style="margin:0;">
                             <thead>
                                 <tr>
                                     <th>Product</th>
-                                    <th class="text-end">Ordered</th>
-                                    <th class="text-end">Received</th>
-                                    <th class="text-end">Remaining</th>
-                                    <th style="width:140px;">Receive Now</th>
+                                    <th style="text-align:right;">Ordered</th>
+                                    <th style="text-align:right;">Received</th>
+                                    <th style="text-align:right;">Remaining</th>
+                                    <th style="width:110px;">Receive now</th>
                                 </tr>
                             </thead>
+                            <!-- JS appends <tr> elements here -->
                             <tbody id="poModalItems"></tbody>
-                            </table>
-                        </div>
+                        </table>
                     </div>
-                    <div class="mt-4">
-                        <label class="form-label po-label">Receiving Notes</label>
-                        <textarea class="form-control" name="receive_notes" rows="3" maxlength="1000" placeholder="Optional receiving notes"></textarea>
+
+                
+                    <div id="poModalNotesWrap">
+                        <label class="form-label">Receiving notes</label>
+                        <textarea class="form-control"
+                                  name="receive_notes"
+                                  rows="3"
+                                  maxlength="1000"
+                                  placeholder="Optional notes about this receipt…"></textarea>
                     </div>
+
+                </div><!-- /.modal-body -->
+
+                <div class="modal-footer justify-content-end gap-2">
+                    <button type="button" class="btn btn-outline" data-bs-dismiss="modal">Close</button>
+                   
+                    <button type="submit"
+                            class="btn btn-success"
+                            id="poReceiveSubmitBtn"
+                            style="display:none;">
+                        <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Save receipt
+                    </button>
                 </div>
-                <div class="modal-footer po-modal-footer">
-                    <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Close</button>
-                    <button type="submit" class="btn btn-success" id="poReceiveSubmitBtn">Save Receipt</button>
-                </div>
+
             </form>
+
         </div>
     </div>
 </div>
 
-<?php require __DIR__ . '/../components/footer.php'; ?>
+
 <?php require __DIR__ . '/../components/js_script.php'; ?>
-<script>
-const purchaseOrderDetails = <?= json_encode($purchaseOrderDetails, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
-document.addEventListener('DOMContentLoaded', () => {
-    const supplierSelect = document.getElementById('poSupplierSelect');
-    const rows = Array.from(document.querySelectorAll('#poCandidateBody tr[data-supplier-id]'));
-    const visibleHint = document.getElementById('poVisibleHint');
-    const modalEl = document.getElementById('purchaseOrderModal');
-    const modal = modalEl ? new bootstrap.Modal(modalEl) : null;
+<script src="/inventory_system/assets/js/purchase_orders.js"></script>
 
-    function applySupplierFilter() {
-        const supplierId = String(supplierSelect?.value || '');
-        let visibleCount = 0;
-        rows.forEach((row) => {
-            const match = supplierId === '' || row.dataset.supplierId === supplierId;
-            row.style.display = match ? '' : 'none';
-            if (match) {
-                visibleCount += 1;
-            }
-            const checkbox = row.querySelector('.po-item-checkbox');
-            const qtyInput = row.querySelector('.po-qty-input');
-            if (!match && checkbox) {
-                checkbox.checked = false;
-            }
-            if (qtyInput) {
-                qtyInput.disabled = !match || !checkbox?.checked;
-            }
-        });
-
-        if (visibleHint) {
-            visibleHint.textContent = supplierId === ''
-                ? `Showing all orderable candidates (${visibleCount}).`
-                : `Showing ${visibleCount} candidate(s) for the selected supplier.`;
-        }
-    }
-
-    supplierSelect?.addEventListener('change', applySupplierFilter);
-    document.addEventListener('change', (event) => {
-        const checkbox = event.target.closest('.po-item-checkbox');
-        if (!checkbox) return;
-        const row = checkbox.closest('tr');
-        const qtyInput = row?.querySelector('.po-qty-input');
-        if (qtyInput) {
-            qtyInput.disabled = !checkbox.checked;
-        }
-    });
-    applySupplierFilter();
-
-    function openPoModal(poId, mode) {
-        const detail = purchaseOrderDetails[String(poId)] || purchaseOrderDetails[poId];
-        if (!detail || !modal) return;
-
-        document.getElementById('poModalId').value = String(poId);
-        document.getElementById('purchaseOrderModalLabel').textContent = detail.po_number || 'Purchase Order';
-        document.getElementById('purchaseOrderModalSubhead').textContent = mode === 'receive'
-            ? 'Enter the quantities received for each remaining line.'
-            : 'Review current order details.';
-
-        document.getElementById('poModalHeader').innerHTML = `
-            <strong>${detail.po_number || 'PO'}</strong><br>
-            Supplier: ${detail.supplier_name || '-'}<br>
-            Status: ${detail.status || '-'}
-        `;
-
-        const itemsBody = document.getElementById('poModalItems');
-        const submitBtn = document.getElementById('poReceiveSubmitBtn');
-        itemsBody.innerHTML = '';
-
-        (detail.items || []).forEach((item) => {
-            const ordered = Number(item.ordered_quantity || 0);
-            const received = Number(item.received_quantity || 0);
-            const remaining = Math.max(0, ordered - received);
-            const disabled = mode !== 'receive' || remaining <= 0 || ['received', 'cancelled'].includes(String(detail.status || '').toLowerCase());
-
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>
-                    <div class="fw-semibold">${item.product_name || ''}</div>
-                    <div class="small text-muted">${item.category_name || 'Uncategorized'}${item.sku ? ' | SKU ' + item.sku : ''}</div>
-                </td>
-                <td class="text-end">${ordered}</td>
-                <td class="text-end">${received}</td>
-                <td class="text-end">${remaining}</td>
-                <td>
-                    <input
-                        type="number"
-                        min="0"
-                        max="${remaining}"
-                        value="${disabled ? 0 : remaining}"
-                        class="form-control form-control-sm"
-                        name="received[${item.po_item_id}]"
-                        ${disabled ? 'disabled' : ''}
-                    >
-                </td>
-            `;
-            itemsBody.appendChild(tr);
-        });
-
-        submitBtn.classList.toggle('d-none', mode !== 'receive');
-        modal.show();
-    }
-
-    document.addEventListener('click', (event) => {
-        const viewBtn = event.target.closest('.po-view-btn');
-        if (viewBtn) {
-            openPoModal(viewBtn.dataset.poId, 'view');
-            return;
-        }
-
-        const receiveBtn = event.target.closest('.po-receive-btn');
-        if (receiveBtn) {
-            openPoModal(receiveBtn.dataset.poId, 'receive');
-        }
-    });
-});
-</script>
 </body>
 </html>
