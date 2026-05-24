@@ -153,6 +153,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
+        // ── Cancel purchase order ─────────────────────────────────────────────
+        if (isset($_POST['cancel_purchase_order'])) {
+            $poId   = (int) ($_POST['po_id']          ?? 0);
+            $reason = trim((string) ($_POST['cancel_reason'] ?? ''));
+
+            $result = PurchaseOrderController::cancelPurchaseOrder(
+                $conn, $poId, $sessionUserId, $reason
+            );
+
+            AuthController::logActivity(
+                $conn, $logConfig, $sessionUserId, 'purchase_order_cancel',
+                sprintf('Cancelled %s (was: %s). Supplier: %s.%s',
+                    $result['po_number'],
+                    ucfirst($result['previous_status']),
+                    $result['supplier_name'],
+                    $reason !== '' ? ' Reason: ' . $reason : ''),
+                'purchase_order', $poId
+            );
+
+            notify($conn, $sessionUserId, 'purchase_order_cancel', 'Purchase Order Cancelled',
+                sprintf('%s has been cancelled.', $result['po_number']),
+                'bi-x-circle', 'text-danger');
+
+            $_SESSION['purchase_order_flash'] = [
+                'success' => $result['po_number'] . ' has been cancelled.',
+            ];
+            header('Location: /inventory_system/admin/purchase_orders.php'
+                . ($_SERVER['QUERY_STRING'] !== '' ? '?' . $_SERVER['QUERY_STRING'] : ''));
+            exit;
+        }
+
     } catch (Throwable $e) {
         error_log('[purchase_orders.php POST] ' . $e->getMessage());
         $_SESSION['purchase_order_flash'] = ['error' => $e->getMessage()];
@@ -219,7 +250,153 @@ try {
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/inventory_system/assets/css/purchase_orders.css">
+    <style>
+        /* ── Design tokens (unified with manage_staff / product / category) ── */
+        :root {
+            --ff-base:'DM Sans',system-ui,sans-serif;
+            --ff-mono:'DM Mono',monospace;
+            --c-bg:#f5f4f1; --c-surface:#fff; --c-surface-2:#f9f8f6;
+            --c-border:#e8e6e1; --c-border-2:#d4d1cb;
+            --c-text-1:#1a1917; --c-text-2:#5a5854; --c-text-3:#9a9691;
+            --c-accent:#2563eb; --c-accent-bg:#eff4ff; --c-accent-bd:#bfcffd;
+            --c-green:#16a34a;  --c-green-bg:#f0fdf4;  --c-green-bd:#bbf7d0;
+            --c-amber:#b45309;  --c-amber-bg:#fffbeb;  --c-amber-bd:#fde68a;
+            --c-red:#dc2626;    --c-red-bg:#fef2f2;    --c-red-bd:#fecaca;
+            --c-purple:#7c3aed; --c-purple-bg:#f5f3ff; --c-purple-bd:#ddd6fe;
+            --c-teal:#0d9488;   --c-teal-bg:#f0fdfa;   --c-teal-bd:#99f6e4;
+            --radius-sm:6px; --radius-md:10px; --radius-lg:14px; --radius-xl:20px;
+            --shadow-sm:0 1px 3px rgba(0,0,0,.07),0 1px 2px rgba(0,0,0,.04);
+            --shadow-lg:0 12px 32px rgba(0,0,0,.10),0 4px 8px rgba(0,0,0,.05);
+        }
+        *,*::before,*::after{box-sizing:border-box}
+        body{font-family:var(--ff-base);background:var(--c-bg);color:var(--c-text-1);font-size:14px;line-height:1.5}
+
+        /* ── Layout ────────────────────────────────────────────────────── */
+        #main{padding:1.5rem 2rem 3rem}
+        .pagetitle h1{font-size:22px;font-weight:600;letter-spacing:-.3px;margin-bottom:.25rem}
+        .breadcrumb{display:flex;align-items:center;gap:6px;list-style:none;padding:0;margin:0 0 1.5rem;font-size:12px;color:var(--c-text-3)}
+        .breadcrumb-item+.breadcrumb-item::before{content:'/';margin-right:6px;color:var(--c-border-2)}
+        .breadcrumb-item a{color:var(--c-text-2);text-decoration:none}
+        .breadcrumb-item a:hover{color:var(--c-accent)}
+        .breadcrumb-item.active{color:var(--c-text-1)}
+
+        /* ── Stat cards ─────────────────────────────────────────────────── */
+        .stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.5rem}
+        @media(max-width:900px){.stats-grid{grid-template-columns:repeat(2,1fr)}}
+        .stat-card{background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--radius-lg);padding:1.1rem 1.25rem;display:flex;align-items:flex-start;gap:1rem;box-shadow:var(--shadow-sm)}
+        .stat-icon{width:40px;height:40px;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+        .stat-body{flex:1;min-width:0}
+        .stat-label{font-size:12px;color:var(--c-text-2);font-weight:500;margin-bottom:2px}
+        .stat-val{font-size:26px;font-weight:600;letter-spacing:-.5px;line-height:1.1}
+
+        /* ── Section card ───────────────────────────────────────────────── */
+        .po-card{background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--radius-xl);box-shadow:var(--shadow-sm);overflow:hidden;margin-bottom:1.5rem}
+
+        /* ── Create section header (accordion toggle) ───────────────────── */
+        /* JS reads: id="createPoToggle", id="createPoBody"                 */
+        /* JS toggles .collapsed class and aria-expanded on createPoToggle  */
+        .po-card-head{display:flex;align-items:center;justify-content:space-between;padding:1.25rem 1.5rem;flex-wrap:wrap;gap:.75rem}
+        .po-card-head.section-toggle{cursor:pointer;user-select:none}
+        .po-card-title{font-size:16px;font-weight:600}
+        .po-card-sub{font-size:12px;color:var(--c-text-3);margin-top:2px}
+        .toggle-icon{transition:transform .2s;flex-shrink:0}
+        .section-toggle.collapsed .toggle-icon{transform:rotate(-90deg)}
+
+        /* ── Filter bar ─────────────────────────────────────────────────── */
+        .filter-bar{display:flex;align-items:flex-end;gap:.75rem;padding:1rem 1.5rem;border-bottom:1px solid var(--c-border);flex-wrap:wrap}
+        .filter-item{display:flex;flex-direction:column;gap:4px}
+        .filter-item.grow{flex:1;min-width:160px}
+        .filter-label{font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--c-text-3);text-transform:uppercase}
+        select.filter-select,input.filter-input{height:36px;padding:0 12px;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--radius-md);font-family:var(--ff-base);font-size:13px;color:var(--c-text-1);transition:border-color .15s,box-shadow .15s}
+        select.filter-select{padding-right:32px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239a9691'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;appearance:none;-webkit-appearance:none;cursor:pointer}
+        select.filter-select:focus,input.filter-input:focus{outline:none;border-color:var(--c-accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+
+        /* ── Buttons ────────────────────────────────────────────────────── */
+        .btn{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0 16px;border-radius:var(--radius-md);font-family:var(--ff-base);font-size:13px;font-weight:500;cursor:pointer;border:1px solid transparent;transition:all .15s;white-space:nowrap;text-decoration:none}
+        .btn-primary{background:var(--c-accent);color:#fff;border-color:var(--c-accent)}
+        .btn-primary:hover{background:#1d4ed8;border-color:#1d4ed8}
+        .btn-success{background:var(--c-green);color:#fff;border-color:var(--c-green)}
+        .btn-success:hover{background:#15803d;border-color:#15803d}
+        .btn-outline{background:var(--c-surface);color:var(--c-text-2);border-color:var(--c-border-2)}
+        .btn-outline:hover{background:var(--c-surface-2);color:var(--c-text-1)}
+        .btn-sm{height:28px;padding:0 10px;font-size:12px;border-radius:var(--radius-sm)}
+
+        /* ── Tables ─────────────────────────────────────────────────────── */
+        .table-wrap{overflow-x:auto}
+        table.po-table{width:100%;border-collapse:collapse}
+        .po-table thead tr{border-bottom:1px solid var(--c-border)}
+        .po-table th{padding:10px 16px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--c-text-3);text-align:left;white-space:nowrap;background:var(--c-surface-2)}
+        .po-table tbody tr{border-bottom:1px solid var(--c-border);transition:background .1s}
+        .po-table tbody tr:last-child{border-bottom:none}
+        .po-table tbody tr:hover{background:var(--c-surface-2)}
+        .po-table td{padding:12px 16px;font-size:13px;vertical-align:middle}
+        .po-table td.num{color:var(--c-text-3);font-size:12px;font-family:var(--ff-mono)}
+        .po-number{font-family:var(--ff-mono);font-weight:600;font-size:13px}
+        .po-meta{font-size:11px;color:var(--c-text-3);margin-top:2px}
+        .po-qty{font-family:var(--ff-mono);font-size:13px;font-weight:500}
+
+        /* ── Status badges — JS references these class names ────────────── */
+        .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:99px;font-size:11px;font-weight:600;letter-spacing:.02em;border:1px solid transparent}
+        .badge-po-ordered  {background:var(--c-accent-bg);color:var(--c-accent);border-color:var(--c-accent-bd)}
+        .badge-po-partial  {background:var(--c-amber-bg); color:var(--c-amber); border-color:var(--c-amber-bd)}
+        .badge-po-received {background:var(--c-green-bg); color:var(--c-green); border-color:var(--c-green-bd)}
+        .badge-po-cancelled{background:var(--c-surface-2);color:var(--c-text-3);border-color:var(--c-border)}
+        .badge-po-draft    {background:var(--c-purple-bg);color:var(--c-purple);border-color:var(--c-purple-bd)}
+        .badge-supplier    {background:var(--c-accent-bg);color:var(--c-accent);border-color:var(--c-accent-bd)}
+
+        /* ── Create form area ───────────────────────────────────────────── */
+        .create-form-wrap{padding:0 1.5rem 1.5rem}
+        .helper-tip{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:var(--c-accent-bg);border:1px solid var(--c-accent-bd);border-radius:var(--radius-md);font-size:12px;color:var(--c-text-2);margin-bottom:1rem}
+        .helper-tip i{color:var(--c-accent);font-size:15px;flex-shrink:0;margin-top:1px}
+
+        /* ── Candidate table inputs ─────────────────────────────────────── */
+        /* JS looks for: .po-item-checkbox, .qty-input, tr[data-supplier-id] */
+        .qty-input{height:32px;padding:0 8px;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--radius-sm);font-family:var(--ff-mono);font-size:13px;width:90px;transition:border-color .15s}
+        .qty-input:focus{outline:none;border-color:var(--c-accent)}
+        .qty-input:disabled{opacity:.4;cursor:not-allowed}
+
+        /* ── Pagination ─────────────────────────────────────────────────── */
+        .pagination-bar{display:flex;align-items:center;justify-content:space-between;padding:1rem 1.5rem;border-top:1px solid var(--c-border);flex-wrap:wrap;gap:.75rem}
+        .pag-info{font-size:12px;color:var(--c-text-3)}
+        .pagination{display:flex;list-style:none;margin:0;padding:0;gap:3px}
+        .page-item .page-link{display:flex;align-items:center;justify-content:center;min-width:30px;height:30px;padding:0 8px;border-radius:var(--radius-sm);border:1px solid var(--c-border);background:var(--c-surface);color:var(--c-text-2);font-size:12px;text-decoration:none;transition:all .15s;font-family:var(--ff-mono)}
+        .page-item .page-link:hover{background:var(--c-surface-2);color:var(--c-text-1)}
+        .page-item.active .page-link{background:var(--c-accent);color:#fff;border-color:var(--c-accent)}
+        .page-item.disabled .page-link{opacity:.4;pointer-events:none}
+
+        /* ── Empty state ────────────────────────────────────────────────── */
+        .empty-state{text-align:center;padding:3.5rem 1rem;color:var(--c-text-3)}
+        .empty-state i{font-size:40px;display:block;margin-bottom:.75rem;opacity:.4}
+        .empty-state p{font-size:14px}
+
+        /* ── Modal (modal IDs referenced by JS) ────────────────────────── */
+        /* poModal, poModalTitle, poModalSubtitle, poModalId               */
+        /* poModalSummary, poModalItems, poModalNotesWrap                  */
+        /* poReceiveSubmitBtn, poReceiveForm                               */
+        .modal-modern .modal-content{border:1px solid var(--c-border);border-radius:var(--radius-xl);box-shadow:var(--shadow-lg);font-family:var(--ff-base);overflow:hidden}
+        .modal-modern .modal-header{border-bottom:1px solid var(--c-border);padding:1.1rem 1.5rem;background:var(--c-surface-2)}
+        .modal-modern .modal-title{font-size:16px;font-weight:600;letter-spacing:-.2px}
+        .modal-modern .modal-subtitle{font-size:12px;color:var(--c-text-3);margin-top:2px}
+        .modal-modern .modal-body{padding:1.5rem}
+        .modal-modern .modal-footer{border-top:1px solid var(--c-border);padding:1rem 1.5rem;background:var(--c-surface-2)}
+        .modal-modern .form-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--c-text-3);margin-bottom:.3rem;display:block}
+        .modal-modern .form-control{height:38px;padding:0 12px;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--radius-md);font-family:var(--ff-base);font-size:13px;color:var(--c-text-1);transition:border-color .15s,box-shadow .15s}
+        .modal-modern textarea.form-control{height:auto;padding:10px 12px}
+        .modal-modern .form-control:focus{border-color:var(--c-accent);box-shadow:0 0 0 3px rgba(37,99,235,.1);outline:none}
+
+        /* ── PO detail summary tiles (built by JS into #poModalSummary) ── */
+        .po-detail-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1rem}
+        .po-detail-tile{background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--radius-md);padding:.75rem 1rem}
+        .po-detail-tile-label{font-size:11px;color:var(--c-text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}
+        .po-detail-tile-val{font-size:15px;font-weight:600;color:var(--c-text-1)}
+
+        @media(max-width:768px){
+            #main{padding:1rem}
+            .filter-bar{flex-direction:column;align-items:stretch}
+            .po-detail-grid{grid-template-columns:1fr 1fr}
+            .stats-grid{grid-template-columns:1fr 1fr}
+        }
+    </style>
 </head>
 <body>
 
@@ -299,7 +476,12 @@ require __DIR__ . '/../components/sidebar.php';
     </div>
 
 
-    
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         CREATE PURCHASE ORDER — collapsible section
+         JS refs: id="createPoToggle" (toggle), id="createPoBody" (content)
+                  class="section-toggle" (accordion trigger)
+                  class="toggle-icon" (chevron that rotates)
+    ════════════════════════════════════════════════════════════════════════ -->
     <div class="po-card">
 
         <!-- Toggle header — JS binds click to id="createPoToggle" -->
@@ -318,9 +500,11 @@ require __DIR__ . '/../components/sidebar.php';
                     Select a supplier and low-stock products to generate a new order.
                 </div>
             </div>
+            <!-- JS toggles transform on this element when collapsed -->
             <i class="bi bi-chevron-down toggle-icon" style="color:var(--c-text-3);font-size:16px;" aria-hidden="true"></i>
         </div>
 
+        <!-- Collapsible body — JS shows/hides via style.display -->
         <div id="createPoBody">
             <div class="create-form-wrap">
 
@@ -334,7 +518,12 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 <?php endif; ?>
 
-                
+                <!--
+                    Create form — JS finds this via:
+                    document.querySelector('input[name="create_purchase_order"]')?.closest("form")
+                    Supplier select: [name="supplier_id"]   → id="poSupplierSelect"
+                    Submit button:   id="createPoBtn"
+                -->
                 <form method="post">
                     <input type="hidden" name="csrf_token"            value="<?= e($csrf_token) ?>">
                     <input type="hidden" name="create_purchase_order"  value="1">
@@ -345,7 +534,11 @@ require __DIR__ . '/../components/sidebar.php';
                                    style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--c-text-3);">
                                 Supplier
                             </label>
-                            
+                            <!--
+                                JS refs: id="poSupplierSelect"
+                                JS reads: supplierSelect.value
+                                JS filters rows: row.dataset.supplierId === supplierId
+                            -->
                             <select class="form-select"
                                     name="supplier_id"
                                     id="poSupplierSelect"
@@ -388,7 +581,12 @@ require __DIR__ . '/../components/sidebar.php';
                                     <th style="width:110px;">Order qty</th>
                                 </tr>
                             </thead>
-                           
+                            <!--
+                                JS refs: id="poCandidateBody"
+                                JS filters: tr[data-supplier-id]
+                                JS checks:  .po-item-checkbox
+                                JS enables: .qty-input
+                            -->
                             <tbody id="poCandidateBody">
                                 <?php if (empty($orderableRows)): ?>
                                     <tr>
@@ -404,10 +602,16 @@ require __DIR__ . '/../components/sidebar.php';
                                     <?php foreach ($orderableRows as $row):
                                         $pid = (int) ($row['product_id'] ?? 0);
                                     ?>
-                                        
+                                        <!--
+                                            data-supplier-id — JS compares against poSupplierSelect.value
+                                            to show/hide rows on supplier change
+                                        -->
                                         <tr data-supplier-id="<?= (int) ($row['supplier_id'] ?? 0) ?>">
                                             <td>
-                                               
+                                                <!--
+                                                    class="po-item-checkbox" — JS listens for change
+                                                    to enable/disable the .qty-input in the same row
+                                                -->
                                                 <input class="form-check-input po-item-checkbox"
                                                        type="checkbox"
                                                        name="items[<?= $pid ?>][selected]"
@@ -440,7 +644,10 @@ require __DIR__ . '/../components/sidebar.php';
                                                 <?= number_format((int) ($row['recommended_pieces'] ?? 0)) ?>
                                             </td>
                                             <td>
-                                                
+                                                <!--
+                                                    class="qty-input" — JS enables/disables based on checkbox state
+                                                    starts disabled; JS enables when checkbox checked
+                                                -->
                                                 <input type="number"
                                                        min="1"
                                                        class="qty-input"
@@ -456,6 +663,7 @@ require __DIR__ . '/../components/sidebar.php';
                         </table>
                     </div>
 
+                    <!-- JS refs: id="poVisibleHint" — updated by applySupplierFilter() -->
                     <div id="poVisibleHint"
                          style="font-size:11px;color:var(--c-text-3);margin-bottom:1rem;">
                         <?= number_format(count($orderableRows)) ?> orderable candidate(s) shown.
@@ -470,12 +678,15 @@ require __DIR__ . '/../components/sidebar.php';
                     </div>
                 </form>
 
-            </div>
-        </div>
-    </div>
+            </div><!-- /.create-form-wrap -->
+        </div><!-- #createPoBody -->
+    </div><!-- /.po-card (create) -->
 
 
-   
+    <!-- ═══════════════════════════════════════════════════════════════════════
+         ORDER LIST — paginated + filterable
+         JS refs: id="poTable" — click delegation for .po-view-btn / .po-receive-btn
+    ════════════════════════════════════════════════════════════════════════ -->
     <div class="po-card">
         <div class="po-card-head">
             <div>
@@ -536,6 +747,7 @@ require __DIR__ . '/../components/sidebar.php';
             </div>
         </form>
 
+        <!-- Table — JS binds click delegation to id="poTable" -->
         <div class="table-wrap">
             <table class="po-table" id="poTable">
                 <thead>
@@ -548,7 +760,7 @@ require __DIR__ . '/../components/sidebar.php';
                         <th style="text-align:right;">Ordered</th>
                         <th style="text-align:right;">Received</th>
                         <th>Date</th>
-                        <th style="text-align:center;width:170px;">Actions</th>
+                        <th style="text-align:center;width:210px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -556,9 +768,13 @@ require __DIR__ . '/../components/sidebar.php';
                         <?php foreach ($poItems as $idx => $row):
                             $poId   = (int) ($row['po_id'] ?? 0);
                             $status = strtolower($row['status'] ?? 'ordered');
-                            $canRec = in_array($status, ['ordered', 'partial'], true);
+                            $canRec    = in_array($status, ['ordered', 'partial'], true);
+                            $canCancel = in_array($status, ['ordered', 'partial'], true);
 
-                           
+                            // Items for this PO — embedded as JSON in data-items
+                            // JS parses: JSON.parse(btn.dataset.items || "[]")
+                            // JS reads fields: ordered_quantity, received_quantity,
+                            //                  po_item_id, product_name, category_name, sku
                             $rowItems = $itemsBatch[$poId] ?? [];
                         ?>
                             <tr id="poRow<?= $poId ?>">
@@ -601,7 +817,11 @@ require __DIR__ . '/../components/sidebar.php';
 
                                 <td>
                                     <div style="display:flex;gap:5px;justify-content:center;">
-                                      
+                                        <!--
+                                            View button — JS reads ALL these data-* attributes:
+                                            data-po-id, data-po-number, data-supplier,
+                                            data-status, data-ordered, data-received, data-items
+                                        -->
                                         <button type="button"
                                                 class="btn btn-outline btn-sm po-view-btn"
                                                 data-po-id="<?= $poId ?>"
@@ -631,6 +851,22 @@ require __DIR__ . '/../components/sidebar.php';
                                                     data-items="<?= e(json_encode($rowItems, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)) ?>"
                                                     aria-label="Receive <?= e($row['po_number'] ?? 'PO') ?>">
                                                 <i class="bi bi-box-arrow-in-down" aria-hidden="true"></i> Receive
+                                            </button>
+                                        <?php endif; ?>
+
+                                        <?php if ($canCancel): ?>
+                                            <!--
+                                                Cancel button — triggers Swal confirm in JS,
+                                                then posts to id="poCancelForm" with po_id + reason.
+                                                JS reads: data-po-id, data-po-number
+                                            -->
+                                            <button type="button"
+                                                    class="btn btn-sm po-cancel-btn"
+                                                    style="background:var(--c-red-bg);color:var(--c-red);border:1px solid var(--c-red-bd);"
+                                                    data-po-id="<?= $poId ?>"
+                                                    data-po-number="<?= e($row['po_number'] ?? '') ?>"
+                                                    aria-label="Cancel <?= e($row['po_number'] ?? 'PO') ?>">
+                                                <i class="bi bi-x-circle" aria-hidden="true"></i>
                                             </button>
                                         <?php endif; ?>
                                     </div>
@@ -692,24 +928,39 @@ require __DIR__ . '/../components/sidebar.php';
             </nav>
         </div>
 
-    </div>
+    </div><!-- /.po-card (list) -->
 
 </main>
 
 
-
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     PO DETAIL / RECEIVE MODAL
+     JS element refs (ALL must exist with these exact IDs):
+       id="poModal"           — bootstrap.Modal target
+       id="poModalTitle"      — filled with po_number
+       id="poModalSubtitle"   — filled with mode label
+       id="poModalId"         — hidden input: po_id for form POST
+       id="poModalSummary"    — JS injects po-detail-tile divs here
+       id="poModalItems"      — JS injects <tr> rows here
+       id="poModalNotesWrap"  — shown in receive mode, hidden in view mode
+       id="poReceiveSubmitBtn"— shown/hidden by mode; disabled on submit
+       id="poReceiveForm"     — the form that posts receive_purchase_order
+════════════════════════════════════════════════════════════════════════════ -->
 <div class="modal fade modal-modern" id="poModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
         <div class="modal-content">
 
             <div class="modal-header">
                 <div>
+                    <!-- JS: poModalTitle.textContent = poNumber -->
                     <div class="modal-title" id="poModalTitle">Purchase Order</div>
+                    <!-- JS: poModalSubtitle.textContent = mode label -->
                     <div class="modal-subtitle" id="poModalSubtitle">Order details</div>
                 </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
 
+            <!-- JS: poReceiveForm — submit handler + validation -->
             <form method="post" id="poReceiveForm">
                 <input type="hidden" name="csrf_token"             value="<?= e($csrf_token) ?>">
                 <input type="hidden" name="receive_purchase_order"  value="1">
@@ -718,9 +969,15 @@ require __DIR__ . '/../components/sidebar.php';
 
                 <div class="modal-body">
 
-                   
+                    <!--
+                        JS: poModalSummary — innerHTML replaced with 3 po-detail-tile divs:
+                        Supplier tile, Status tile, Progress tile
+                        CSS classes used by JS-generated HTML:
+                        .po-detail-grid, .po-detail-tile, .po-detail-tile-label, .po-detail-tile-val
+                    -->
                     <div class="po-detail-grid" id="poModalSummary"></div>
 
+                    <!-- Item rows table — JS builds <tr> rows into id="poModalItems" -->
                     <div class="table-wrap"
                          style="border:1px solid var(--c-border);border-radius:var(--radius-lg);overflow:hidden;margin-bottom:1rem;">
                         <table class="po-table" style="margin:0;">
@@ -738,7 +995,10 @@ require __DIR__ . '/../components/sidebar.php';
                         </table>
                     </div>
 
-                
+                    <!--
+                        JS: poModalNotesWrap — style.display toggled:
+                        "" in receive mode, "none" in view mode
+                    -->
                     <div id="poModalNotesWrap">
                         <label class="form-label">Receiving notes</label>
                         <textarea class="form-control"
@@ -752,7 +1012,12 @@ require __DIR__ . '/../components/sidebar.php';
 
                 <div class="modal-footer justify-content-end gap-2">
                     <button type="button" class="btn btn-outline" data-bs-dismiss="modal">Close</button>
-                   
+                    <!--
+                        JS: poReceiveSubmitBtn
+                        - style.display toggled: "" receive, "none" view
+                        - disabled + spinner on form submit
+                        - reset on modal close
+                    -->
                     <button type="submit"
                             class="btn btn-success"
                             id="poReceiveSubmitBtn"
@@ -761,11 +1026,11 @@ require __DIR__ . '/../components/sidebar.php';
                     </button>
                 </div>
 
-            </form>
+            </form><!-- #poReceiveForm -->
 
-        </div>
-    </div>
-</div>
+        </div><!-- /.modal-content -->
+    </div><!-- /.modal-dialog -->
+</div><!-- #poModal -->
 
 
 <?php require __DIR__ . '/../components/js_script.php'; ?>

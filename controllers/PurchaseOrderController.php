@@ -224,6 +224,123 @@ final class PurchaseOrderController
     }
 
     // =========================================================================
+    // READ — receiving history (same as paginate but adds text search)
+    // =========================================================================
+
+    /**
+     * Paginate for the receiving history page.
+     * Adds a free-text search across po_number, supplier_name, and
+     * the creating user's username.
+     * Ordered by received_at DESC (most recently received first),
+     * falling back to created_at DESC.
+     */
+    public static function paginateHistory(PDO $conn, array $filters = []): array
+    {
+        self::ensureSchema($conn);
+
+        $search     = trim((string) ($filters['search']      ?? ''));
+        $status     = strtolower(trim((string) ($filters['status']      ?? 'all')));
+        $supplierId = (int) ($filters['supplier_id'] ?? 0);
+        $dateFrom   = trim((string) ($filters['date_from'] ?? ''));
+        $dateTo     = trim((string) ($filters['date_to']   ?? ''));
+        $reqPage    = max(1, (int) ($filters['page']     ?? 1));
+        $reqPer     = (int) ($filters['per_page'] ?? 25);
+
+        $status  = in_array($status, self::ALLOWED_STATUSES, true) ? $status : 'all';
+        $perPage = in_array($reqPer, self::ALLOWED_PER_PAGE, true) ? $reqPer : 25;
+
+        $where  = [];
+        $params = [];
+
+        if ($search !== '') {
+            $like            = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $search) . '%';
+            $where[]         = "(po.po_number LIKE :search OR s.supplier_name LIKE :search2 OR u.username LIKE :search3)";
+            $params[':search']  = $like;
+            $params[':search2'] = $like;
+            $params[':search3'] = $like;
+        }
+        if ($status !== 'all') {
+            $where[]          = 'po.status = :status';
+            $params[':status'] = $status;
+        }
+        if ($supplierId > 0) {
+            $where[]          = 'po.supplier_id = :sup';
+            $params[':sup']    = $supplierId;
+        }
+        if ($dateFrom !== '') {
+            $where[]              = 'DATE(COALESCE(po.received_at, po.ordered_at)) >= :date_from';
+            $params[':date_from']  = $dateFrom;
+        }
+        if ($dateTo !== '') {
+            $where[]            = 'DATE(COALESCE(po.received_at, po.ordered_at)) <= :date_to';
+            $params[':date_to']  = $dateTo;
+        }
+
+        $whereSql = $where !== [] ? ' WHERE ' . implode(' AND ', $where) : '';
+
+        $fromSql = "
+            FROM " . self::PO_TABLE . " po
+            INNER JOIN suppliers s ON s.supplier_id = po.supplier_id
+            LEFT  JOIN users u     ON u.user_id      = po.created_by
+            LEFT  JOIN users ru    ON ru.user_id     = po.received_by
+            LEFT  JOIN (
+                SELECT po_id,
+                       SUM(ordered_quantity)  AS ordered_total,
+                       SUM(received_quantity) AS received_total,
+                       COUNT(*)               AS item_lines
+                FROM " . self::ITEM_TABLE . "
+                GROUP BY po_id
+            ) agg ON agg.po_id = po.po_id
+        ";
+
+        $countStmt = $conn->prepare('SELECT COUNT(*) ' . $fromSql . $whereSql);
+        foreach ($params as $k => $v) {
+            $countStmt->bindValue($k, $v, PDO::PARAM_STR);
+        }
+        $countStmt->execute();
+        $total = (int) $countStmt->fetchColumn();
+
+        $pag     = ListQueryHelper::offsetPagination($reqPage, $perPage, $total, self::ALLOWED_PER_PAGE);
+        $page    = $pag['page'];
+        $perPage = $pag['per_page'];
+
+        $dataStmt = $conn->prepare(
+            "SELECT
+                po.po_id, po.po_number, po.status, po.notes,
+                po.ordered_at, po.received_at, po.created_at,
+                s.supplier_name,
+                u.username  AS created_by_username,
+                ru.username AS received_by_username,
+                COALESCE(agg.ordered_total,  0) AS ordered_total,
+                COALESCE(agg.received_total, 0) AS received_total,
+                COALESCE(agg.item_lines,     0) AS item_lines
+            {$fromSql}
+            {$whereSql}
+            ORDER BY po.received_at DESC, po.created_at DESC, po.po_id DESC
+            LIMIT :limit OFFSET :offset"
+        );
+        foreach ($params as $k => $v) {
+            $dataStmt->bindValue($k, $v, PDO::PARAM_STR);
+        }
+        $dataStmt->bindValue(':limit',  $perPage,       PDO::PARAM_INT);
+        $dataStmt->bindValue(':offset', $pag['offset'], PDO::PARAM_INT);
+        $dataStmt->execute();
+
+        return [
+            'items'       => $dataStmt->fetchAll(PDO::FETCH_ASSOC) ?: [],
+            'total'       => $total,
+            'page'        => $page,
+            'per_page'    => $perPage,
+            'total_pages' => $pag['total_pages'],
+            'search'      => $search,
+            'status'      => $status,
+            'supplier_id' => $supplierId,
+            'date_from'   => $dateFrom,
+            'date_to'     => $dateTo,
+        ];
+    }
+
+    // =========================================================================
     // READ — batch item fetch (eliminates N+1)
     // =========================================================================
 
@@ -675,6 +792,100 @@ final class PurchaseOrderController
                 'received_lines'  => $receivedLines,
                 'received_pieces' => $receivedPieces,
                 'supplier_name'   => (string) ($po['supplier_name'] ?? ''),
+            ];
+        } catch (Throwable $e) {
+            if ($conn->inTransaction()) {
+                $conn->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    // =========================================================================
+    // WRITE — cancel purchase order
+    // =========================================================================
+
+    /**
+     * Cancel a purchase order.
+     *
+     * Rules
+     * ─────
+     *  • Only 'ordered' or 'partial' orders can be cancelled.
+     *    - 'received'  → already fully delivered, cannot undo.
+     *    - 'cancelled' → already cancelled, idempotent guard.
+     *  • Partial orders (some stock already received) can still be cancelled;
+     *    the already-received stock remains in inventory — it was a legitimate
+     *    receipt and should not be reversed here. The cancel only closes the
+     *    outstanding expectation.
+     *  • An optional $reason string is appended to the PO notes for audit trail.
+     *  • bustSummaryCache() is called so stat cards reflect the new state.
+     *
+     * @throws InvalidArgumentException  If poId or userId is invalid.
+     * @throws RuntimeException          If PO not found or status prevents cancel.
+     * @return array{po_id:int, po_number:string, supplier_name:string, previous_status:string}
+     */
+    public static function cancelPurchaseOrder(
+        PDO    $conn,
+        int    $poId,
+        int    $userId,
+        string $reason = ''
+    ): array {
+        self::ensureSchema($conn);
+
+        if ($poId <= 0) {
+            throw new InvalidArgumentException('Purchase order is required.');
+        }
+        if ($userId <= 0) {
+            throw new InvalidArgumentException('Authenticated user is required.');
+        }
+
+        $conn->beginTransaction();
+        try {
+            $po = self::getPurchaseOrderForUpdate($conn, $poId);
+
+            if ($po === null) {
+                throw new RuntimeException('Purchase order not found.');
+            }
+
+            $currentStatus = strtolower((string) ($po['status'] ?? ''));
+
+            if ($currentStatus === 'cancelled') {
+                throw new RuntimeException('This purchase order is already cancelled.');
+            }
+            if ($currentStatus === 'received') {
+                throw new RuntimeException('Fully received purchase orders cannot be cancelled.');
+            }
+            if (!in_array($currentStatus, ['ordered', 'partial'], true)) {
+                throw new RuntimeException('Only ordered or partially received purchase orders can be cancelled.');
+            }
+
+            // Append reason to existing notes for audit trail
+            $existingNotes = trim((string) ($po['notes'] ?? ''));
+            $cancelNote    = 'CANCELLED by user #' . $userId
+                . (trim($reason) !== '' ? ' — Reason: ' . trim($reason) : '');
+            $mergedNotes   = $existingNotes !== ''
+                ? $existingNotes . ' | ' . $cancelNote
+                : $cancelNote;
+
+            $conn->prepare(
+                "UPDATE " . self::PO_TABLE . "
+                 SET status     = 'cancelled',
+                     notes      = :notes,
+                     updated_at = NOW()
+                 WHERE po_id = :id"
+            )->execute([
+                ':notes' => self::normalizeNotes($mergedNotes),
+                ':id'    => $poId,
+            ]);
+
+            $conn->commit();
+            self::bustSummaryCache();
+
+            return [
+                'po_id'           => $poId,
+                'po_number'       => (string) ($po['po_number'] ?? self::formatPoNumber($poId)),
+                'supplier_name'   => (string) ($po['supplier_name'] ?? ''),
+                'previous_status' => $currentStatus,
             ];
         } catch (Throwable $e) {
             if ($conn->inTransaction()) {

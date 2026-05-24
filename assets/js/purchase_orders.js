@@ -252,13 +252,60 @@ document.addEventListener("DOMContentLoaded", () => {
     poModal.show();
   }
 
-  // ── Table click delegation — view / receive ────────────────────────────────
+  // ── Table click delegation — view / receive / cancel ─────────────────────────
   document.getElementById("poTable")?.addEventListener("click", e => {
     const viewBtn    = e.target.closest(".po-view-btn");
     const receiveBtn = e.target.closest(".po-receive-btn");
+    const cancelBtn  = e.target.closest(".po-cancel-btn");
     if (viewBtn)    { openPoModal(viewBtn,    "view");    return; }
-    if (receiveBtn) { openPoModal(receiveBtn, "receive"); }
+    if (receiveBtn) { openPoModal(receiveBtn, "receive"); return; }
+    if (cancelBtn)  { handleCancel(cancelBtn); }
   });
+
+  // ── Cancel PO ─────────────────────────────────────────────────────────────
+  async function handleCancel(btn) {
+    const poId     = btn.dataset.poId     || "";
+    const poNumber = btn.dataset.poNumber || "this purchase order";
+
+    const result = await Swal.fire({
+      title:   `Cancel ${poNumber}?`,
+      html:    `
+        <p style="font-size:13px;margin-bottom:12px;">
+          You're about to cancel this purchase order.
+          Any stock already received will remain in inventory.
+        </p>
+        <label style="display:block;text-align:left;font-size:11px;font-weight:600;
+                       text-transform:uppercase;letter-spacing:.04em;color:#9a9691;margin-bottom:5px;">
+          Reason <span style="font-weight:400;color:#b0a9a3;">(optional)</span>
+        </label>
+        <input id="swalCancelReason" class="swal2-input"
+               placeholder="e.g. Supplier no longer available…"
+               style="margin:0;width:100%;font-size:13px;">`,
+      icon:               "warning",
+      showCancelButton:   true,
+      confirmButtonText:  "Yes, cancel order",
+      cancelButtonText:   "Go back",
+      confirmButtonColor: "#dc2626",
+      cancelButtonColor:  "#6b7280",
+      focusConfirm:       false,
+      preConfirm: () => document.getElementById("swalCancelReason")?.value.trim() || "",
+    });
+
+    if (!result.isConfirmed) return;
+
+    const form     = document.getElementById("poCancelForm");
+    const idInput  = document.getElementById("poCancelPoId");
+    const resInput = document.getElementById("poCancelReason");
+
+    if (!form || !idInput || !resInput) {
+      showToast("Cancel form not found. Please refresh the page.", "error");
+      return;
+    }
+
+    idInput.value  = poId;
+    resInput.value = result.value || "";
+    form.submit();
+  }
 
   // ── Receive form — validate + loading state ────────────────────────────────
   poReceiveForm?.addEventListener("submit", e => {
