@@ -383,19 +383,19 @@ require __DIR__ . '/../components/sidebar.php';
             <form id="bulkUploadProductsForm" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
 
-                <!-- Cards render here -->
-                <div id="bulkProductCards" class="bulk-stack">
-                    <!-- Empty state shown when no cards -->
-                    <div id="bulkEmptyState" class="empty-state">
-                        <i class="bi bi-box-seam" aria-hidden="true"></i>
-                        <p>No product cards yet. Click <strong>Add product card</strong> to get started.</p>
-                        <button type="button" class="btn btn-primary" id="addBulkProductCardEmpty">
-                            <i class="bi bi-plus-lg" aria-hidden="true"></i> Add first product
-                        </button>
-                    </div>
+                <!-- Empty state (outside cards stack, hidden when cards exist) -->
+                <div id="bulkEmptyState" class="empty-state">
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    <p>No product cards yet. Click <strong>Add product card</strong> to get started.</p>
+                    <button type="button" class="btn btn-primary" id="addBulkProductCardEmpty">
+                        <i class="bi bi-plus-lg" aria-hidden="true"></i> Add first product
+                    </button>
                 </div>
 
-                <!-- Submit row -->
+                <!-- Cards render here -->
+                <div id="bulkProductCards" class="bulk-stack"></div>
+
+                <!-- Submit row — inside the form so the submit button works -->
                 <div class="bulk-submit-row" id="bulkSubmitRow" style="display:none;">
                     <span class="bulk-submit-hint">
                         <i class="bi bi-info-circle me-1" aria-hidden="true"></i>

@@ -1033,6 +1033,14 @@ require __DIR__ . '/../components/sidebar.php';
 </div><!-- #poModal -->
 
 
+<!-- Hidden cancel form — JS fills po_id + cancel_reason then submits -->
+<form method="post" id="poCancelForm" style="display:none;">
+    <input type="hidden" name="csrf_token"            value="<?= e($csrf_token) ?>">
+    <input type="hidden" name="cancel_purchase_order"  value="1">
+    <input type="hidden" name="po_id"          id="poCancelPoId"    value="">
+    <input type="hidden" name="cancel_reason"  id="poCancelReason"  value="">
+</form>
+
 <?php require __DIR__ . '/../components/js_script.php'; ?>
 <script src="/inventory_system/assets/js/purchase_orders.js"></script>
 
