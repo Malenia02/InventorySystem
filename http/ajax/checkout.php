@@ -18,230 +18,172 @@ Middleware::auth()
     ->csrf()
     ->throttle('checkout', 20, 60, 'Too many checkout attempts. Please wait a moment and try again.');
 
-function checkout_json(array $payload, int $statusCode = 200): never
+
+
+// ── Safe fallback — MUST be before try{} so catch{} can use it ───────────────
+$sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
+
+// ── Limits ────────────────────────────────────────────────────────────────────
+const MAX_CHECKOUT_LINES = 100;
+
+// ── Response helpers ──────────────────────────────────────────────────────────
+function checkout_json(array $payload, int $status = 200): never
 {
-    http_response_code($statusCode);
-    echo json_encode($payload);
+    http_response_code($status);
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-function checkout_transaction_number(int $saleId, ?string $saleDate = null): string
+function checkout_txn_no(int $saleId, string $saleDate): string
 {
-    $datePart = date('Ymd', $saleDate !== null ? strtotime($saleDate) : time());
-    return sprintf('SALE-%s-%06d', $datePart, $saleId);
-}
-
-function checkout_notify_sale(
-    PDO $conn,
-    int $userId,
-    string $type,
-    string $title,
-    string $message,
-    string $icon = 'bi-bell',
-    string $color = 'text-primary',
-    ?string $link = null
-): void {
-    if ($userId <= 0) {
-        return;
-    }
-
-    try {
-        NotificationController::create(
-            $conn,
-            $userId,
-            'admin',
-            $type,
-            $title,
-            $message,
-            $icon,
-            $color,
-            $link !== null && trim($link) !== '' ? $link : '/inventory_system/product_management/pos.php'
-        );
-    } catch (Throwable $notificationError) {
-        error_log('[checkout.php][notification] ' . $notificationError->getMessage());
-    }
+    return sprintf('SALE-%s-%06d', date('Ymd', strtotime($saleDate)), $saleId);
 }
 
 function checkout_actor_label(): string
 {
     $name = trim((string) ($_SESSION['first_name'] ?? '') . ' ' . (string) ($_SESSION['last_name'] ?? ''));
-    if ($name !== '') {
-        return $name;
-    }
-
-    $username = trim((string) ($_SESSION['username'] ?? ''));
-    return $username !== '' ? $username : 'Cashier';
+    if ($name !== '') return $name;
+    $u = trim((string) ($_SESSION['username'] ?? ''));
+    return $u !== '' ? $u : 'Cashier';
 }
 
-function checkout_failure_response(
-    PDO $conn,
-    int $userId,
+function checkout_notify(
+    PDO     $conn,
+    int     $userId,
+    string  $type,
+    string  $title,
+    string  $message,
+    string  $icon   = 'bi-bell',
+    string  $color  = 'text-primary',
+    ?string $link   = null
+): void {
+    if ($userId <= 0) return;
+    try {
+        NotificationController::create(
+            $conn, $userId, 'admin', $type, $title, $message, $icon, $color,
+            ($link !== null && trim($link) !== '')
+                ? $link
+                : '/inventory_system/product_management/pos.php'
+        );
+    } catch (Throwable $e) {
+        error_log('[checkout.php][notify] ' . $e->getMessage());
+    }
+}
+
+function checkout_fail(
+    PDO    $conn,
+    int    $userId,
     string $type,
     string $message,
-    int $statusCode = 422,
-    array $extra = []
+    int    $status = 422,
+    array  $extra  = []
 ): never {
-    checkout_notify_sale(
-        $conn,
-        $userId,
-        $type,
-        'Sale failed',
-        checkout_actor_label() . ': ' . $message,
-        'bi-exclamation-triangle',
-        'text-danger'
-    );
-
+    checkout_notify($conn, $userId, $type, 'Sale failed',
+        checkout_actor_label() . ': ' . $message, 'bi-exclamation-triangle', 'text-danger');
     checkout_json(array_merge([
-        'success' => false,
-        'error' => $message,
+        'success'           => false,
+        'error'             => $message,
         'notification_type' => $type,
-    ], $extra), $statusCode);
+    ], $extra), $status);
 }
 
-function checkout_discount_percent(array $product, string $unitType = 'piece'): float
-{
-    $field = match ($unitType) {
-        'box' => 'box_sale_price',
-        'case' => 'case_sale_price',
-        default => 'sale_price',
-    };
-
-    if (!isset($product[$field]) || $product[$field] === null || $product[$field] === '') {
-        return 0.0;
-    }
-
-    return max(0.0, min(100.0, (float) $product[$field]));
-}
-
+// ── Item helpers ──────────────────────────────────────────────────────────────
 function checkout_normalize_items(array $items): array
 {
-    $normalized = [];
-
+    $out = [];
     foreach ($items as $item) {
-        if (!is_array($item)) {
-            continue;
+        if (!is_array($item)) continue;
+        $pid  = (int) ($item['product_id'] ?? 0);
+        $qty  = (int) ($item['quantity']   ?? 0);
+        $unit = strtolower(trim((string) ($item['unit_type'] ?? 'piece')));
+        if ($pid <= 0 || $qty <= 0) continue;
+        if (!in_array($unit, ['piece', 'box', 'case'], true)) $unit = 'piece';
+        $key = $pid . ':' . $unit;
+        if (!isset($out[$key])) {
+            $out[$key] = ['product_id' => $pid, 'quantity' => 0, 'unit_type' => $unit];
         }
-
-        $productId = (int) ($item['product_id'] ?? 0);
-        $quantity = (int) ($item['quantity'] ?? 0);
-        $unitType = strtolower(trim((string) ($item['unit_type'] ?? 'piece')));
-        $unitMultiplier = max(1, (int) ($item['unit_multiplier'] ?? 1));
-
-        if ($productId <= 0 || $quantity <= 0) {
-            continue;
-        }
-
-        if (!in_array($unitType, ['piece', 'box', 'case'], true)) {
-            $unitType = 'piece';
-        }
-
-        $key = $productId . ':' . $unitType;
-
-        if (!isset($normalized[$key])) {
-            $normalized[$key] = [
-                'product_id' => $productId,
-                'quantity'   => 0,
-                'unit_type'  => $unitType,
-            ];
-        }
-
-        $normalized[$key]['quantity'] += $quantity;
+        $out[$key]['quantity'] += $qty;
     }
-
-    return array_values($normalized);
+    return array_values($out);
 }
 
-function checkout_server_unit_multiplier(array $product, string $unitType): int
+function checkout_unit_multiplier(array $product, string $unitType): int
 {
-    $piecesPerBox = max(1, (int) ($product['pieces_per_box'] ?? 1));
-    $boxesPerCase = max(1, (int) ($product['boxes_per_case'] ?? 1));
-
+    $ppb = max(1, (int) ($product['pieces_per_box']  ?? 1));
+    $bpc = max(1, (int) ($product['boxes_per_case']  ?? 1));
     return match ($unitType) {
-        'box' => $piecesPerBox,
-        'case' => $piecesPerBox * $boxesPerCase,
+        'box'   => $ppb,
+        'case'  => $ppb * $bpc,
         default => 1,
     };
 }
 
-function checkout_unit_is_available(array $product, string $unitType): bool
+function checkout_unit_available(array $product, string $unitType): bool
 {
     return match ($unitType) {
-        'box' => (float) ($product['box_price'] ?? 0) > 0,
-        'case' => (float) ($product['case_price'] ?? 0) > 0,
+        'box'   => (float) ($product['box_price']  ?? 0) > 0,
+        'case'  => (float) ($product['case_price'] ?? 0) > 0,
         default => true,
     };
 }
 
-function checkout_unit_label(string $unitType, int $quantity): string
+function checkout_discount_pct(array $product, string $unitType): float
 {
-    if ($quantity === 1) {
-        return $unitType;
-    }
+    $field = match ($unitType) {
+        'box'   => 'box_sale_price',
+        'case'  => 'case_sale_price',
+        default => 'sale_price',
+    };
+    if (!isset($product[$field]) || $product[$field] === null || $product[$field] === '') return 0.0;
+    return max(0.0, min(100.0, (float) $product[$field]));
+}
 
+function checkout_unit_label(string $unitType, int $qty): string
+{
+    if ($qty === 1) return $unitType;
     return match ($unitType) {
-        'box' => 'boxes',
-        'case' => 'cases',
+        'box'   => 'boxes',
+        'case'  => 'cases',
         default => 'pieces',
     };
 }
 
+// ── Main ──────────────────────────────────────────────────────────────────────
 try {
-    $rawBody = file_get_contents('php://input');
-    $body = json_decode($rawBody ?: '', true);
-
+    // ── Parse body ────────────────────────────────────────────────────────────
+    $body = json_decode((string) file_get_contents('php://input'), true);
     if (!is_array($body)) {
-        checkout_json([
-            'success' => false,
-            'error'   => 'Invalid JSON payload.',
-        ], 400);
+        checkout_json(['success' => false, 'error' => 'Invalid JSON payload.'], 400);
     }
 
-    $items = checkout_normalize_items((array) ($body['items'] ?? []));
-    $paymentMethod = strtolower(trim((string) ($body['payment_method'] ?? 'cash')));
-    $allowedPayments = ['cash', 'card', 'gcash', 'other'];
-
-    if (!in_array($paymentMethod, $allowedPayments, true)) {
-        checkout_failure_response(
-            $conn,
-            (int) ($_SESSION['user_id'] ?? 0),
-            'sale_failed_invalid_payment',
-            'Invalid payment method.',
-            422
-        );
-    }
-
-    if ($items === []) {
-        checkout_failure_response(
-            $conn,
-            (int) ($_SESSION['user_id'] ?? 0),
-            'sale_failed_empty_cart',
-            'Cart is empty.',
-            422
-        );
-    }
-
-    $productIds = array_column($items, 'product_id');
-    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
-    $sessionUserId = (int) ($_SESSION['user_id'] ?? 0);
-
+    // ── Auth ──────────────────────────────────────────────────────────────────
     if ($sessionUserId <= 0) {
-        checkout_json([
-            'success' => false,
-            'error'   => 'Unauthorized.',
-        ], 401);
+        checkout_json(['success' => false, 'error' => 'Unauthorized.'], 401);
     }
 
+    // ── Normalize + validate cart ─────────────────────────────────────────────
+    $items = checkout_normalize_items((array) ($body['items'] ?? []));
+    if ($items === []) {
+        checkout_fail($conn, $sessionUserId, 'sale_failed_empty_cart', 'Cart is empty.');
+    }
+    if (count($items) > MAX_CHECKOUT_LINES) {
+        checkout_fail($conn, $sessionUserId, 'sale_failed_too_many_items',
+            sprintf('Cart may not exceed %d distinct product lines.', MAX_CHECKOUT_LINES));
+    }
+
+    $paymentMethod = strtolower(trim((string) ($body['payment_method'] ?? 'cash')));
+    if (!in_array($paymentMethod, ['cash', 'card', 'gcash', 'other'], true)) {
+        checkout_fail($conn, $sessionUserId, 'sale_failed_invalid_payment', 'Invalid payment method.');
+    }
+
+    // ── Shift guard ───────────────────────────────────────────────────────────
     $sessionRole = strtolower((string) ($_SESSION['role'] ?? ''));
     if ($sessionRole !== 'admin' && !ShiftClosingController::hasOpenShiftForToday($conn, $sessionUserId)) {
-        checkout_failure_response(
-            $conn,
-            $sessionUserId,
-            'sale_failed_shift_not_started',
-            'Start your shift first before saving a sale.',
-            422
-        );
+        checkout_fail($conn, $sessionUserId, 'sale_failed_shift_not_started',
+            'Start your shift first before saving a sale.');
     }
 
+    // ── Config ────────────────────────────────────────────────────────────────
     $logConfig = [
         'table'       => $table_activity_logs,
         'col_user_id' => $activity_log_user_id,
@@ -250,27 +192,26 @@ try {
         'col_ip'      => $activity_log_ip,
         'col_created' => $activity_log_created,
     ];
+
     $vatRate = PosConfigController::taxRate($conn) / 100;
+
+    // Static guard — runs INFORMATION_SCHEMA check only once per worker
     ProductController::ensureStockMovementSchema($conn);
 
+    // ── Begin transaction ─────────────────────────────────────────────────────
     $conn->beginTransaction();
+
+    // ── Lock product rows (FOR UPDATE on primary key — O(1) per row) ─────────
+    $productIds   = array_column($items, 'product_id');
+    $placeholders = implode(',', array_fill(0, count($productIds), '?'));
 
     $productStmt = $conn->prepare("
         SELECT
-            product_id,
-            product_name,
-            price,
-            box_price,
-            case_price,
-            pieces_per_box,
-            boxes_per_case,
-            sale_price,
-            box_sale_price,
-            case_sale_price,
-            on_sale,
-            vatable,
-            quantity,
-            status
+            product_id, product_name,
+            price, box_price, case_price,
+            pieces_per_box, boxes_per_case,
+            sale_price, box_sale_price, case_sale_price,
+            on_sale, vatable, quantity, status
         FROM {$table_products}
         WHERE product_id IN ({$placeholders})
         FOR UPDATE
@@ -278,179 +219,238 @@ try {
     $productStmt->execute($productIds);
 
     $products = [];
-    foreach ($productStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $product) {
-        $products[(int) $product['product_id']] = $product;
+    foreach ($productStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
+        $products[(int) $p['product_id']] = $p;
     }
 
-    $subtotal = 0.0;
+    // ── Validate + price each line ────────────────────────────────────────────
+    // $remainingQtyByProduct tracks in-memory reservations so two lines of the
+    // same product (e.g. 1 box + 5 pieces) don't both pass against full stock.
+    $remainingQtyByProduct = [];
+    foreach ($products as $pid => $p) {
+        $remainingQtyByProduct[(int) $pid] = (int) ($p['quantity'] ?? 0);
+    }
+
+    $subtotal       = 0.0;
     $discountAmount = 0.0;
-    $taxAmount = 0.0;
-    $saleItems = [];
+    $taxAmount      = 0.0;
+    $saleItems      = [];
 
     foreach ($items as $item) {
-        $productId = (int) $item['product_id'];
-        $quantity = (int) $item['quantity'];
+        $pid      = (int) $item['product_id'];
+        $qty      = (int) $item['quantity'];
         $unitType = (string) ($item['unit_type'] ?? 'piece');
-        $product = $products[$productId] ?? null;
+        $product  = $products[$pid] ?? null;
 
         if ($product === null || ($product['status'] ?? 'inactive') !== 'active') {
             throw new RuntimeException('One or more products are unavailable.');
         }
 
-        if (!checkout_unit_is_available($product, $unitType)) {
-            throw new RuntimeException('One or more products are missing the requested selling unit.');
+        if (!checkout_unit_available($product, $unitType)) {
+            throw new RuntimeException(sprintf(
+                '"%s" is not available in %s units.',
+                (string) ($product['product_name'] ?? ''), $unitType
+            ));
         }
 
-        $unitMultiplier = checkout_server_unit_multiplier($product, $unitType);
+        $multiplier   = checkout_unit_multiplier($product, $unitType);
+        $requiredBase = $qty * $multiplier;
 
-        $availableQty = (int) ($product['quantity'] ?? 0);
-        $requiredBaseQty = $quantity * $unitMultiplier;
-        if ($availableQty < $requiredBaseQty) {
-            if ($conn->inTransaction()) {
-                $conn->rollBack();
-            }
-
-            checkout_failure_response(
-                $conn,
-                $sessionUserId,
-                'sale_failed_low_stock',
+        // Check against remaining (already-reserved) stock, not raw DB value
+        if (($remainingQtyByProduct[$pid] ?? 0) < $requiredBase) {
+            if ($conn->inTransaction()) $conn->rollBack();
+            checkout_fail(
+                $conn, $sessionUserId, 'sale_failed_low_stock',
                 sprintf(
-                    'Insufficient stock for %s. Available: %d, requested: %d.',
-                    (string) ($product['product_name'] ?? 'one or more items'),
-                    $availableQty,
-                    $requiredBaseQty
+                    'Insufficient stock for "%s". Available: %d pcs, requested: %d pcs.',
+                    (string) ($product['product_name'] ?? ''),
+                    $remainingQtyByProduct[$pid] ?? 0,
+                    $requiredBase
                 ),
                 409,
                 [
                     'product'   => $product['product_name'],
-                    'available' => $availableQty,
-                    'requested' => $requiredBaseQty,
+                    'available' => $remainingQtyByProduct[$pid] ?? 0,
+                    'requested' => $requiredBase,
                 ]
             );
         }
 
-        $regularPrice = match ($unitType) {
-            'box' => round((float) ($product['box_price'] ?? 0), 2),
-            'case' => round((float) ($product['case_price'] ?? 0), 2),
-            default => round((float) ($product['price'] ?? 0), 2),
-        };
-        if ($regularPrice <= 0) {
-            throw new RuntimeException('One or more products are missing a valid selling price.');
-        }
-        $discountPercent = checkout_discount_percent($product, $unitType);
-        $unitPrice = round($regularPrice * (1 - ($discountPercent / 100)), 2);
-        $lineSubtotal = round($unitPrice * $quantity, 2);
-        $lineDiscount = round(max(0, $regularPrice - $unitPrice) * $quantity, 2);
-        $lineTax = !empty($product['vatable']) ? round($lineSubtotal * $vatRate, 2) : 0.0;
+        // Reserve stock in memory for subsequent lines of the same product
+        $remainingQtyByProduct[$pid] -= $requiredBase;
 
-        $subtotal += $lineSubtotal;
+        // Server-side pricing — client-supplied prices are intentionally ignored
+        $regularPrice = match ($unitType) {
+            'box'   => round((float) ($product['box_price']  ?? 0), 2),
+            'case'  => round((float) ($product['case_price'] ?? 0), 2),
+            default => round((float) ($product['price']      ?? 0), 2),
+        };
+
+        if ($regularPrice <= 0) {
+            throw new RuntimeException(sprintf(
+                '"%s" is missing a valid selling price.',
+                (string) ($product['product_name'] ?? '')
+            ));
+        }
+
+        $discPct      = checkout_discount_pct($product, $unitType);
+        $unitPrice    = round($regularPrice * (1 - $discPct / 100), 2);
+        $lineSubtotal = round($unitPrice * $qty, 2);
+        $lineDiscount = round(max(0.0, $regularPrice - $unitPrice) * $qty, 2);
+        $lineTax      = !empty($product['vatable']) ? round($lineSubtotal * $vatRate, 2) : 0.0;
+
+        $subtotal       += $lineSubtotal;
         $discountAmount += $lineDiscount;
-        $taxAmount += $lineTax;
+        $taxAmount      += $lineTax;
+
         $saleItems[] = [
-            'product_id' => $productId,
-            'quantity'   => $quantity,
-            'unit_type'  => $unitType,
-            'unit_multiplier' => $unitMultiplier,
-            'unit_price' => $unitPrice,
+            'product_id'    => $pid,
+            'quantity'      => $qty,
+            'unit_type'     => $unitType,
+            'unit_multiplier' => $multiplier,
+            'unit_price'    => $unitPrice,
+            'base_qty_sold' => $requiredBase,   // pre-calculated, reused below
         ];
     }
 
-    $subtotal = round($subtotal, 2);
+    $subtotal       = round($subtotal,       2);
     $discountAmount = round($discountAmount, 2);
-    $taxAmount = round($taxAmount, 2);
-    $grandTotal = round($subtotal + $taxAmount, 2);
+    $taxAmount      = round($taxAmount,      2);
+    $grandTotal     = round($subtotal + $taxAmount, 2);
 
-    $saleStmt = $conn->prepare("
+    // ── INSERT sale header ────────────────────────────────────────────────────
+    // BUG FIX 3: explicitly pass sale_date = NOW() so the column never relies
+    // on a DEFAULT that may not exist.
+    $conn->prepare("
         INSERT INTO {$table_sales}
-            (total_amount, tax, discount, payment_method, user_id)
+            (sale_date, total_amount, tax, discount, payment_method, user_id)
         VALUES
-            (:total_amount, :tax, :discount, :payment_method, :user_id)
-    ");
-    $saleStmt->execute([
-        ':total_amount'   => $grandTotal,
-        ':tax'            => $taxAmount,
-        ':discount'       => $discountAmount,
-        ':payment_method' => $paymentMethod,
-        ':user_id'        => $sessionUserId,
+            (NOW(), :total, :tax, :discount, :payment, :user)
+    ")->execute([
+        ':total'   => $grandTotal,
+        ':tax'     => $taxAmount,
+        ':discount' => $discountAmount,
+        ':payment' => $paymentMethod,
+        ':user'    => $sessionUserId,
     ]);
 
     $saleId = (int) $conn->lastInsertId();
-    $saleDate = date('Y-m-d H:i:s');
 
+    // BUG FIX 4: guard against lastInsertId() returning 0
+    if ($saleId <= 0) {
+        throw new RuntimeException('Failed to create sale record — lastInsertId returned 0.');
+    }
+
+    // Fetch the server-side sale_date so TXN number is consistent with the DB row
+    $saleDateStmt = $conn->prepare(
+        "SELECT sale_date FROM {$table_sales} WHERE sale_id = :id LIMIT 1"
+    );
+    $saleDateStmt->execute([':id' => $saleId]);
+    $saleDate = (string) ($saleDateStmt->fetchColumn() ?: date('Y-m-d H:i:s'));
+    $txnNo    = checkout_txn_no($saleId, $saleDate);
+
+    // ── Prepared statements — declared ONCE, reused per item ─────────────────
     $itemStmt = $conn->prepare("
         INSERT INTO {$table_sale_items}
             (sale_id, product_id, unit_price, quantity, unit_type, unit_multiplier)
         VALUES
-            (:sale_id, :product_id, :unit_price, :quantity, :unit_type, :unit_multiplier)
+            (:sale_id, :product_id, :unit_price, :qty, :unit_type, :multiplier)
     ");
-    $stockAuditStmt = $conn->prepare("
+
+    // BUG FIX 1 (CRITICAL): actually deduct stock from the products table.
+    // GREATEST(0, ...) is a DB-level safety net even if the FOR UPDATE lock
+    // is somehow not effective — quantity can never go negative.
+    $stockStmt = $conn->prepare("
+        UPDATE {$table_products}
+        SET    quantity = GREATEST(0, quantity - :deduct)
+        WHERE  product_id = :product_id
+    ");
+
+    $auditStmt = $conn->prepare("
         INSERT INTO stock_audit_log
-            (product_id, change_qty, current_qty, action, reference_type, reference_id, notes, user_id, timestamp)
+            (product_id, change_qty, current_qty, action,
+             reference_type, reference_id, notes, user_id, timestamp)
         VALUES
-            (:product_id, :change_qty, :current_qty, :action, :reference_type, :reference_id, :notes, :user_id, NOW())
+            (:product_id, :change_qty, :current_qty, :action,
+             :ref_type, :ref_id, :notes, :user_id, NOW())
     ");
-    $remainingQtyByProduct = [];
-    foreach ($products as $lockedProductId => $lockedProduct) {
-        $remainingQtyByProduct[(int) $lockedProductId] = (int) ($lockedProduct['quantity'] ?? 0);
-    }
 
-    $transactionNo = checkout_transaction_number($saleId, $saleDate);
+    foreach ($saleItems as $si) {
+        $pid         = (int) $si['product_id'];
+        $baseQtySold = (int) $si['base_qty_sold'];
+        $newQty      = max(0, (int) ($remainingQtyByProduct[$pid] ?? 0));
 
-    foreach ($saleItems as $saleItem) {
+        // 1 — sale item line
         $itemStmt->execute([
             ':sale_id'    => $saleId,
-            ':product_id' => $saleItem['product_id'],
-            ':unit_price' => $saleItem['unit_price'],
-            ':quantity'   => $saleItem['quantity'],
-            ':unit_type'  => $saleItem['unit_type'],
-            ':unit_multiplier' => $saleItem['unit_multiplier'],
+            ':product_id' => $pid,
+            ':unit_price' => $si['unit_price'],
+            ':qty'        => $si['quantity'],
+            ':unit_type'  => $si['unit_type'],
+            ':multiplier' => $si['unit_multiplier'],
         ]);
 
-        $productId = (int) $saleItem['product_id'];
-        $baseQtySold = (int) $saleItem['quantity'] * max(1, (int) $saleItem['unit_multiplier']);
-        $remainingQtyByProduct[$productId] = max(
-            0,
-            ((int) ($remainingQtyByProduct[$productId] ?? 0)) - $baseQtySold
-        );
+        // 2 — deduct stock (THE FIX — was missing in the original)
+        $stockStmt->execute([
+            ':deduct'     => $baseQtySold,
+            ':product_id' => $pid,
+        ]);
 
-        $note = sprintf(
-            'Transaction %s | Sold %d %s',
-            $transactionNo,
-            (int) $saleItem['quantity'],
-            checkout_unit_label((string) $saleItem['unit_type'], (int) $saleItem['quantity'])
-        );
-
-        $stockAuditStmt->execute([
-            ':product_id'  => $productId,
+        // 3 — audit log
+        $auditStmt->execute([
+            ':product_id'  => $pid,
             ':change_qty'  => -$baseQtySold,
-            ':current_qty' => $remainingQtyByProduct[$productId],
+            ':current_qty' => $newQty,
             ':action'      => 'sale',
-            ':reference_type' => 'sale',
-            ':reference_id' => $saleId,
-            ':notes' => $note,
+            ':ref_type'    => 'sale',
+            ':ref_id'      => $saleId,
+            ':notes'       => sprintf(
+                'Transaction %s | Sold %d %s',
+                $txnNo,
+                (int) $si['quantity'],
+                checkout_unit_label((string) $si['unit_type'], (int) $si['quantity'])
+            ),
             ':user_id'     => $sessionUserId,
         ]);
     }
 
     $conn->commit();
 
-    AuthController::logActivity(
-        $conn,
-        $logConfig,
-        $sessionUserId,
-        'sale_create',
-        sprintf(
-            'Completed sale #%d with %d item(s), payment: %s, total: %.2f',
-            $saleId,
-            array_sum(array_map(static fn(array $item): int => (int) $item['quantity'] * (int) $item['unit_multiplier'], $saleItems)),
-            $paymentMethod,
-            $grandTotal
-        ),
-        'sale',
-        $saleId
-    );
+    // ── Post-commit work (non-fatal if any of these throw) ────────────────────
 
-    checkout_notify_sale(
+    // SCALABILITY FIX: bust APCu product summary cache so manage_product.php
+    // stat cards (total stock, low-stock count) reflect the new quantities
+    // immediately rather than waiting for the 60 s TTL to expire.
+    try {
+        ProductController::bustSummaryCache();
+    } catch (Throwable $e) {
+        error_log('[checkout.php][bust_cache] ' . $e->getMessage());
+    }
+
+    // BUG FIX 6: logActivity() wrapped so a logging failure cannot trigger
+    // the catch block and attempt to rollback an already-committed transaction.
+    try {
+        AuthController::logActivity(
+            $conn,
+            $logConfig,
+            $sessionUserId,
+            'sale_create',
+            sprintf(
+                'Completed sale #%d (%s), %d item line(s), payment: %s, total: PHP %.2f.',
+                $saleId,
+                $txnNo,
+                count($saleItems),
+                $paymentMethod,
+                $grandTotal
+            ),
+            'sale',
+            $saleId
+        );
+    } catch (Throwable $e) {
+        error_log('[checkout.php][log_activity] ' . $e->getMessage());
+    }
+
+    checkout_notify(
         $conn,
         $sessionUserId,
         'sale_success',
@@ -458,7 +458,7 @@ try {
         sprintf(
             '%s saved %s for PHP %s.',
             checkout_actor_label(),
-            $transactionNo,
+            $txnNo,
             number_format($grandTotal, 2)
         ),
         'bi-receipt',
@@ -467,27 +467,31 @@ try {
     );
 
     checkout_json([
-        'success' => true,
-        'sale_id' => $saleId,
-        'transaction_no' => $transactionNo,
-        'message' => 'Sale saved successfully.',
+        'success'           => true,
+        'sale_id'           => $saleId,
+        'transaction_no'    => $txnNo,
+        'message'           => 'Sale saved successfully.',
         'notification_type' => 'sale_success',
-        'server_totals' => [
+        'server_totals'     => [
             'subtotal' => $subtotal,
             'discount' => $discountAmount,
             'tax'      => $taxAmount,
             'grand'    => $grandTotal,
         ],
     ]);
+
 } catch (Throwable $e) {
-    if ($conn->inTransaction()) {
+    // Only roll back if still inside an open transaction.
+    // If the throw happened after commit(), inTransaction() returns false
+    // so we won't attempt to roll back a committed transaction.
+    if (isset($conn) && $conn instanceof PDO && $conn->inTransaction()) {
         $conn->rollBack();
     }
 
-    error_log('[checkout.php] ' . $e->getMessage());
+    error_log('[checkout.php] ' . $e->getMessage() . ' | ' . $e->getFile() . ':' . $e->getLine());
 
-    checkout_notify_sale(
-        $conn,
+    checkout_notify(
+        $conn ?? new PDO('sqlite::memory:'), // fallback so notify() doesn't crash if $conn is unset
         $sessionUserId,
         'sale_failed_error',
         'Sale failed',
@@ -497,8 +501,8 @@ try {
     );
 
     checkout_json([
-        'success' => false,
-        'error'   => 'Unable to complete checkout right now.',
+        'success'           => false,
+        'error'             => 'Unable to complete checkout right now.',
         'notification_type' => 'sale_failed_error',
     ], 500);
 }

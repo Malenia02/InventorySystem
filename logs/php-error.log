@@ -1368,3 +1368,24 @@ Stack trace:
 [26-May-2026 18:28:00 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
 [26-May-2026 18:28:01 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
 [26-May-2026 18:28:01 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[28-May-2026 18:57:06 Asia/Manila] PHP Fatal error:  Uncaught PDOException: SQLSTATE[HY000]: General error: 2006 MySQL server has gone away in C:\xampp\htdocs\inventory_system\config\install.php:336
+Stack trace:
+#0 C:\xampp\htdocs\inventory_system\config\install.php(336): PDO->prepare('\n            SE...')
+#1 C:\xampp\htdocs\inventory_system\config\install.php(379): app_has_table(Object(PDO), 'users')
+#2 C:\xampp\htdocs\inventory_system\bootstrap\app.php(360): app_is_fully_installed(Object(PDO))
+#3 C:\xampp\htdocs\inventory_system\admin\manage_staff.php(4): require('C:\\xampp\\htdocs...')
+#4 {main}
+  thrown in C:\xampp\htdocs\inventory_system\config\install.php on line 336
+[28-May-2026 18:57:06 Asia/Manila] [shutdown] Fatal error: Uncaught PDOException: SQLSTATE[HY000]: General error: 2006 MySQL server has gone away in C:\xampp\htdocs\inventory_system\config\install.php:336
+Stack trace:
+#0 C:\xampp\htdocs\inventory_system\config\install.php(336): PDO->prepare('\n            SE...')
+#1 C:\xampp\htdocs\inventory_system\config\install.php(379): app_has_table(Object(PDO), 'users')
+#2 C:\xampp\htdocs\inventory_system\bootstrap\app.php(360): app_is_fully_installed(Object(PDO))
+#3 C:\xampp\htdocs\inventory_system\admin\manage_staff.php(4): require('C:\\xampp\\htdocs...')
+#4 {main}
+  thrown in C:\xampp\htdocs\inventory_system\config\install.php:336
+[28-May-2026 18:57:09 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[28-May-2026 18:57:09 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[28-May-2026 18:57:12 Asia/Manila] [database.php] Database connection failed: SQLSTATE[HY000] [2002] No connection could be made because the target machine actively refused it
+[28-May-2026 18:57:12 Asia/Manila] [bootstrap] DB connection failed: Database connection failed.
+[28-May-2026 19:02:24 Asia/Manila] [Middleware] Non-AJAX/JSON access blocked - uri: /inventory_system/http/ajax/shift_sales.php, ip: ::1
