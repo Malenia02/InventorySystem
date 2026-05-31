@@ -1,26 +1,6 @@
 <?php
 declare(strict_types=1);
 
-/**
- * category_actions.php  —  AJAX endpoint for category CRUD
- *
- * Improvements over the previous version
- * ────────────────────────────────────────
- *  1.  No ob_start() + include template. Returns structured JSON only;
- *      JS rebuilds the row client-side via buildCategoryRow().
- *
- *  2.  No double (or triple) SELECT after writes.
- *      addCategory()    → returns ['category_id', 'view'] directly.
- *      updateCategory() → returns the merged view directly.
- *      toggleStatus()   → returns ['new_status', 'view'] directly.
- *
- *  3.  CategoryController now throws RuntimeException on duplicate
- *      instead of returning the string 'duplicate'.
- *
- *  4.  buildLogConfig() helper replaces duplicated $GLOBALS array.
- *
- *  5.  notify() helper keeps notification calls DRY.
- */
 
 require_once __DIR__ . '/../../bootstrap/app.php';
 require_once __DIR__ . '/../../middleware/Middleware.php';

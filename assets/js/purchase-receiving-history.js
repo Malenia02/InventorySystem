@@ -1,218 +1,236 @@
+"use strict";
 document.addEventListener("DOMContentLoaded", () => {
-  const table = document.getElementById("receivingHistoryTable");
-  if (!table) return;
 
-  const rows = Array.from(table.querySelectorAll("tbody tr"));
-  const searchInput = document.getElementById("receivingSearch");
-  const statusInput = document.getElementById("receivingStatus");
-  const dateFromInput = document.getElementById("receivingDateFrom");
-  const dateToInput = document.getElementById("receivingDateTo");
-  const countNode = document.getElementById("receivingHistoryCount");
-  const receivedCountNode = document.getElementById("receivingReceivedCount");
-  const partialCountNode = document.getElementById("receivingPartialCount");
-  const piecesCountNode = document.getElementById("receivingPiecesCount");
-  const metaNode = document.getElementById("receivingHistoryMeta");
-  const emptyNode = document.getElementById("receivingHistoryEmpty");
-  const modalElement = document.getElementById("receivingHistoryModal");
-  const modalBody = document.getElementById("receivingHistoryModalBody");
-  const modalLabel = document.getElementById("receivingHistoryModalLabel");
-  const modal = modalElement ? new bootstrap.Modal(modalElement) : null;
-  const payload = window.PURCHASE_RECEIVING_HISTORY || {};
-  const detailMap = payload.details || {};
+  // ── Element refs ───────────────────────────────────────────────────────────
+  const searchInput = document.getElementById("rhSearchInput");
+  const filterForm  = document.querySelector("form[method='get']");
+  const rhTable     = document.getElementById("rhTable");
 
-  const escapeHtml = (value) =>
-    String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  // Modal — IDs match the PHP exactly
+  const modalEl       = document.getElementById("rhDetailModal");
+  const modal         = modalEl ? new bootstrap.Modal(modalEl) : null;
+  const modalTitle    = document.getElementById("rhModalTitle");
+  const modalSubtitle = document.getElementById("rhModalSubtitle");
+  const modalMeta     = document.getElementById("rhModalMeta");
+  const modalItems    = document.getElementById("rhModalItems");
 
-  const formatDate = (value) => {
-    const date = new Date(value || "");
-    return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("en-PH", {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
+  // ── Utilities ──────────────────────────────────────────────────────────────
+  function esc(v) {
+    const d = document.createElement("div");
+    d.textContent = v ?? "";
+    return d.innerHTML;
+  }
+
+  function fmtInt(n) {
+    return Number(n || 0).toLocaleString();
+  }
+
+  function fmtDate(v) {
+    if (!v || v === "0000-00-00 00:00:00") return "—";
+    const d = new Date(v.replace(" ", "T"));
+    if (isNaN(d.getTime())) return String(v);
+    return d.toLocaleString("en-PH", {
+      month: "short", day: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
     });
-  };
+  }
 
-  const applyFilters = () => {
-    const search = (searchInput?.value || "").trim().toLowerCase();
-    const status = statusInput?.value || "all";
-    const dateFrom = dateFromInput?.value || "";
-    const dateTo = dateToInput?.value || "";
-    let visible = 0;
-    let receivedCount = 0;
-    let partialCount = 0;
-    let receivedPieces = 0;
-
-    rows.forEach((row) => {
-      const matches =
-        (!search || (row.dataset.search || "").includes(search)) &&
-        (status === "all" || (row.dataset.status || "") === status) &&
-        (!dateFrom || (row.dataset.date || "") >= dateFrom) &&
-        (!dateTo || (row.dataset.date || "") <= dateTo);
-
-      row.classList.toggle("d-none", !matches);
-      if (matches) {
-        visible += 1;
-        receivedPieces += Number(row.dataset.receivedTotal || 0);
-        if ((row.dataset.status || "") === "received") receivedCount += 1;
-        if ((row.dataset.status || "") === "partial") partialCount += 1;
-      }
+  // ── Search debounce — submits server-side filter form ─────────────────────
+  let _searchTimer;
+  if (searchInput && filterForm) {
+    searchInput.addEventListener("input", () => {
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(() => filterForm.submit(), 420);
     });
+  }
 
-    if (countNode) countNode.textContent = visible.toLocaleString();
-    if (receivedCountNode) receivedCountNode.textContent = receivedCount.toLocaleString();
-    if (partialCountNode) partialCountNode.textContent = partialCount.toLocaleString();
-    if (piecesCountNode) piecesCountNode.textContent = receivedPieces.toLocaleString();
-    if (metaNode) metaNode.textContent = `Showing ${visible.toLocaleString()} of ${rows.length.toLocaleString()} purchase orders.`;
-    if (emptyNode) emptyNode.classList.toggle("d-none", visible !== 0);
-  };
+  // ── Build and open the detail modal ───────────────────────────────────────
+  function openDetailModal(btn) {
+    if (!modal) return;
 
-  const renderModal = (detail) => {
-    const items = Array.isArray(detail.items) ? detail.items : [];
-    const orderedTotal = items.reduce((sum, item) => sum + Number(item.ordered_quantity || 0), 0);
-    const receivedTotal = items.reduce((sum, item) => sum + Number(item.received_quantity || 0), 0);
-    const progress = orderedTotal > 0 ? Math.min(100, Math.round((receivedTotal / orderedTotal) * 100)) : 0;
-    const statusValue = String(detail.status || "ordered").toLowerCase();
-    const statusTone = statusValue === "received"
-      ? "is-success"
-      : statusValue === "partial"
-        ? "is-warning"
-        : statusValue === "cancelled"
-          ? "is-danger"
-          : "is-info";
+    const poNumber    = btn.dataset.poNumber   || "Purchase Order";
+    const supplier    = btn.dataset.supplier   || "—";
+    const status      = (btn.dataset.status    || "ordered").toLowerCase();
+    const orderedAt   = btn.dataset.orderedAt  || "";
+    const receivedAt  = btn.dataset.receivedAt || "";
+    const orderedTot  = parseInt(btn.dataset.ordered   || "0", 10);
+    const receivedTot = parseInt(btn.dataset.received  || "0", 10);
+    const progress    = parseInt(btn.dataset.progress  || "0", 10);
+    const createdBy   = btn.dataset.createdBy  || "—";
+    const receivedBy  = btn.dataset.receivedBy || "—";
+    const statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
 
-    const itemRows = items.map((item) => {
-      const ordered = Number(item.ordered_quantity || 0);
-      const received = Number(item.received_quantity || 0);
-      const remaining = Math.max(0, ordered - received);
-      return `
-        <tr>
-          <td><strong>${escapeHtml(item.product_name || "Product")}</strong><div class="small text-muted">${escapeHtml(item.category_name || "Uncategorized")}${item.sku ? ` | SKU ${escapeHtml(item.sku)}` : ""}</div></td>
-          <td class="text-end">${ordered.toLocaleString()}</td>
-          <td class="text-end">${received.toLocaleString()}</td>
-          <td class="text-end">${remaining.toLocaleString()}</td>
-          <td class="text-end">${Number(item.current_stock || 0).toLocaleString()}</td>
-          <td>${escapeHtml(item.notes || "-")}</td>
-        </tr>
-      `;
-    }).join("");
+    let items = [];
+    try {
+      items = JSON.parse(btn.dataset.items || "[]");
+    } catch {
+      items = [];
+    }
+
+    // ── Header ─────────────────────────────────────────────────────────────
+    if (modalTitle)    modalTitle.textContent    = poNumber;
+    if (modalSubtitle) modalSubtitle.textContent = `${esc(supplier)} · ${statusLabel}`;
+
+    // ── Meta tiles (4 columns) ──────────────────────────────────────────────
+    if (modalMeta) {
+      const remaining = Math.max(0, orderedTot - receivedTot);
+      modalMeta.innerHTML = `
+        <div class="detail-tile">
+          <div class="detail-tile-label">Supplier</div>
+          <div class="detail-tile-val" style="font-size:13px;">${esc(supplier)}</div>
+        </div>
+        <div class="detail-tile">
+          <div class="detail-tile-label">Status</div>
+          <div class="detail-tile-val">${esc(statusLabel)}</div>
+        </div>
+        <div class="detail-tile">
+          <div class="detail-tile-label">Progress</div>
+          <div class="detail-tile-val" style="font-size:13px;">${fmtInt(receivedTot)} / ${fmtInt(orderedTot)} pcs</div>
+          <div class="detail-tile-sub">${progress}% received${remaining > 0 ? ` · ${fmtInt(remaining)} remaining` : ""}</div>
+        </div>
+        <div class="detail-tile">
+          <div class="detail-tile-label">Received at</div>
+          <div class="detail-tile-val" style="font-size:12px;">${receivedAt ? esc(fmtDate(receivedAt)) : '<span style="color:var(--c-text-3);">Pending</span>'}</div>
+          <div class="detail-tile-sub">Ordered ${esc(fmtDate(orderedAt))}</div>
+        </div>`;
+    }
+
+    // ── Timeline strip ──────────────────────────────────────────────────────
     const timelineSteps = [
       {
         label: "Order created",
-        value: formatDate(detail.ordered_at),
-        active: true,
+        value: fmtDate(orderedAt),
+        by:    createdBy ? `By ${createdBy}` : "",
+        done:  true,
       },
       {
-        label: statusValue === "cancelled" ? "Order cancelled" : "Receiving started",
-        value: statusValue === "ordered" ? "Waiting for first receipt" : formatDate(detail.received_at || detail.ordered_at),
-        active: statusValue !== "ordered",
+        label: status === "cancelled" ? "Order cancelled" : "Receiving started",
+        value: status === "ordered"
+          ? "Waiting for first receipt"
+          : fmtDate(receivedAt || orderedAt),
+        by:    "",
+        done:  !["ordered"].includes(status),
       },
       {
         label: "Fully received",
-        value: statusValue === "received" ? formatDate(detail.received_at) : `${Math.max(0, orderedTotal - receivedTotal).toLocaleString()} pcs remaining`,
-        active: statusValue === "received",
+        value: status === "received"
+          ? fmtDate(receivedAt)
+          : `${fmtInt(Math.max(0, orderedTot - receivedTot))} pcs remaining`,
+        by:    receivedBy && status === "received" ? `By ${receivedBy}` : "",
+        done:  status === "received",
       },
     ];
-    const timelineHtml = timelineSteps.map((step) => `
-      <div class="ops-timeline-step ${step.active ? "is-active" : ""}">
-        <span class="ops-timeline-dot"></span>
-        <div>
-          <strong>${escapeHtml(step.label)}</strong>
-          <small>${escapeHtml(step.value)}</small>
+
+    const timelineHtml = `
+      <div style="display:flex;gap:0;margin-bottom:1.25rem;">
+        ${timelineSteps.map((step, i) => `
+          <div style="flex:1;position:relative;padding:0 0 0 ${i === 0 ? 0 : "1rem"};">
+            ${i > 0 ? `<div style="position:absolute;left:0;top:8px;height:2px;right:50%;background:${step.done ? "var(--c-green)" : "var(--c-border)"};"></div>` : ""}
+            <div style="width:16px;height:16px;border-radius:50%;background:${step.done ? "var(--c-green)" : "var(--c-border)"};border:2px solid ${step.done ? "var(--c-green)" : "var(--c-border-2)"};margin-bottom:6px;position:relative;z-index:1;"></div>
+            <div style="font-size:11px;font-weight:600;color:${step.done ? "var(--c-text-1)" : "var(--c-text-3)"};">${esc(step.label)}</div>
+            <div style="font-size:11px;color:var(--c-text-3);margin-top:1px;">${esc(step.value)}</div>
+            ${step.by ? `<div style="font-size:11px;color:var(--c-text-3);">${esc(step.by)}</div>` : ""}
+          </div>`).join("")}
+      </div>`;
+
+    // ── Overall progress bar ────────────────────────────────────────────────
+    const progressHtml = `
+      <div style="margin-bottom:1rem;">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--c-text-3);margin-bottom:4px;">
+          <span>Receipt progress</span><span>${progress}%</span>
         </div>
-      </div>
-    `).join("");
-
-    modalLabel.textContent = detail.po_number || "Receiving Detail";
-    modalBody.innerHTML = `
-      <div class="ops-preview-stack">
-        <section class="ops-preview-hero">
-          <div>
-            <span class="ops-eyebrow">Receiving Preview</span>
-            <h3 class="ops-preview-title mb-1">${escapeHtml(detail.po_number || "Receiving Detail")}</h3>
-            <p class="ops-muted mb-0">Inspect supplier details, receipt progress, and ordered versus received quantities before closing the delivery loop.</p>
-          </div>
-          <span class="ops-status ${statusTone}">${escapeHtml(String(detail.status || "ordered").toUpperCase())}</span>
-        </section>
-
-        <div class="ops-modal-summary">
-          <div class="ops-kpi"><span>Supplier</span><strong>${escapeHtml(detail.supplier_name || "Supplier")}</strong></div>
-          <div class="ops-kpi"><span>Status</span><strong>${escapeHtml(String(detail.status || "ordered").toUpperCase())}</strong></div>
-          <div class="ops-kpi"><span>Ordered At</span><strong>${escapeHtml(formatDate(detail.ordered_at))}</strong></div>
-          <div class="ops-kpi"><span>Received At</span><strong>${escapeHtml(detail.received_at ? formatDate(detail.received_at) : "Pending")}</strong></div>
+        <div style="background:var(--c-border);border-radius:99px;height:8px;overflow:hidden;">
+          <div style="height:100%;border-radius:99px;width:${progress}%;
+               background:${progress >= 100 ? "var(--c-green)" : progress > 0 ? "var(--c-amber)" : "var(--c-border)"};
+               transition:width .3s;"></div>
         </div>
+      </div>`;
 
-        <div class="ops-detail-grid mb-3">
-          <div><span class="ops-detail-label">Supplier Contact</span><p class="mb-0">${escapeHtml(detail.contact_person || "-")}<br>${escapeHtml(detail.phone || "-")}<br>${escapeHtml(detail.email || "-")}</p></div>
-          <div><span class="ops-detail-label">Order Notes</span><p class="mb-0">${escapeHtml(detail.notes || "No notes added.")}</p></div>
-        </div>
+    // ── Item rows ───────────────────────────────────────────────────────────
+    if (modalItems) {
+      modalItems.innerHTML = "";
 
-        <div class="ops-detail-grid mb-3">
-          <div>
-            <span class="ops-detail-label">Receipt Progress</span>
-            <div class="ops-progress mt-3"><span style="width:${progress}%"></span></div>
-            <p class="mb-0 mt-2">${progress}% received | ${receivedTotal.toLocaleString()} of ${orderedTotal.toLocaleString()} pcs</p>
-          </div>
-          <div>
-            <span class="ops-detail-label">Receiving Snapshot</span>
-            <p class="mb-0">Pending pieces: ${Math.max(0, orderedTotal - receivedTotal).toLocaleString()}<br>Item lines: ${items.length.toLocaleString()}<br>Current status: ${escapeHtml(String(detail.status || "ordered").toUpperCase())}</p>
-          </div>
-        </div>
+      if (items.length === 0) {
+        modalItems.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align:center;padding:2.5rem;color:var(--c-text-3);">
+              No items on this order.
+            </td>
+          </tr>`;
+      } else {
+        items.forEach(item => {
+          const ordered   = Number(item.ordered_quantity  || 0);
+          const received  = Number(item.received_quantity || 0);
+          const remaining = Math.max(0, ordered - received);
+          const pct       = ordered > 0 ? Math.min(100, Math.round((received / ordered) * 100)) : 0;
+          const isFull    = pct >= 100;
 
-        <section class="ops-preview-section">
-          <div class="ops-preview-section__head">
-            <div>
-              <span class="ops-eyebrow">PO Timeline</span>
-              <h4 class="ops-preview-section__title">Receiving lifecycle</h4>
-            </div>
-          </div>
-          <div class="ops-timeline">${timelineHtml}</div>
-        </section>
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>
+              <div style="font-weight:500;font-size:13px;">${esc(item.product_name || "")}</div>
+              <div style="font-size:11px;color:var(--c-text-3);">
+                ${esc(item.category_name || "Uncategorized")}
+                ${item.sku ? " · SKU " + esc(item.sku) : ""}
+              </div>
+            </td>
+            <td style="text-align:right;font-family:var(--ff-mono);font-weight:600;">${fmtInt(ordered)}</td>
+            <td style="text-align:right;font-family:var(--ff-mono);color:var(--c-green);">${fmtInt(received)}</td>
+            <td style="text-align:right;font-family:var(--ff-mono);color:${remaining > 0 ? "var(--c-amber)" : "var(--c-text-3)"};">${fmtInt(remaining)}</td>
+            <td style="min-width:90px;">
+              <div style="background:var(--c-border);border-radius:99px;height:6px;overflow:hidden;">
+                <div style="height:100%;border-radius:99px;width:${pct}%;background:${isFull ? "var(--c-green)" : "var(--c-amber)"};"></div>
+              </div>
+              <div style="font-size:10px;color:var(--c-text-3);margin-top:3px;">${pct}%</div>
+            </td>`;
+          modalItems.appendChild(tr);
+        });
+      }
+    }
 
-        <section class="ops-preview-section">
-          <div class="ops-preview-section__head">
-            <div>
-              <span class="ops-eyebrow">Line Details</span>
-              <h4 class="ops-preview-section__title">Ordered versus received items</h4>
-            </div>
-          </div>
-          <div class="table-responsive">
-            <table class="table align-middle">
-              <thead><tr><th>Product</th><th class="text-end">Ordered</th><th class="text-end">Received</th><th class="text-end">Remaining</th><th class="text-end">Current Stock</th><th>Notes</th></tr></thead>
-              <tbody>${itemRows || '<tr><td colspan="6" class="text-center text-muted py-4">No purchase order items found.</td></tr>'}</tbody>
-            </table>
-          </div>
-        </section>
-      </div>
-    `;
-  };
+    // Inject timeline + progress bar above the items table inside modal-body
+    const modalBody = modalEl?.querySelector(".modal-body");
+    if (modalBody) {
+      // Remove any previously injected timeline/progress
+      modalBody.querySelectorAll(".rh-timeline-inject").forEach(el => el.remove());
 
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest(".receiving-detail-btn");
-    if (!button || !modal) return;
-    const poId = button.dataset.poId || "";
-    const detail = detailMap[poId];
-    if (!detail) return;
-    renderModal(detail);
-    modal.show();
-  });
+      const inject = document.createElement("div");
+      inject.className = "rh-timeline-inject";
+      inject.innerHTML = timelineHtml + progressHtml;
 
-  const deepLinkPoId = new URLSearchParams(window.location.search).get("po_id");
-  if (deepLinkPoId && detailMap[deepLinkPoId] && modal) {
-    renderModal(detailMap[deepLinkPoId]);
+      // Insert before the table-wrap
+      const tableWrap = modalBody.querySelector(".table-wrap");
+      if (tableWrap) {
+        modalBody.insertBefore(inject, tableWrap);
+      } else {
+        modalBody.prepend(inject);
+      }
+    }
+
     modal.show();
   }
 
-  [searchInput, statusInput, dateFromInput, dateToInput].forEach((element) => {
-    element?.addEventListener("input", applyFilters);
-    element?.addEventListener("change", applyFilters);
+  // ── Table click delegation ─────────────────────────────────────────────────
+  rhTable?.addEventListener("click", e => {
+    const btn = e.target.closest(".rh-detail-btn");
+    if (btn) openDetailModal(btn);
   });
 
-  applyFilters();
+  // ── Modal cleanup ──────────────────────────────────────────────────────────
+  modalEl?.addEventListener("hidden.bs.modal", () => {
+    if (modalItems) modalItems.innerHTML = "";
+    if (modalMeta)  modalMeta.innerHTML  = "";
+    modalEl?.querySelectorAll(".rh-timeline-inject").forEach(el => el.remove());
+  });
+
+  // ── Deep-link: ?po_id=N opens the modal automatically ─────────────────────
+  const deepLinkId = new URLSearchParams(window.location.search).get("po_id");
+  if (deepLinkId) {
+    const btn = rhTable?.querySelector(`.rh-detail-btn[data-po-id="${CSS.escape(deepLinkId)}"]`);
+    if (btn) {
+      // Small delay so Bootstrap is fully ready
+      setTimeout(() => openDetailModal(btn), 180);
+    }
+  }
+
 });
